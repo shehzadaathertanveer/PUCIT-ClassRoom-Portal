@@ -5,7 +5,7 @@ const rateLimit = require("express-rate-limit");
 const connectDB = require("./config/db");
 
 const AppError = require("./utils/appError");
-const authController = require("./controller/authController"); // Added for maintenance middleware
+const authController = require("./controller/authController"); 
 const authRoutes = require("./routes/authRoutes");
 const classroomRoutes = require("./routes/classroomRoutes");
 const marksRoutes = require("./routes/marksRoutes");
@@ -34,6 +34,13 @@ app.use("/api", limiter);
 
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+
+// =============================================================================
+// RENDER PINGER HEALTH CHECK (Placed before maintenance mode so pinger stays green)
+// =============================================================================
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "awake", timestamp: new Date() });
+});
 
 // 🛑 GLOBAL MAINTENANCE MODE INTERCEPTOR
 app.use(authController.checkMaintenanceMode);
