@@ -127,13 +127,18 @@ const sendStyledEmail = async ({
   `;
 
   try {
-    // Transporter with forced IPv4 family fix for Render
+    // Hardcoded IPv4 Gmail SMTP address to bypass cloud provider DNS issues entirely
     const transporter = nodemailer.createTransport({
-      service: "Gmail",
-      family: 4, // <-- FORCES IPv4 AND FIXES RENDER ENETUNREACH ERROR
+      host: '142.250.150.108', 
+      port: 465,
+      secure: true,
+      family: 4,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
+      },
+      tls: {
+        servername: 'smtp.gmail.com', // Required for SSL certificate verification matching
       },
       connectionTimeout: 10000,
       socketTimeout: 10000,
