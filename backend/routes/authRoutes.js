@@ -34,7 +34,9 @@ router.post('/attach-email/verify-otp', authController.verifyOfficialEmailActiva
 // =============================================================================
 router.get('/admin/analytics', restrictTo('ADMIN'), authController.getAdminAnalytics);
 router.get('/admin/users', restrictTo('ADMIN'), authController.getAllUsersAdmin); // <-- Added route for Analytics Vault users list
+// Add both variations to your backend authRoutes.js under Admin Routes:
 router.patch('/admin/maintenance/toggle', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
+router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode); // Fallback alias
 
 // =============================================================================
 // ADMIN TEACHER APPROVAL & REJECTION ROUTES (Admin Only)
