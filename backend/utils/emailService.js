@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+const https = require("https");
 
 const sendStyledEmail = async ({
   to,
@@ -9,6 +9,15 @@ const sendStyledEmail = async ({
   otpCode = null,
 }) => {
   if (!to) return;
+
+  const brevoApiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.EMAIL_USER;
+
+  if (!brevoApiKey || !senderEmail) {
+    console.error("Missing BREVO_API_KEY or EMAIL_USER in environment variables.");
+    return;
+  }
+
   const timestamp = new Date().toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -126,29 +135,59 @@ const sendStyledEmail = async ({
     </html>
   `;
 
-  try {
-    // Switched to Port 465 with secure: true to bypass Render's port 587 block
-    const transporter = nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 465,
-      secure: true, 
-      auth: {
-        user: process.env.BREVO_SMTP_USER,
-        pass: process.env.BREVO_SMTP_PASS,
-      },
-      connectionTimeout: 15000,
-      socketTimeout: 15000,
+  const payload = JSON.stringify({
+    sender: {
+      name: "PUCIT Portal System",
+      email: senderEmail,
+    },
+    to: [{ email: to }],
+    subject: `[PUCIT Portal] ${subject}`,
+    htmlContent: htmlContent,
+  });
+
+  const options = {
+    hostname: "api.brevo.com",
+    path: "/v3/smtp/email",
+    method: "POST",
+    headers: {
+      "accept": "application/json",
+      "api-key": brevoApiKey,
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(payload),
+    },
+    timeout: 15000,
+  };
+
+  return new Promise((resolve) => {
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(true);
+        } else {
+          console.error("Brevo API Error Response:", data);
+          resolve(false);
+        }
+      });
     });
 
-    await transporter.sendMail({
-      from: `"PUCIT Portal System" <${process.env.EMAIL_USER}>`,
-      to,
-      subject: `[PUCIT Portal] ${subject}`,
-      html: htmlContent,
+    req.on("error", (err) => {
+      console.error("Failed to send styled email notification:", err.message);
+      resolve(false);
     });
-  } catch (err) {
-    console.error("Failed to send styled email notification:", err.message);
-  }
+
+    req.on("timeout", () => {
+      console.error("Failed to send styled email notification: Connection timeout");
+      req.destroy();
+      resolve(false);
+    });
+
+    req.write(payload);
+    req.end();
+  });
 };
 
 module.exports = sendStyledEmail;
