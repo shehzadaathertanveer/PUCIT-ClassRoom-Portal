@@ -10,11 +10,12 @@ const sendStyledEmail = async ({
 }) => {
   if (!to) return;
 
-  const brevoApiKey = process.env.BREVO_API_KEY;
+  // This will check both environment variable names so it never misses your key
+  const brevoApiKey = process.env.BREVO_API_KEY || process.env.BREVO_SMTP_PASS;
   const senderEmail = process.env.EMAIL_USER;
 
   if (!brevoApiKey || !senderEmail) {
-    console.error("Missing BREVO_API_KEY or EMAIL_USER in environment variables.");
+    console.error("Missing Brevo API/SMTP Key or EMAIL_USER in environment variables.");
     return;
   }
 
