@@ -127,21 +127,18 @@ const sendStyledEmail = async ({
   `;
 
   try {
-    // Hardcoded IPv4 Gmail SMTP address to bypass cloud provider DNS issues entirely
+    // Port 587 with STARTTLS and IPv4 enforcement
     const transporter = nodemailer.createTransport({
-      host: '142.250.150.108', 
-      port: 465,
-      secure: true,
-      family: 4,
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // false for port 587
+      family: 4,     // forces IPv4
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
-      tls: {
-        servername: 'smtp.gmail.com', // Required for SSL certificate verification matching
-      },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
+      connectionTimeout: 15000,
+      socketTimeout: 15000,
     });
 
     await transporter.sendMail({
