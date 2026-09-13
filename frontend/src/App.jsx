@@ -1,0 +1,122 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import OtpVerify from "./pages/OtpVerify";
+import ForgotPassword from "./pages/ForgotPassword";
+import VerifyRecoveryOtp from "./pages/VerifyRecoveryOtp";
+import ResetPassword from "./pages/ResetPassword";
+import Dashboard from "./pages/Dashboard";
+import ClassroomDetail from "./pages/ClassroomDetail";
+import MarksSheet from "./pages/MarksSheet";
+import LabroomDetail from "./pages/LabroomDetail";
+import LabMarksSheet from "./pages/LabMarksSheet";
+
+// Protected Route Component to block unauthenticated users
+const ProtectedRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="relative min-h-screen flex flex-col items-center justify-center bg-[#080507] text-slate-200 overflow-hidden">
+        {/* Ambient background glows matching your master theme */}
+        <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-orange-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-rose-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+
+        <div className="relative z-10 text-center space-y-3">
+          <div className="inline-block w-8 h-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 animate-pulse">
+            Loading Portal...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public Auth & Password Recovery Routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/otp-verify" element={<OtpVerify />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/verify-recovery-otp" element={<VerifyRecoveryOtp />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+
+        {/* Protected Portal Dashboard & Classroom Routes */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/classroom/:classroomId"
+          element={
+            <ProtectedRoute>
+              <ClassroomDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/classroom/:classroomId/sheet/:category/:itemId"
+          element={
+            <ProtectedRoute>
+              <MarksSheet />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Protected Labroom & Lab Marksheet Routes (Supporting both singular and plural paths) */}
+        <Route
+          path="/labroom/:labroomId"
+          element={
+            <ProtectedRoute>
+              <LabroomDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/labrooms/:labroomId"
+          element={
+            <ProtectedRoute>
+              <LabroomDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/labroom/:labroomId/sheet/:category/:itemId"
+          element={
+            <ProtectedRoute>
+              <LabMarksSheet />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/labrooms/:labroomId/sheet/:category/:itemId"
+          element={
+            <ProtectedRoute>
+              <LabMarksSheet />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Catch-all redirect to home/login */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;

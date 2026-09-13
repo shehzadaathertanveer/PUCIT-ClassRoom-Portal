@@ -1,0 +1,994 @@
+const Mark = require('../models/markSchema');
+const Classroom = require('../models/classRoomSchema');
+const User = require('../models/userSchema');
+const catchAsync = require('../utils/catchAsyncError');
+const AppError = require('../utils/appError');
+const nodemailer = require('nodemailer');
+
+const VALID_CATEGORIES = ['quizzes', 'assignments', 'mids', 'finals'];
+
+// Helper: Normalizes singular/plural category inputs from frontend UI variants
+const CATEGORY_MAP = {
+  quiz: 'quizzes',
+  quizzes: 'quizzes',
+  assignment: 'assignments',
+  assignments: 'assignments',
+  mids: 'mids',
+  finals: 'finals',
+};
+
+// Helper: Nodemailer transporter with safeguards
+const transporter = nodemailer.createTransport({
+  service: 'Gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+  connectionTimeout: 10000,
+  socketTimeout: 10000,
+});
+
+// Helper: Sleek Enterprise Dark Theme Email Wrapper
+const sendStyledEmail = async ({ to, subject, title, bodyText, details = [] }) => {
+  if (!to) return;
+  const timestamp = new Date().toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+
+  const detailsHtml =
+    details.length > 0
+      ? `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 12px; margin: 24px 0;">
+      <tr>
+        <td style="padding: 16px 20px;">
+          ${details
+            .map(
+              (d) => `
+            <div style="font-size: 13px; color: #a1a1aa; padding: 6px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+              <strong style="color: #f4f4f5; font-weight: 600;">${d.label}:</strong> <span style="color: #e4e4e7; font-weight: 500;">${d.value}</span>
+            </div>
+          `,
+            )
+            .join('')}
+        </td>
+      </tr>
+    </table>
+  `
+      : '';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${subject}</title>
+    </head>
+    <body style="background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 40px 0; color: #f4f4f5;">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed; background-color: #09090b;">
+        <tr>
+          <td align="center">
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #121215; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+              
+              <!-- Header Bar -->
+              <tr>
+                <td style="padding: 28px 32px 20px 32px; border-bottom: 1px solid #27272a;">
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td>
+                        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #f4f4f5; background: #27272a; padding: 6px 12px; border-radius: 6px; display: inline-block;">
+                          PUCIT Classroom Portal
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top: 8px; font-size: 11px; color: #a1a1aa; font-weight: 500;">
+                        Academic Ecosystem
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Main Content Area -->
+              <tr>
+                <td style="padding: 32px;">
+                  <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #f4f4f5; letter-spacing: -0.025em;">
+                    ${title}
+                  </h2>
+                  <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
+                    ${bodyText}
+                  </p>
+
+                  ${detailsHtml}
+
+                  <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #27272a; font-size: 12px; color: #71717a; line-height: 1.5;">
+                    Automated secure notification.<br>
+                    <span>Timestamp: ${timestamp}</span>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td style="padding: 16px 32px; background-color: #09090b; border-top: 1px solid #27272a; text-align: center;">
+                  <p style="margin: 0; font-size: 11px; color: #71717a;">
+                    Independent Academic Tool • Administered by <strong style="color: #a1a1aa;">Shehzada Ather</strong>
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: '"PUCIT Portal System" <no-reply@pucit.edu.pk>',
+      to,
+      subject: `[PUCIT Portal] ${subject || title}`,
+      html: htmlContent,
+    });
+  } catch (err) {
+    console.error('Failed to send mark notification email:', err.message);
+  }
+};
+
+// Helper: Extract numbers safely for sorting (e.g., BITF25A012 -> 12)
+const getRollDigits = (rollNo = '') => {
+  const digits = rollNo.replace(/\D/g, '');
+  if (!digits) return 99999;
+  return parseInt(digits.slice(-3), 10);
+};
+
+// Helper: Safely normalize Cloudinary file payload
+const parseCloudinaryFile = (item = {}) => {
+  const fileSource = item.file || item;
+  if (fileSource && typeof fileSource === 'object' && (fileSource.url || fileSource.secure_url || fileSource.fileUrl)) {
+    return {
+      url: fileSource.url || fileSource.secure_url || fileSource.fileUrl || '',
+      public_id: fileSource.public_id || '',
+      fileType: fileSource.fileType || fileSource.format || '',
+      fileName: fileSource.fileName || fileSource.original_filename || '',
+    };
+  }
+  if (typeof item.fileUrl === 'string' && item.fileUrl.trim() !== '') {
+    return { url: item.fileUrl, public_id: '', fileType: '', fileName: '' };
+  }
+  return null;
+};
+
+// =============================================================================
+// 1. GET BULK SHEET FOR ADDING MARKS
+// =============================================================================
+exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', 'name rollNo email personalNotificationEmail')
+    .lean();
+
+  if (!classroom) {
+    return next(new AppError('Active classroom not found!', 404));
+  }
+
+  const prefix = classroom.sectionPrefix.toUpperCase();
+  const regular = [];
+  const addDrop = [];
+
+  (classroom.students || []).forEach((student) => {
+    const roll = student.rollNo ? student.rollNo.toUpperCase() : '';
+    if (roll.startsWith(prefix)) {
+      regular.push(student);
+    } else {
+      addDrop.push(student);
+    }
+  });
+
+  regular.sort((a, b) => getRollDigits(a.rollNo) - getRollDigits(b.rollNo));
+  addDrop.sort((a, b) => (a.rollNo || '').localeCompare(b.rollNo || ''));
+
+  const sortedStudents = [...regular, ...addDrop];
+  const studentIds = sortedStudents.map((s) => s._id);
+
+  const existingMarks = await Mark.find({
+    classroom: classroomId,
+    student: { $in: studentIds },
+  }).lean();
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      classroom: {
+        _id: classroom._id,
+        className: classroom.className,
+        sectionPrefix: classroom.sectionPrefix,
+        quizzes: classroom.quizzes,
+        assignments: classroom.assignments,
+      },
+      students: sortedStudents,
+      existingMarks,
+    },
+  });
+});
+
+// =============================================================================
+// 1.1 GET UNASSIGNED STUDENTS FOR A SPECIFIC EVALUATION ITEM
+// =============================================================================
+exports.getUnassignedStudents = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { category, title } = req.query;
+
+  if (!category || !title) {
+    return next(new AppError('Valid category and item title are required!', 400));
+  }
+
+  const cleanCategory = category.trim().toLowerCase();
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
+    return next(new AppError('Invalid evaluation category provided!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', 'name rollNo email personalNotificationEmail')
+    .lean();
+
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const allStudents = classroom.students || [];
+  const studentIds = allStudents.map(s => s._id);
+
+  const markDocs = await Mark.find({
+    classroom: classroomId,
+    student: { $in: studentIds }
+  }).lean();
+
+  const gradedStudentIds = new Set();
+  const cleanTitle = title.trim().toLowerCase();
+
+  markDocs.forEach(doc => {
+    if (['mids', 'finals'].includes(resolvedCategory)) {
+      if (doc[resolvedCategory] && doc[resolvedCategory].totalMarks > 0) {
+        gradedStudentIds.add(doc.student.toString());
+      }
+    } else {
+      const itemsList = doc[resolvedCategory] || [];
+      const found = itemsList.find(item => item.title && item.title.trim().toLowerCase() === cleanTitle);
+      if (found) {
+        gradedStudentIds.add(doc.student.toString());
+      }
+    }
+  });
+
+  const unassignedStudents = allStudents.filter(s => !gradedStudentIds.has(s._id.toString()));
+
+  res.status(200).json({
+    status: 'success',
+    results: unassignedStudents.length,
+    data: { unassignedStudents }
+  });
+});
+
+// =============================================================================
+// 1.2 GET PENDING GRADING ACTIVITIES
+// =============================================================================
+exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', '_id')
+    .lean();
+
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const totalStudentsCount = (classroom.students || []).length;
+  if (totalStudentsCount === 0) {
+    return res.status(200).json({ status: 'success', data: { pendingActivities: [] } });
+  }
+
+  const markDocs = await Mark.find({ classroom: classroomId }).lean();
+  const gradedCountMap = {};
+
+  markDocs.forEach(doc => {
+    const studentId = doc.student.toString();
+    ['quizzes', 'assignments'].forEach(cat => {
+      if (Array.isArray(doc[cat])) {
+        doc[cat].forEach(item => {
+          if (item.title && item.totalMarks > 0) {
+            const key = `${cat}:${item.title.trim().toLowerCase()}`;
+            if (!gradedCountMap[key]) gradedCountMap[key] = new Set();
+            gradedCountMap[key].add(studentId);
+          }
+        });
+      }
+    });
+  });
+
+  const pendingActivities = [];
+  const checkListCategories = [
+    { key: 'quizzes', items: classroom.quizzes || [] },
+    { key: 'assignments', items: classroom.assignments || [] }
+  ];
+
+  checkListCategories.forEach(catGroup => {
+    catGroup.items.forEach(item => {
+      const title = item.title;
+      const key = `${catGroup.key}:${title.trim().toLowerCase()}`;
+      const gradedSet = gradedCountMap[key] || new Set();
+      const remainingCount = totalStudentsCount - gradedSet.size;
+
+      if (remainingCount > 0) {
+        pendingActivities.push({
+          category: catGroup.key,
+          title,
+          totalStudents: totalStudentsCount,
+          gradedCount: gradedSet.size,
+          remainingCount
+        });
+      }
+    });
+  });
+
+  res.status(200).json({
+    status: 'success',
+    data: { pendingActivities }
+  });
+});
+
+exports.getPendingActivities = exports.getPendingGradingActivities;
+
+// =============================================================================
+// 1.3 GET CLASSROOM ANALYTICS, CLASS AVERAGES & PERFORMANCE TIERS
+// =============================================================================
+exports.getClassAnalytics = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', '_id rollNo name')
+    .lean();
+
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const markDocs = await Mark.find({ classroom: classroomId }).lean();
+  const activeStudents = classroom.students || [];
+  const activeStudentIds = new Set(activeStudents.map(s => s._id.toString()));
+
+  const markMap = new Map();
+  markDocs.forEach(doc => {
+    if (doc.student && activeStudentIds.has(doc.student.toString())) {
+      markMap.set(doc.student.toString(), doc);
+    }
+  });
+
+  let sumQuiz = 0, sumAssign = 0, sumSessional = 0, sumMids = 0, sumFinals = 0, sumOverall = 0;
+  let quizCount = 0, assignCount = 0, sessionalCount = 0, midsCount = 0, finalsCount = 0, overallCount = 0;
+
+  const tiers = { excellent: 0, good: 0, average: 0, needsImprovement: 0 };
+  const gradingScheme = classroom.gradingScheme || { sessionalWeight: 25, midsWeight: 35, finalsWeight: 40 };
+
+  const rankings = activeStudents.map(st => {
+    const studentIdStr = st._id.toString();
+    const doc = markMap.get(studentIdStr) || { 
+      quizzes: [], 
+      assignments: [], 
+      mids: { totalMarks: 0, obtainedMarks: 0 }, 
+      finals: { totalMarks: 0, obtainedMarks: 0 } 
+    };
+
+    // 1. Quizzes Percentage
+    let qObt = 0, qTot = 0;
+    if (Array.isArray(doc.quizzes)) {
+      doc.quizzes.forEach(q => {
+        if (!q.isAbsent) qObt += (Number(q.obtainedMarks) || 0);
+        qTot += (Number(q.totalMarks) || 0);
+      });
+    }
+    const quizPercentage = qTot > 0 ? (qObt / qTot) * 100 : 0;
+    if (qTot > 0) { sumQuiz += quizPercentage; quizCount++; }
+
+    // 2. Assignments Percentage
+    let aObt = 0, aTot = 0;
+    if (Array.isArray(doc.assignments)) {
+      doc.assignments.forEach(a => {
+        if (!a.isAbsent) aObt += (Number(a.obtainedMarks) || 0);
+        aTot += (Number(a.totalMarks) || 0);
+      });
+    }
+    const assignmentPercentage = aTot > 0 ? (aObt / aTot) * 100 : 0;
+    if (aTot > 0) { sumAssign += assignmentPercentage; assignCount++; }
+
+    // 3. Sessional Percentage (Combined Quizzes and Assignments percentage)
+    const hasQuizzes = qTot > 0;
+    const hasAssignments = aTot > 0;
+    let sessionalPercentage = 0;
+    if (hasQuizzes && hasAssignments) {
+      sessionalPercentage = (quizPercentage + assignmentPercentage) / 2;
+    } else if (hasQuizzes) {
+      sessionalPercentage = quizPercentage;
+    } else if (hasAssignments) {
+      sessionalPercentage = assignmentPercentage;
+    }
+    if (hasQuizzes || hasAssignments) { 
+      sumSessional += sessionalPercentage; 
+      sessionalCount++; 
+    }
+
+    // 4. Mids Percentage
+    let midsPercentage = 0;
+    if (doc.mids && doc.mids.totalMarks > 0) {
+      midsPercentage = doc.mids.isAbsent ? 0 : ((Number(doc.mids.obtainedMarks) || 0) / doc.mids.totalMarks) * 100;
+      sumMids += midsPercentage; midsCount++;
+    }
+
+    // 5. Finals Percentage
+    let finalsPercentage = 0;
+    if (doc.finals && doc.finals.totalMarks > 0) {
+      finalsPercentage = doc.finals.isAbsent ? 0 : ((Number(doc.finals.obtainedMarks) || 0) / doc.finals.totalMarks) * 100;
+      sumFinals += finalsPercentage; finalsCount++;
+    }
+
+    // 6. Overall Weighted Percentage
+    const sW = Number(gradingScheme.sessionalWeight) || 25;
+    const mW = Number(gradingScheme.midsWeight) || 35;
+    const fW = Number(gradingScheme.finalsWeight) || 40;
+
+    const overallPercentage = ((sessionalPercentage * sW) + (midsPercentage * mW) + (finalsPercentage * fW)) / 100;
+    sumOverall += overallPercentage; overallCount++;
+
+    if (overallPercentage >= 80) tiers.excellent++;
+    else if (overallPercentage >= 65) tiers.good++;
+    else if (overallPercentage >= 50) tiers.average++;
+    else tiers.needsImprovement++;
+
+    return {
+      student: { _id: st._id, name: st.name, rollNo: st.rollNo },
+      sessionalPercentage: Number(sessionalPercentage.toFixed(2)),
+      quizPercentage: Number(quizPercentage.toFixed(2)),
+      assignmentPercentage: Number(assignmentPercentage.toFixed(2)),
+      midsPercentage: Number(midsPercentage.toFixed(2)),
+      finalsPercentage: Number(finalsPercentage.toFixed(2)),
+      overallPercentage: Number(overallPercentage.toFixed(2)),
+      marksDoc: doc
+    };
+  });
+
+  rankings.sort((a, b) => b.overallPercentage - a.overallPercentage);
+
+  const classAverages = {
+    quizPercentage: quizCount > 0 ? Number((sumQuiz / quizCount).toFixed(2)) : 0,
+    assignmentPercentage: assignCount > 0 ? Number((sumAssign / assignCount).toFixed(2)) : 0,
+    sessionalPercentage: sessionalCount > 0 ? Number((sumSessional / sessionalCount).toFixed(2)) : 0,
+    midsPercentage: midsCount > 0 ? Number((sumMids / midsCount).toFixed(2)) : 0,
+    finalsPercentage: finalsCount > 0 ? Number((sumFinals / finalsCount).toFixed(2)) : 0,
+    overallPercentage: overallCount > 0 ? Number((sumOverall / overallCount).toFixed(2)) : 0,
+  };
+
+  res.status(200).json({
+    status: 'success',
+    data: { classAverages, rankings, performanceTiers: tiers }
+  });
+});
+
+exports.getClassroomAnalytics = exports.getClassAnalytics;
+
+// =============================================================================
+// GET SINGLE EVALUATION SHEET FOR POPUP EDITOR
+// =============================================================================
+exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
+  const { classroomId, category, title } = req.params;
+
+  const classroom = await Classroom.findById(classroomId).populate('students', 'name rollNo');
+  if (!classroom) {
+    return next(new AppError('Classroom not found.', 404));
+  }
+
+  const cleanCategory = category.trim().toLowerCase();
+  const targetCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  const studentMarksDocs = await Mark.find({ classroom: classroomId });
+  const markMap = {};
+  studentMarksDocs.forEach(doc => {
+    markMap[doc.student.toString()] = doc;
+  });
+
+  const studentSheet = (classroom.students || []).map(st => {
+    const studentId = st._id.toString();
+    const markDoc = markMap[studentId];
+    let obtainedMarks = 0;
+    let isAbsent = false;
+    let file = null;
+
+    if (markDoc && markDoc[targetCategory]) {
+      const entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodeURIComponent(title).toLowerCase());
+      if (entry) {
+        obtainedMarks = entry.obtainedMarks;
+        isAbsent = Boolean(entry.isAbsent);
+        file = entry.file || null;
+      }
+    }
+
+    return {
+      studentId: st._id,
+      name: st.name,
+      rollNo: st.rollNo || '',
+      obtainedMarks,
+      isAbsent,
+      file
+    };
+  });
+
+  res.status(200).json({
+    status: 'success',
+    data: { students: studentSheet }
+  });
+});
+
+// =============================================================================
+// SAVE SINGLE EVALUATION SHEET FROM POPUP EDITOR
+// =============================================================================
+exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { category, title, totalMarks, marks } = req.body; 
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) {
+    return next(new AppError('Classroom not found.', 404));
+  }
+
+  const cleanCategory = (category || '').trim().toLowerCase();
+  const targetCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  if (!VALID_CATEGORIES.includes(targetCategory)) {
+    return next(new AppError('Invalid category specified!', 400));
+  }
+
+  const parsedTotal = Number(totalMarks) || 10;
+  let cleanTitle = (title || '').trim();
+
+  if (!['mids', 'finals'].includes(targetCategory)) {
+    if (!Array.isArray(classroom[targetCategory])) {
+      classroom[targetCategory] = [];
+    }
+    const existingIndex = classroom[targetCategory].findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+    if (existingIndex > -1) {
+      classroom[targetCategory][existingIndex].totalMarks = parsedTotal;
+    } else {
+      classroom[targetCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+    }
+    await classroom.save();
+  }
+
+  if (Array.isArray(marks)) {
+    for (const m of marks) {
+      const studentId = m.studentId || m._id;
+      if (!studentId) continue;
+
+      let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId });
+      if (!markDoc) {
+        markDoc = new Mark({
+          classroom: classroomId,
+          student: studentId,
+          quizzes: [],
+          assignments: [],
+        });
+      }
+
+      const isAbsent = Boolean(m.isAbsent);
+      const obtained = isAbsent ? 0 : Math.max(0, Number(m.obtainedMarks) || 0);
+      const fileData = parseCloudinaryFile(m);
+
+      if (['mids', 'finals'].includes(targetCategory)) {
+        markDoc[targetCategory] = {
+          totalMarks: parsedTotal,
+          obtainedMarks: obtained,
+          isAbsent,
+          file: fileData || markDoc[targetCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
+        };
+      } else {
+        if (!Array.isArray(markDoc[targetCategory])) markDoc[targetCategory] = [];
+        const entryIndex = markDoc[targetCategory].findIndex(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
+        const scoreObj = {
+          title: cleanTitle,
+          totalMarks: parsedTotal,
+          obtainedMarks: obtained,
+          isAbsent,
+          file: fileData || (entryIndex > -1 ? markDoc[targetCategory][entryIndex].file : { url: '', public_id: '', fileType: '', fileName: '' })
+        };
+
+        if (entryIndex > -1) {
+          markDoc[targetCategory][entryIndex] = scoreObj;
+        } else {
+          markDoc[targetCategory].push(scoreObj);
+        }
+      }
+
+      await markDoc.save();
+    }
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Marksheet updated and saved successfully!'
+  });
+});
+
+// =============================================================================
+// BATCH SUBMIT MARKS
+// =============================================================================
+exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
+  const { classroomId, category, title, totalMarks, marksData } = req.body;
+
+  const cleanCategory = category ? category.trim().toLowerCase() : '';
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
+    return next(new AppError('Invalid evaluation category provided!', 400));
+  }
+
+  if (!classroomId || totalMarks === undefined || !Array.isArray(marksData) || marksData.length === 0) {
+    return next(new AppError('Classroom ID, Total Marks (>0), and Marks Data array are required!', 400));
+  }
+
+  const parsedTotal = Number(totalMarks);
+  if (isNaN(parsedTotal) || parsedTotal <= 0) {
+    return next(new AppError('Total marks must be a valid number greater than 0!', 400));
+  }
+
+  const validEntries = marksData
+    .map(item => ({
+      studentId: item.studentId || item.student || item._id,
+      obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score),
+      isAbsent: Boolean(item.isAbsent),
+      file: parseCloudinaryFile(item)
+    }))
+    .filter(item => {
+      if (!item.studentId) return false;
+      const val = item.obtainedMarks;
+      return (val !== undefined && val !== null && String(val).trim() !== '') || item.isAbsent;
+    });
+
+  if (validEntries.length === 0) {
+    return next(new AppError('No valid student marks were provided for submission.', 400));
+  }
+
+  let cleanTitle = (title || '').trim();
+  const isMongoId = /^[0-9a-fA-F]{24}$/.test(cleanTitle);
+  if (!cleanTitle || isMongoId) {
+    cleanTitle = `${resolvedCategory.slice(0, -1).toUpperCase()} Entry`;
+  }
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  if (!['mids', 'finals'].includes(resolvedCategory)) {
+    if (!Array.isArray(classroom[resolvedCategory])) {
+      classroom[resolvedCategory] = [];
+    }
+
+    const existingClassItem = classroom[resolvedCategory].find(
+      (item) => item.title && item.title.toLowerCase() === cleanTitle.toLowerCase()
+    );
+
+    if (existingClassItem) {
+      existingClassItem.totalMarks = parsedTotal;
+    } else {
+      classroom[resolvedCategory].push({
+        title: cleanTitle,
+        totalMarks: parsedTotal
+      });
+    }
+    await classroom.save();
+  }
+
+  const studentIds = validEntries.map((m) => m.studentId);
+  const students = await User.find({ _id: { $in: studentIds } }).lean();
+  const studentMap = new Map(students.map(s => [s._id.toString(), s]));
+
+  const existingDocs = await Mark.find({
+    classroom: classroomId,
+    student: { $in: studentIds },
+  });
+
+  const docMap = new Map(existingDocs.map((doc) => [doc.student.toString(), doc]));
+  const docsToSave = [];
+  const emailDispatchList = [];
+
+  for (const item of validEntries) {
+    const { studentId, obtainedMarks, isAbsent, file } = item;
+    const studentIdStr = studentId.toString();
+    const rawVal = String(obtainedMarks).trim();
+    const absentFlag = isAbsent || rawVal.toUpperCase() === 'A';
+    const parsedObtained = absentFlag ? 0 : Math.max(0, Number(rawVal) || 0);
+
+    let markDoc = docMap.get(studentIdStr);
+
+    if (!markDoc) {
+      markDoc = new Mark({
+        classroom: classroomId,
+        student: studentId,
+        quizzes: [],
+        assignments: [],
+      });
+    }
+
+    if (['mids', 'finals'].includes(resolvedCategory)) {
+      markDoc[resolvedCategory].totalMarks = parsedTotal;
+      markDoc[resolvedCategory].obtainedMarks = parsedObtained;
+      markDoc[resolvedCategory].isAbsent = absentFlag;
+      if (file) markDoc[resolvedCategory].file = file;
+    } else {
+      if (!Array.isArray(markDoc[resolvedCategory])) {
+        markDoc[resolvedCategory] = [];
+      }
+
+      const existingIdx = markDoc[resolvedCategory].findIndex(
+        (e) => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase()
+      );
+
+      if (existingIdx > -1) {
+        markDoc[resolvedCategory][existingIdx].totalMarks = parsedTotal;
+        markDoc[resolvedCategory][existingIdx].obtainedMarks = parsedObtained;
+        markDoc[resolvedCategory][existingIdx].isAbsent = absentFlag;
+        if (file) {
+          markDoc[resolvedCategory][existingIdx].file = file;
+        }
+      } else {
+        const newItem = {
+          title: cleanTitle,
+          totalMarks: parsedTotal,
+          obtainedMarks: parsedObtained,
+          isAbsent: absentFlag,
+        };
+        if (file) newItem.file = file;
+        markDoc[resolvedCategory].push(newItem);
+      }
+    }
+
+    docsToSave.push(markDoc);
+
+    const studentUser = studentMap.get(studentIdStr);
+    if (studentUser) {
+      const targetStudentEmail = studentUser.personalNotificationEmail || studentUser.email;
+      if (targetStudentEmail) {
+        const percentage = parsedTotal > 0 ? ((parsedObtained / parsedTotal) * 100).toFixed(2) : '0.00';
+        const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
+        emailDispatchList.push({
+          email: targetStudentEmail,
+          title: `${cleanTitle} (${resolvedCategory.toUpperCase()})`,
+          bodyText: absentFlag
+            ? `You were marked <strong>ABSENT ('A')</strong> for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong>. Your score has been recorded as 0.`
+            : `Your grade for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been uploaded.`,
+          details: [
+            { label: 'Evaluation', value: cleanTitle },
+            { label: 'Score', value: absentFlag ? 'Absent (0 / ' + parsedTotal + ')' : `${parsedObtained} / ${parsedTotal} (${percentage}%)` },
+            { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
+          ]
+        });
+      }
+    }
+  }
+
+  await Promise.all(docsToSave.map((doc) => doc.save()));
+
+  await Promise.all(
+    emailDispatchList.map(async (mail) => {
+      try {
+        await sendStyledEmail({
+          to: mail.email,
+          subject: `Marks Uploaded: ${mail.title}`,
+          title: mail.title,
+          bodyText: mail.bodyText,
+          details: mail.details
+        });
+      } catch (err) {
+        console.warn('Failed to send mark email:', err.message);
+      }
+    })
+  );
+
+  res.status(200).json({
+    status: 'success',
+    message: `Successfully recorded grades for ${docsToSave.length} student(s)!`,
+  });
+});
+
+// =============================================================================
+// UPDATE SINGLE ITEM MARK FOR A STUDENT (Exported under both aliases)
+// =============================================================================
+exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
+  const { classroomId, studentId, category } = req.body;
+  let { itemTitle } = req.body;
+
+  if (itemTitle && /^[0-9a-fA-F]{24}$/.test(itemTitle)) {
+    itemTitle = '';
+  }
+
+  const incomingObtained = req.body.newObtainedMarks !== undefined ? req.body.newObtainedMarks : (req.body.obtainedMarks !== undefined ? req.body.obtainedMarks : req.body.score);
+  const incomingTotal = req.body.newTotalMarks !== undefined ? req.body.newTotalMarks : req.body.totalMarks;
+  const isAbsentFlag = Boolean(req.body.isAbsent);
+
+  const cleanCategory = category ? category.trim().toLowerCase() : '';
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
+    return next(new AppError('Invalid category specified!', 400));
+  }
+
+  let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId });
+  if (!markDoc) {
+    markDoc = new Mark({
+      classroom: classroomId,
+      student: studentId,
+      quizzes: [],
+      assignments: [],
+    });
+  }
+
+  const fileData = parseCloudinaryFile(req.body);
+
+  if (['mids', 'finals'].includes(resolvedCategory)) {
+    const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
+    const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
+    const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
+    const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+
+    if (currentTotal <= 0) {
+      return next(new AppError('Total marks must be greater than 0!', 400));
+    }
+
+    if (!absentFlag && currentObtained > currentTotal) {
+      return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
+    }
+
+    markDoc[resolvedCategory] = {
+      totalMarks: currentTotal,
+      obtainedMarks: currentObtained,
+      isAbsent: absentFlag,
+      file: fileData || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
+    };
+  } else {
+    if (!itemTitle) return next(new AppError('Item title is required!', 400));
+
+    if (!Array.isArray(markDoc[resolvedCategory])) {
+      markDoc[resolvedCategory] = [];
+    }
+
+    const itemIdx = markDoc[resolvedCategory].findIndex(
+      (item) => item.title.toLowerCase() === itemTitle.trim().toLowerCase()
+    );
+
+    const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (itemIdx > -1 ? markDoc[resolvedCategory][itemIdx].totalMarks : 10);
+    const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : (itemIdx > -1 ? String(markDoc[resolvedCategory][itemIdx].obtainedMarks) : '0');
+    const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
+    const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+
+    if (currentTotal <= 0) {
+      return next(new AppError('Total marks must be greater than 0!', 400));
+    }
+
+    if (!absentFlag && currentObtained > currentTotal) {
+      return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
+    }
+
+    if (itemIdx > -1) {
+      markDoc[resolvedCategory][itemIdx].totalMarks = currentTotal;
+      markDoc[resolvedCategory][itemIdx].obtainedMarks = currentObtained;
+      markDoc[resolvedCategory][itemIdx].isAbsent = absentFlag;
+      if (fileData) markDoc[resolvedCategory][itemIdx].file = fileData;
+    } else {
+      markDoc[resolvedCategory].push({
+        title: itemTitle.trim(),
+        totalMarks: currentTotal,
+        obtainedMarks: currentObtained,
+        isAbsent: absentFlag,
+        file: fileData || { url: '', public_id: '', fileType: '', fileName: '' }
+      });
+    }
+  }
+
+  await markDoc.save();
+
+  const student = await User.findById(studentId).lean();
+  const classroom = await Classroom.findById(classroomId).lean();
+  const displayTitle = itemTitle || resolvedCategory;
+
+  if (student) {
+    const targetStudentEmail = student.personalNotificationEmail || student.email;
+    if (targetStudentEmail) {
+      const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
+      await sendStyledEmail({
+        to: targetStudentEmail,
+        subject: `Grade Updated: ${displayTitle}`,
+        title: `Grade Update: ${displayTitle}`,
+        bodyText: `Your score for <strong>${displayTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been updated by <strong>${req.user.name}</strong>.`,
+        details: [
+          { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
+        ]
+      }).catch(err => console.warn('Failed to send update email:', err.message));
+    }
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Marks updated successfully for student!',
+    data: { markDoc },
+  });
+});
+
+exports.updateSingleStudentItemMark = exports.updateSingleStudentMark;
+
+// =============================================================================
+// DELETE / CANCEL AN EVALUATION ENTRY ACROSS ENTIRE CLASSROOM
+// =============================================================================
+exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
+  const { classroomId, category, itemTitle } = req.body;
+
+  const cleanCategory = category ? category.trim().toLowerCase() : '';
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+
+  if (!classroomId || !resolvedCategory || !itemTitle) {
+    return next(new AppError('Classroom ID, Category, and Item Title are required!', 400));
+  }
+
+  if (['mids', 'finals'].includes(resolvedCategory)) {
+    return next(new AppError('Midterm and Final exam slots cannot be deleted.', 400));
+  }
+
+  const cleanTitle = itemTitle.trim().toLowerCase();
+  const markDocs = await Mark.find({ classroom: classroomId });
+
+  const savePromises = [];
+
+  for (const doc of markDocs) {
+    const initialLength = (doc[resolvedCategory] || []).length;
+    doc[resolvedCategory] = (doc[resolvedCategory] || []).filter(
+      (item) => item.title.trim().toLowerCase() !== cleanTitle
+    );
+
+    if (doc[resolvedCategory].length !== initialLength) {
+      savePromises.push(doc.save());
+    }
+  }
+
+  await Promise.all(savePromises);
+
+  res.status(200).json({
+    status: 'success',
+    message: `Removed "${itemTitle}" from ${savePromises.length} student record(s) and recalculated totals.`,
+  });
+});
+
+// =============================================================================
+// GET SINGLE STUDENT MARKS
+// =============================================================================
+exports.getStudentMarks = catchAsync(async (req, res, next) => {
+  const { classroomId, studentId } = req.params;
+
+  let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId })
+    .populate('student', 'name rollNo email personalNotificationEmail')
+    .populate('classroom', 'className sectionPrefix');
+
+  if (!markDoc) {
+    markDoc = await Mark.create({
+      classroom: classroomId,
+      student: studentId,
+      quizzes: [],
+      assignments: [],
+    });
+    
+    markDoc = await Mark.findById(markDoc._id)
+      .populate('student', 'name rollNo email personalNotificationEmail')
+      .populate('classroom', 'className sectionPrefix');
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: { markDoc },
+  });
+});

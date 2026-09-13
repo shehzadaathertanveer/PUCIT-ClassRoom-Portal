@@ -1,0 +1,1011 @@
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+const jwt = require("jsonwebtoken");
+const User = require("../models/userSchema");
+const Classroom = require("../models/classRoomSchema");
+const Labroom = require("../models/labSchema");
+const Mark = require("../models/markSchema");
+const catchAsync = require("../utils/catchAsyncError");
+const AppError = require("../utils/appError");
+
+// In-memory maintenance flag object
+let systemMaintenance = {
+  isUnderMaintenance: false,
+  message: "Portal is currently undergoing scheduled maintenance. Please try again later.",
+  retryAfter: "15 minutes"
+};
+
+// RegEx to validate official PUCIT roll number structures (e.g., BITF26A001)
+const ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
+
+// Helper: Extracts entry year from a Roll Number (e.g., "BITF26A001" -> 2026)
+const getRollYear = (rollNo) => {
+  if (!rollNo) return null;
+  const match = rollNo.match(/[FS](\d{2})[A-Z]/i);
+  return match ? parseInt(`20${match[1]}`, 10) : null;
+};
+
+// Helper: Generates signed JWT authentication token
+const signToken = (id, role) => {
+  return jwt.sign({ id, role }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  });
+};
+
+// Helper: Nodemailer Transporter instance with safeguards to prevent indefinite hanging
+const transporter = nodemailer.createTransport({
+  service: "Gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+  connectionTimeout: 10000,
+  socketTimeout: 10000,
+});
+
+// Helper: Unified Sleek Dark Theme Email Wrapper with 6-Digit OTP Boxes
+const sendStyledEmail = async ({
+  to,
+  subject,
+  title,
+  bodyText,
+  details = [],
+  otpCode = null,
+}) => {
+  if (!to) return;
+  const timestamp = new Date().toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  // Generate 6 distinct modern OTP boxes if an OTP code is provided
+  let otpBoxesHtml = "";
+  if (otpCode) {
+    const digits = otpCode.toString().padStart(6, "0").split("");
+    otpBoxesHtml = `
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 24px auto;">
+        <tr>
+          ${digits
+            .map(
+              (digit) => `
+            <td align="center" style="width: 44px; height: 52px; background-color: #27272a; border: 1px solid #3f3f46; border-radius: 8px; font-size: 22px; font-weight: 700; color: #ffffff; font-family: monospace; text-align: center; vertical-align: middle; padding: 0 4px;">
+              ${digit}
+            </td>
+          `,
+            )
+            .join('<td style="width: 8px;"></td>')}
+        </tr>
+      </table>
+    `;
+  }
+
+  const detailsHtml =
+    details.length > 0
+      ? `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 12px; margin: 24px 0;">
+      <tr>
+        <td style="padding: 16px 20px;">
+          ${details
+            .map(
+              (d) => `
+            <div style="font-size: 13px; color: #a1a1aa; padding: 6px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+              <strong style="color: #f4f4f5; font-weight: 600;">${d.label}:</strong> <span style="color: #e4e4e7; font-weight: 500;">${d.value}</span>
+            </div>
+          `,
+            )
+            .join("")}
+        </td>
+      </tr>
+    </table>
+  `
+      : "";
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${subject}</title>
+    </head>
+    <body style="background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 40px 0; color: #f4f4f5;">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed; background-color: #09090b;">
+        <tr>
+          <td align="center">
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #121215; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+              
+              <!-- Header Bar -->
+              <tr>
+                <td style="padding: 28px 32px 20px 32px; border-bottom: 1px solid #27272a;">
+                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td>
+                        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #f4f4f5; background: #27272a; padding: 6px 12px; border-radius: 6px; display: inline-block;">
+                          PUCIT Classroom Portal
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding-top: 8px; font-size: 11px; color: #a1a1aa; font-weight: 500;">
+                        Secure Academic Ecosystem
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+
+              <!-- Main Content Area -->
+              <tr>
+                <td style="padding: 32px;">
+                  <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; color: #f4f4f5; letter-spacing: -0.025em;">
+                    ${title}
+                  </h2>
+                  <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
+                    ${bodyText}
+                  </p>
+
+                  ${otpBoxesHtml}
+                  ${detailsHtml}
+
+                  <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #27272a; font-size: 12px; color: #71717a; line-height: 1.5;">
+                    Automated secure notification.<br>
+                    <span>Timestamp: ${timestamp}</span>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td style="padding: 16px 32px; background-color: #09090b; border-top: 1px solid #27272a; text-align: center;">
+                  <p style="margin: 0; font-size: 11px; color: #71717a;">
+                    Independent Academic Tool • Administered by <strong style="color: #a1a1aa;">Shehzada Ather</strong>
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: '"PUCIT Portal System" <no-reply@pucit.edu.pk>',
+      to,
+      subject: `[PUCIT Portal] ${subject}`,
+      html: htmlContent,
+    });
+  } catch (err) {
+    console.error("Failed to send styled email notification:", err.message);
+  }
+};
+
+// Helper: SHA-256 OTP hashing for secure database storage
+const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
+
+// FIXED SECURE SYNC: Only enrolls student if their exact roll number is explicitly pre-approved/added by staff (No labs)
+const syncStudentEnrollment = async (user) => {
+  if (user.role !== "STUDENT" || !user.rollNo) return;
+
+  const userRoll = user.rollNo.toUpperCase();
+
+  const matchingClassrooms = await Classroom.find({
+    isActive: true,
+    approvedRollNumbers: userRoll,
+  });
+
+  if (matchingClassrooms.length === 0) return;
+
+  const syncPromises = matchingClassrooms.map(async (classroom) => {
+    if (classroom.students.length >= classroom.maxCapacity) return;
+
+    await Classroom.updateOne(
+      { _id: classroom._id },
+      { $addToSet: { students: user._id } },
+    );
+
+    await Mark.findOneAndUpdate(
+      { classroom: classroom._id, student: user._id },
+      {
+        $setOnInsert: {
+          classroom: classroom._id,
+          student: user._id,
+          quizzes: [],
+          assignments: [],
+        },
+      },
+      { upsert: true, returnDocument: "after" },
+    );
+  });
+
+  await Promise.all(syncPromises);
+};
+
+// =============================================================================
+// SYSTEM MAINTENANCE MODE MIDDLEWARE & CONTROLLERS
+// =============================================================================
+exports.checkMaintenanceMode = (req, res, next) => {
+  if (systemMaintenance.isUnderMaintenance) {
+    if (req.path.includes('/maintenance') || req.path.includes('/auth/login') || req.path.includes('/auth/me')) {
+      return next();
+    }
+    return res.status(503).json({
+      status: "maintenance",
+      message: systemMaintenance.message,
+      retryAfter: systemMaintenance.retryAfter,
+      isUnderMaintenance: true
+    });
+  }
+  next();
+};
+
+exports.getMaintenanceStatus = catchAsync(async (req, res, next) => {
+  res.status(200).json({
+    status: "success",
+    data: systemMaintenance
+  });
+});
+
+exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
+  const { isUnderMaintenance, message, retryAfter } = req.body;
+  
+  if (isUnderMaintenance !== undefined) {
+    systemMaintenance.isUnderMaintenance = Boolean(isUnderMaintenance);
+  }
+  if (message) systemMaintenance.message = message;
+  if (retryAfter) systemMaintenance.retryAfter = retryAfter;
+
+  res.status(200).json({
+    status: "success",
+    message: `Maintenance mode is now ${systemMaintenance.isUnderMaintenance ? 'ENABLED' : 'DISABLED'}.`,
+    data: systemMaintenance
+  });
+});
+
+// =============================================================================
+// 1. GET ME PROFILE
+// =============================================================================
+exports.getMe = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return next(new AppError("User not found.", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        rollNo: user.rollNo,
+        role: user.role,
+        personalNotificationEmail: user.personalNotificationEmail,
+        isUniversityEmailVerified: user.isUniversityEmailVerified,
+        isEmailVerified: user.isEmailVerified,
+      },
+    },
+  });
+});
+
+// =============================================================================
+// 2. INITIATE REGISTRATION
+// =============================================================================
+exports.initiateRegistration = catchAsync(async (req, res, next) => {
+  const { name, password, rollNo, personalNotificationEmail, email } = req.body;
+
+  if (!password || !name) {
+    return next(new AppError("Name and Password are required!", 400));
+  }
+
+  let formattedRollNo = rollNo ? rollNo.trim().toUpperCase() : "";
+  let cleanEmail = email ? email.trim().toLowerCase() : "";
+  const cleanPersonalEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
+
+  let assignedRole = "STUDENT";
+
+  if (!formattedRollNo && cleanEmail) {
+    assignedRole = "PENDING_TEACHER";
+    formattedRollNo = cleanEmail.split('@')[0].toUpperCase();
+  }
+
+  if (assignedRole === "STUDENT" && !ROLL_NO_REGEX.test(formattedRollNo)) {
+    return next(new AppError("A valid Roll Number is required for student registration!", 400));
+  }
+
+  const officialEmail = cleanEmail || `${formattedRollNo.toLowerCase()}@pucit.edu.pk`;
+
+  const existingRollHolder = await User.findOne({
+    rollNo: formattedRollNo,
+    isEmailVerified: true,
+  });
+  if (existingRollHolder) {
+    return next(
+      new AppError(
+        "This Roll Number is already linked to an active account. Contact admin to release it.",
+        400,
+      ),
+    );
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const hashedOtp = hashOtp(otp);
+  const otpExpiry = Date.now() + 10 * 60 * 1000;
+
+  const destinationEmail = cleanPersonalEmail || officialEmail;
+
+  try {
+    await sendStyledEmail({
+      to: destinationEmail,
+      subject: "Account Registration OTP",
+      title: "Complete Your Registration",
+      bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
+      otpCode: otp,
+      details: [
+        { label: "Assigned Roll No", value: formattedRollNo },
+        { label: "Official Email", value: officialEmail }
+      ],
+    });
+  } catch (err) {
+    return next(
+      new AppError(
+        "Failed to send verification email. Check SMTP settings.",
+        500,
+      ),
+    );
+  }
+
+  let user = await User.findOne({ email: officialEmail });
+
+  if (user) {
+    user.name = name;
+    user.rollNo = formattedRollNo;
+    user.password = password;
+    user.role = assignedRole;
+    user.personalNotificationEmail = cleanPersonalEmail;
+    user.requiresEmail = true;
+    user.isEmailVerified = false;
+    user.isUniversityEmailVerified = false;
+    user.otpCode = hashedOtp;
+    user.otpExpiresAt = otpExpiry;
+    await user.save();
+  } else {
+    user = await User.create({
+      name,
+      email: officialEmail,
+      rollNo: formattedRollNo,
+      password,
+      role: assignedRole,
+      personalNotificationEmail: cleanPersonalEmail,
+      requiresEmail: true,
+      isEmailVerified: false,
+      isUniversityEmailVerified: false,
+      otpCode: hashedOtp,
+      otpExpiresAt: otpExpiry,
+    });
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: `Verification code sent to ${destinationEmail}. Please verify OTP to complete registration.`,
+    email: officialEmail,
+  });
+});
+
+// =============================================================================
+// 3. VERIFY REGISTRATION OTP & ACTIVATE ACCOUNT
+// =============================================================================
+exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return next(new AppError("Email and OTP code are required!", 400));
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanOtp = otp.trim();
+  const hashedInputOtp = hashOtp(cleanOtp);
+
+  const user = await User.findOne({ email: cleanEmail });
+
+  if (!user) {
+    return next(new AppError("No account found with this email!", 400));
+  }
+
+  if (!user.otpCode || user.otpCode !== hashedInputOtp) {
+    return next(new AppError("Invalid OTP code!", 400));
+  }
+
+  if (user.otpExpiresAt && user.otpExpiresAt < Date.now()) {
+    return next(new AppError("OTP code has expired!", 400));
+  }
+
+  user.isEmailVerified = true;
+  user.otpCode = undefined;
+  user.otpExpiresAt = undefined;
+  await user.save();
+
+  const userRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
+
+  if (user.role === "TA" && userRoll) {
+    const taClassrooms = await Classroom.find({
+      isActive: true,
+      taRollNumbers: userRoll,
+    });
+    for (const classroom of taClassrooms) {
+      await Classroom.updateOne(
+        { _id: classroom._id },
+        { $addToSet: { tas: user._id } },
+      );
+    }
+  }
+
+  if (user.role === "STUDENT") {
+    await syncStudentEnrollment(user);
+  }
+
+  user.password = undefined;
+  const token = signToken(user._id, user.role);
+
+  res.status(200).json({
+    status: "success",
+    message: "Email verified! Account activated successfully.",
+    token,
+    user,
+  });
+});
+
+// =============================================================================
+// 4. USER LOGIN & DASHBOARD DATA PRE-LOAD
+// =============================================================================
+exports.login = catchAsync(async (req, res, next) => {
+  const { loginIdentifier, password } = req.body;
+
+  if (!loginIdentifier || !password) {
+    return next(
+      new AppError("Please provide Roll Number/Email and Password!", 400),
+    );
+  }
+
+  const identifier = loginIdentifier.trim();
+
+  const user = await User.findOne({
+    $or: [
+      { rollNo: identifier.toUpperCase() },
+      { email: identifier.toLowerCase() },
+      { personalNotificationEmail: identifier.toLowerCase() }
+    ],
+  }).select("+password");
+
+  if (!user || !(await user.correctPassword(password, user.password))) {
+    return next(new AppError("Incorrect Roll Number/Email or Password!", 401));
+  }
+
+  if (user.requiresEmail && !user.isEmailVerified) {
+    return next(
+      new AppError(
+        "Your email address is not verified! Please complete OTP verification.",
+        403,
+      ),
+    );
+  }
+
+  if (user.role === "PENDING_TEACHER") {
+    return next(
+      new AppError(
+        "Your teacher account is pending Admin approval. Contact administrator.",
+        403,
+      ),
+    );
+  }
+
+  if (user.role === "STUDENT") {
+    await syncStudentEnrollment(user);
+  }
+
+  user.password = undefined;
+  user.otpCode = undefined;
+  user.otpExpiresAt = undefined;
+
+  const token = signToken(user._id, user.role);
+  let dashboardData = {};
+
+  if (user.role === "STUDENT") {
+    const classrooms = await Classroom.find({
+      students: user._id,
+      isActive: true,
+    })
+      .populate("teacher", "name email")
+      .populate("tas", "name rollNo email");
+
+    const classroomIds = classrooms.map((c) => c._id);
+    const marks = await Mark.find({
+      student: user._id,
+      classroom: { $in: classroomIds },
+    });
+
+    dashboardData = { classrooms, marks };
+  } else if (["TA", "TEACHER"].includes(user.role)) {
+    const roleKey = user.role === "TA" ? "tas" : "teacher";
+    const classrooms = await Classroom.find({
+      [roleKey]: user._id,
+      isActive: true,
+    })
+      .populate("teacher", "name email")
+      .populate("tas", "name rollNo email")
+      .populate("students", "name rollNo email requiresEmail");
+
+    const labrooms = await Labroom.find({
+      [roleKey]: user._id,
+      isActive: true,
+    })
+      .populate("teacher", "name email")
+      .populate("tas", "name rollNo email")
+      .populate("students", "name rollNo email requiresEmail");
+
+    const classroomIds = classrooms.map((c) => c._id);
+    const marks = await Mark.find({ classroom: { $in: classroomIds } });
+
+    dashboardData = { classrooms, labrooms, marks };
+  } else if (user.role === "ADMIN") {
+    const activeClassrooms = await Classroom.find({ isActive: true })
+      .populate("teacher", "name email")
+      .populate("tas", "name rollNo")
+      .populate("students", "name rollNo");
+
+    const activeLabrooms = await Labroom.find({ isActive: true })
+      .populate("teacher", "name email")
+      .populate("tas", "name rollNo")
+      .populate("students", "name rollNo");
+
+    const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select(
+      "-password",
+    );
+    const allUsers = await User.find().select("-password");
+
+    dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
+  }
+
+  res.status(200).json({
+    status: "success",
+    token,
+    user: {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      rollNo: user.rollNo,
+      role: user.role,
+      personalNotificationEmail: user.personalNotificationEmail,
+      isUniversityEmailVerified: user.isUniversityEmailVerified,
+      isEmailVerified: user.isEmailVerified,
+    },
+    dashboardData,
+  });
+});
+
+// =============================================================================
+// 5. FORGOT PASSWORD
+// =============================================================================
+exports.forgotPassword = catchAsync(async (req, res, next) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return next(new AppError("Please enter your email or roll number!", 400));
+  }
+
+  const identifier = email.trim().toLowerCase();
+
+  const user = await User.findOne({
+    $or: [
+      { email: identifier },
+      { rollNo: identifier.toUpperCase() },
+      { personalNotificationEmail: identifier }
+    ],
+    isEmailVerified: true,
+  });
+
+  if (!user) {
+    return next(
+      new AppError("No verified account found with this identifier.", 404),
+    );
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const targetEmail = user.personalNotificationEmail || user.email;
+
+  try {
+    await sendStyledEmail({
+      to: targetEmail,
+      subject: "Password Recovery OTP",
+      title: "Password Reset Request",
+      bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
+      otpCode: otp,
+      details: [{ label: "Account Target", value: user.rollNo || user.email }],
+    });
+  } catch (err) {
+    return next(
+      new AppError("Error sending reset email. Try again later!", 500),
+    );
+  }
+
+  user.otpCode = hashOtp(otp);
+  user.otpExpiresAt = Date.now() + 10 * 60 * 1000;
+  await user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: "success",
+    message: `Password reset OTP code sent successfully to ${targetEmail}`,
+  });
+});
+
+// =============================================================================
+// 6. RESET PASSWORD WITH OTP
+// =============================================================================
+exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
+  const { email, otp, newPassword } = req.body;
+
+  if (!email || !otp || !newPassword) {
+    return next(
+      new AppError("Identifier, OTP code, and new password are required!", 400),
+    );
+  }
+
+  if (newPassword.length < 6) {
+    return next(
+      new AppError("New password must be at least 6 characters long!", 400),
+    );
+  }
+
+  const identifier = email.trim().toLowerCase();
+
+  const user = await User.findOne({
+    $or: [
+      { email: identifier },
+      { rollNo: identifier.toUpperCase() },
+      { personalNotificationEmail: identifier }
+    ],
+    isEmailVerified: true,
+    otpCode: hashOtp(otp),
+    otpExpiresAt: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    return next(new AppError("Invalid or expired OTP code!", 400));
+  }
+
+  user.password = newPassword;
+  user.otpCode = undefined;
+  user.otpExpiresAt = undefined;
+  await user.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Password reset successful! You can now log in with your new password.",
+  });
+});
+
+// =============================================================================
+// 7. UPDATE PASSWORD IN PROFILE
+// =============================================================================
+exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return next(
+      new AppError("Please provide both current and new passwords!", 400),
+    );
+  }
+
+  if (newPassword.length < 6) {
+    return next(
+      new AppError("New password must be at least 6 characters long!", 400),
+    );
+  }
+
+  const user = await User.findById(req.user._id).select("+password");
+  if (!(await user.correctPassword(currentPassword, user.password))) {
+    return next(new AppError("Your current password is incorrect!", 401));
+  }
+
+  user.password = newPassword;
+  await user.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Password updated successfully!",
+  });
+});
+
+// =============================================================================
+// 8. UPDATE USER PROFILE
+// =============================================================================
+exports.updateProfile = catchAsync(async (req, res, next) => {
+  const { name, password, personalNotificationEmail } = req.body;
+
+  const user = await User.findById(req.user._id);
+  if (!user) return next(new AppError("User not found.", 404));
+
+  if (name) user.name = name.trim();
+  if (password && password.trim().length >= 6) {
+    user.password = password.trim();
+  }
+  
+  if (personalNotificationEmail !== undefined && !user.isUniversityEmailVerified) {
+    user.personalNotificationEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
+  }
+
+  await user.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Profile updated successfully!",
+    data: {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        personalNotificationEmail: user.personalNotificationEmail,
+        role: user.role,
+        rollNo: user.rollNo,
+        isUniversityEmailVerified: user.isUniversityEmailVerified,
+      },
+    },
+  });
+});
+
+// =============================================================================
+// 9. REQUEST OFFICIAL EMAIL ACTIVATION OTP
+// =============================================================================
+exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
+  const { universityEmail } = req.body;
+  const user = await User.findById(req.user._id);
+
+  const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
+
+  if (!targetEmail.endsWith('@pucit.edu.pk')) {
+    return next(new AppError("Must be a valid official @pucit.edu.pk email address.", 400));
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  try {
+    await sendStyledEmail({
+      to: targetEmail,
+      subject: "Official Inbox Activation OTP",
+      title: "Activate Official University Inbox",
+      bodyText: `Hello <strong>${user.name}</strong>, your official university inbox is now accessible. Use the secure verification code boxes below to link and lock your account permanently.`,
+      otpCode: otp,
+      details: [{ label: "Official Email", value: targetEmail }],
+    });
+  } catch (err) {
+    return next(
+      new AppError("Could not send activation OTP to official inbox. Try again later!", 500),
+    );
+  }
+
+  user.otpCode = hashOtp(otp);
+  user.otpExpiresAt = Date.now() + 10 * 60 * 1000;
+  await user.save({ validateBeforeSave: false });
+
+  res.status(200).json({
+    status: "success",
+    message: `Activation OTP sent successfully to your official inbox (${targetEmail}).`,
+  });
+});
+
+// =============================================================================
+// 10. VERIFY OFFICIAL EMAIL ACTIVATION OTP
+// =============================================================================
+exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
+  const { universityEmail, otp } = req.body;
+
+  if (!otp) {
+    return next(new AppError("OTP code is required!", 400));
+  }
+
+  const user = await User.findById(req.user._id);
+
+  if (
+    !user.otpCode ||
+    user.otpCode !== hashOtp(otp.trim()) ||
+    user.otpExpiresAt < Date.now()
+  ) {
+    return next(new AppError("Invalid or expired OTP code!", 400));
+  }
+
+  if (universityEmail) {
+    user.email = universityEmail.trim().toLowerCase();
+  }
+
+  user.isUniversityEmailVerified = true;
+  user.personalNotificationEmail = null;
+  user.otpCode = undefined;
+  user.otpExpiresAt = undefined;
+  await user.save();
+
+  user.password = undefined;
+
+  res.status(200).json({
+    status: "success",
+    message: "Official university email successfully activated and verified!",
+    data: { user },
+  });
+});
+
+// =============================================================================
+// 11. EMERGENCY STAFF PASSWORD RESET
+// =============================================================================
+exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
+  const { studentId, newPassword } = req.body;
+
+  if (!studentId || !newPassword) {
+    return next(new AppError("Student ID and new password are required!", 400));
+  }
+
+  if (newPassword.length < 6) {
+    return next(
+      new AppError("Password must be at least 6 characters long!", 400),
+    );
+  }
+
+  const student = await User.findById(studentId);
+  if (!student || student.role !== "STUDENT") {
+    return next(new AppError("Student record not found!", 404));
+  }
+
+  student.password = newPassword;
+  await student.save();
+
+  res.status(200).json({
+    status: "success",
+    message: `Password for ${student.name} (${student.rollNo}) updated successfully!`,
+  });
+});
+
+// =============================================================================
+// 12. ADMIN: GET PENDING TEACHERS
+// =============================================================================
+exports.getPendingTeachers = catchAsync(async (req, res, next) => {
+  const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select(
+    "-password",
+  );
+  res.status(200).json({
+    status: "success",
+    results: pendingTeachers.length,
+    data: { teachers: pendingTeachers, pendingTeachers },
+  });
+});
+
+// =============================================================================
+// 13. ADMIN: APPROVE PENDING TEACHER
+// =============================================================================
+exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
+  const userId = req.params.id || req.body.userId;
+  const user = await User.findById(userId);
+
+  if (!user) return next(new AppError("User account not found.", 404));
+  if (user.role !== "PENDING_TEACHER") {
+    return next(new AppError("User is not in a pending teacher state.", 400));
+  }
+
+  user.role = "TEACHER";
+  await user.save();
+
+  if (user.email) {
+    await sendStyledEmail({
+      to: user.email,
+      subject: "Teacher Account Approved",
+      title: "Teacher Account Approved",
+      bodyText: `Hello <strong>${user.name}</strong>, your teacher account registration has been <span style="color: #10b981; font-weight: 600;">approved</span> by the Administrator. You can now log in and manage your classrooms and labs.`,
+      details: [
+        { label: "Account Name", value: user.name },
+        { label: "Assigned Role", value: "TEACHER" },
+        { label: "Approved By", value: `${req.user.name} (Admin)` },
+      ],
+    });
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: `Teacher ${user.name} has been approved successfully!`,
+    data: { user },
+  });
+});
+
+// =============================================================================
+// 14. ADMIN: REJECT PENDING TEACHER
+// =============================================================================
+exports.rejectTeacher = catchAsync(async (req, res, next) => {
+  const userId = req.params.id || req.body.userId;
+  const user = await User.findById(userId);
+
+  if (!user) {
+    return next(new AppError("Teacher registration request not found.", 404));
+  }
+
+  const teacherEmail = user.email;
+  const teacherName = user.name;
+
+  if (teacherEmail) {
+    try {
+      await sendStyledEmail({
+        to: teacherEmail,
+        subject: "Teacher Account Request Status",
+        title: "Registration Request Update",
+        bodyText: `Hello <strong>${teacherName}</strong>,<br><br>We regret to inform you that your teacher account registration request for the PUCIT Portal has been <span style="color: #e11d48; font-weight: 600;">declined</span> at this time.<br><br>If you believe this is an error or need further assistance with your credentials, please feel free to contact the administrator, <strong>Shehzada Ather (IT F25 - Old Campus)</strong>.<br><br>Your registration profile has been reset. You may re-register on the portal with updated credentials whenever you are ready.`,
+        details: [
+          {
+            label: "Status",
+            value: '<span style="color: #e11d48; font-weight: 600;">Declined / Reset</span>',
+          },
+          {
+            label: "Support Contact",
+            value: "Shehzada Ather, IT F25 (Old Campus)",
+          },
+        ],
+      });
+    } catch (mailErr) {
+      console.warn("Failed to send rejection email:", mailErr.message);
+    }
+  }
+
+  await User.findByIdAndDelete(userId);
+
+  res.status(200).json({
+    status: "success",
+    message:
+      "Teacher registration request rejected, email notification sent, and database record cleared for re-registration.",
+  });
+});
+
+// =============================================================================
+// 15. ADMIN ANALYTICS & BREAKDOWNS
+// =============================================================================
+exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
+  const totalUsers = await User.countDocuments();
+  const studentsCount = await User.countDocuments({ role: "STUDENT" });
+  const teachersCount = await User.countDocuments({ role: "TEACHER" });
+  const adminsCount = await User.countDocuments({ role: "ADMIN" });
+  const pendingTeachersCount = await User.countDocuments({ role: "PENDING_TEACHER" });
+
+  const activeClassroomsCount = await Classroom.countDocuments({ isActive: true });
+  const activeLabroomsCount = await Labroom.countDocuments({ isActive: true });
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      totalUsers,
+      totalClassrooms: activeClassroomsCount,
+      totalLabrooms: activeLabroomsCount,
+      userBreakdown: {
+        totalUsers,
+        students: studentsCount,
+        teachers: teachersCount,
+        admins: adminsCount,
+        pendingTeachers: pendingTeachersCount
+      },
+      academicBreakdown: {
+        activeClassrooms: activeClassroomsCount,
+        activeLabrooms: activeLabroomsCount
+      }
+    }
+  });
+});
+
+// =============================================================================
+// 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT (FIXED)
+// =============================================================================
+exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
+  const users = await User.find().select("-password").sort({ createdAt: -1 });
+  
+  res.status(200).json({
+    status: "success",
+    count: users.length,
+    data: {
+      users
+    }
+  });
+});

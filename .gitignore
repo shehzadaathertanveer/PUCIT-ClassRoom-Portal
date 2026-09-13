@@ -1,0 +1,6 @@
+backend/config/config.env
+
+frontend/.env
+
+*.env
+*.env.*
