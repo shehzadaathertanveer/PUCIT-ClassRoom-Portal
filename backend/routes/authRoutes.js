@@ -35,7 +35,9 @@ router.post('/attach-email/verify-otp', authController.verifyOfficialEmailActiva
 router.get('/admin/analytics', restrictTo('ADMIN'), authController.getAdminAnalytics);
 router.get('/admin/users', restrictTo('ADMIN'), authController.getAllUsersAdmin); // <-- Added route for Analytics Vault users list
 // Add both variations to your backend authRoutes.js under Admin Routes:
-router.patch('/admin/maintenance/toggle', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
+// Add or change the route to accept POST requests to match your frontend API call
+router.post('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
+router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode); // Keep patch as fallback
 router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode); // Fallback alias
 
 // =============================================================================
