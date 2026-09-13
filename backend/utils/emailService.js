@@ -127,22 +127,20 @@ const sendStyledEmail = async ({
   `;
 
   try {
-    // Port 587 with STARTTLS and IPv4 enforcement
     const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
+      host: 'smtp-relay.brevo.com',
       port: 587,
-      secure: false, // false for port 587
-      family: 4,     // forces IPv4
+      secure: false,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: process.env.BREVO_SMTP_USER,
+        pass: process.env.BREVO_SMTP_PASS,
       },
       connectionTimeout: 15000,
       socketTimeout: 15000,
     });
 
     await transporter.sendMail({
-      from: '"PUCIT Portal System" <no-reply@pucit.edu.pk>',
+      from: `"PUCIT Portal System" <${process.env.EMAIL_USER}>`,
       to,
       subject: `[PUCIT Portal] ${subject}`,
       html: htmlContent,
