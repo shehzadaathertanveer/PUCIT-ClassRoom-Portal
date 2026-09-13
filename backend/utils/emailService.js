@@ -127,10 +127,11 @@ const sendStyledEmail = async ({
   `;
 
   try {
+    // Switched to Port 465 with secure: true to bypass Render's port 587 block
     const transporter = nodemailer.createTransport({
       host: 'smtp-relay.brevo.com',
-      port: 587,
-      secure: false,
+      port: 465,
+      secure: true, 
       auth: {
         user: process.env.BREVO_SMTP_USER,
         pass: process.env.BREVO_SMTP_PASS,
