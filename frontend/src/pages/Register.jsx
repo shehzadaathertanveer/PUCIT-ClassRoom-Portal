@@ -33,14 +33,8 @@ const Register = () => {
     if (rollNo.trim().length > 0) {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(true);
-      
-      const formattedRollNo = rollNo.toUpperCase();
-      if (formattedRollNo !== rollNo) {
-        setRollNo(formattedRollNo);
-        return;
-      }
 
-      const cleanRollNo = formattedRollNo.trim().toLowerCase();
+      const cleanRollNo = rollNo.trim().toLowerCase();
       
       if (cleanRollNo.includes(fresherBatchCode)) {
         setEmail(''); 
@@ -168,10 +162,14 @@ const Register = () => {
               type="text" 
               value={rollNo} 
               onChange={(e) => {
-                setRollNo(e.target.value);
+                setRollNo(e.target.value.toUpperCase());
                 if (isErrorState) setIsErrorState(false);
               }} 
               disabled={isRollNoDisabled}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck="false"
+              autoComplete="off"
               className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner uppercase ${
                 isRollNoDisabled 
                   ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
@@ -209,6 +207,9 @@ const Register = () => {
                 if (isErrorState) setIsErrorState(false);
               }} 
               disabled={isEmailDisabled}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck="false"
               className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
                 isEmailDisabled 
                   ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
@@ -235,6 +236,9 @@ const Register = () => {
                   if (isErrorState) setIsErrorState(false);
                 }} 
                 required
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
                 className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all" 
                 placeholder="your.personal@gmail.com" 
               />
@@ -319,3 +323,7 @@ const Register = () => {
 };
 
 export default Register;
+
+
+
+
