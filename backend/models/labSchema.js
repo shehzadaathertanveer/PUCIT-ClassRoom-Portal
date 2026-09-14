@@ -172,10 +172,9 @@ const normalizeNoticeAttachments = (doc) => {
   }
 };
 
-// Pre-save hook to ensure URLs are clean before hitting the database
-labRoomSchema.pre('save', function (next) {
+// Pre-save hook using async/await (No next callback required)
+labRoomSchema.pre('save', async function () {
   normalizeNoticeAttachments(this);
-  next();
 });
 
 // Post-query middleware to fix any legacy URLs returned to the client

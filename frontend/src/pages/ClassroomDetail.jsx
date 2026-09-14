@@ -993,23 +993,23 @@ const ClassroomDetail = () => {
 
         <div className="flex flex-wrap items-center gap-1.5 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800">
           {user?.role === 'STUDENT' && !isAssignedTa && (
-            <button onClick={() => setIsComplaintModalOpen(true)} className="px-3 py-2 bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚠️ Complaints</button>
+            <button type="button" onClick={() => setIsComplaintModalOpen(true)} className="px-3 py-2 bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚠️ Complaints</button>
           )}
           {isStaffOrAdmin && (
-            <button onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="px-3 py-2 bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-[10px] font-extrabold uppercase rounded-xl transition-all">📥 Feedback</button>
+            <button type="button" onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="px-3 py-2 bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-500/50 text-[10px] font-extrabold uppercase rounded-xl transition-all">📥 Feedback</button>
           )}
-          <button onClick={() => setIsMembersModalOpen(true)} className="px-3 py-2 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">👥 Roster</button>
-          {isAdmin && <button onClick={() => setIsAssignTeacherModalOpen(true)} className="px-3 py-2 bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Teacher</button>}
-          {isTeacherOrAdmin && <button onClick={() => setIsTaModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ TA</button>}
+          <button type="button" onClick={() => setIsMembersModalOpen(true)} className="px-3 py-2 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">👥 Roster</button>
+          {isAdmin && <button type="button" onClick={() => setIsAssignTeacherModalOpen(true)} className="px-3 py-2 bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Teacher</button>}
+          {isTeacherOrAdmin && <button type="button" onClick={() => setIsTaModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ TA</button>}
           {isStaffOrAdmin && (
             <>
-              <button onClick={() => setIsAddStudentModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Student</button>
-              <button onClick={handleDownloadExcelReport} className="px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all shadow-md">📥 Download Excel</button>
-              <button onClick={() => setIsExcelModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">📊 Upload Sync</button>
-              <button onClick={() => setIsItemModalOpen(true)} className="px-3.5 py-2 bg-gradient-to-r from-orange-400 to-rose-500 text-black text-[10px] font-extrabold uppercase rounded-xl shadow-md transition-all">+ Result</button>
+              <button type="button" onClick={() => setIsAddStudentModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Student</button>
+              <button type="button" onClick={handleDownloadExcelReport} className="px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all shadow-md">📥 Download Excel</button>
+              <button type="button" onClick={() => setIsExcelModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">📊 Upload Sync</button>
+              <button type="button" onClick={() => setIsItemModalOpen(true)} className="px-3.5 py-2 bg-gradient-to-r from-orange-400 to-rose-500 text-black text-[10px] font-extrabold uppercase rounded-xl shadow-md transition-all">+ Result</button>
             </>
           )}
-          {isTeacherOrAdmin && <button onClick={() => setIsSettingsModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚙️ Settings</button>}
+          {isTeacherOrAdmin && <button type="button" onClick={() => setIsSettingsModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚙️ Settings</button>}
         </div>
       </header>
 
@@ -1023,7 +1023,7 @@ const ClassroomDetail = () => {
               <h2 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Notice Board</h2>
             </div>
             {classroom.notices?.length > 0 && (
-              <button onClick={() => setShowAllNotices(!showAllNotices)} className="text-xs font-bold underline cursor-pointer text-orange-400">
+              <button type="button" onClick={() => setShowAllNotices(!showAllNotices)} className="text-xs font-bold underline cursor-pointer text-orange-400">
                 {showAllNotices ? 'Show Latest Only' : `View All (${classroom.notices.length})`}
               </button>
             )}
@@ -1092,10 +1092,10 @@ const ClassroomDetail = () => {
 
         {/* NAVIGATION TABS */}
         <div className="flex items-center bg-[#130910]/80 border border-orange-500/20 rounded-2xl p-2 gap-1 overflow-x-auto">
-          <button onClick={() => setActiveTab('overview')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${activeTab === 'overview' ? 'bg-orange-400 text-black' : 'text-slate-400'}`}>📊 Overview</button>
+          <button type="button" onClick={() => setActiveTab('overview')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${activeTab === 'overview' ? 'bg-orange-400 text-black' : 'text-slate-400'}`}>📊 Overview</button>
           
           {isStaffOrAdmin && (
-            <button onClick={() => setActiveTab('leaderboard')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${activeTab === 'leaderboard' ? 'bg-orange-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
+            <button type="button" onClick={() => setActiveTab('leaderboard')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${activeTab === 'leaderboard' ? 'bg-orange-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
               <span>🏆 Class Leaderboard</span>
             </button>
           )}
@@ -1103,7 +1103,7 @@ const ClassroomDetail = () => {
           {sessionalActivitiesList.map((act) => {
             const count = getItemsForCategory(act.category).length;
             return (
-              <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-2 ${activeTab === act.category.toLowerCase() ? 'bg-orange-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
+              <button type="button" key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-2 ${activeTab === act.category.toLowerCase() ? 'bg-orange-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
                 <span>📁 {act.category}</span>
                 <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${activeTab === act.category.toLowerCase() ? 'bg-black/20 text-black' : 'bg-slate-800 text-slate-300'}`}>
                   {count}
@@ -1230,7 +1230,7 @@ const ClassroomDetail = () => {
               </div>
 
               <div className="pt-4 relative z-10">
-                <button onClick={() => setIsMembersModalOpen(true)} className="w-full py-3 bg-gradient-to-r from-orange-500/20 hover:from-orange-500/30 to-rose-500/20 hover:to-rose-500/30 border border-orange-500/40 text-orange-300 hover:text-orange-200 text-xs font-black uppercase tracking-wider rounded-2xl transition-all cursor-pointer shadow-lg shadow-orange-500/10 flex items-center justify-center gap-2">
+                <button type="button" onClick={() => setIsMembersModalOpen(true)} className="w-full py-3 bg-gradient-to-r from-orange-500/20 hover:from-orange-500/30 to-rose-500/20 hover:to-rose-500/30 border border-orange-500/40 text-orange-300 hover:text-orange-200 text-xs font-black uppercase tracking-wider rounded-2xl transition-all cursor-pointer shadow-lg shadow-orange-500/10 flex items-center justify-center gap-2">
                   <span>👥 View Full Class Roster</span>
                   <span>→</span>
                 </button>
@@ -1258,6 +1258,7 @@ const ClassroomDetail = () => {
                   { key: 'finals', label: 'Finals' },
                 ].map((filter) => (
                   <button
+                    type="button"
                     key={filter.key}
                     onClick={() => setLeaderboardFilter(filter.key)}
                     className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer ${
@@ -1427,6 +1428,7 @@ const ClassroomDetail = () => {
                               <span className="text-[10px] text-slate-500 italic">Submission Status Active</span>
                               {hasPhoto && (
                                 <button 
+                                  type="button"
                                   onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
                                   className="px-3 py-1.5 bg-orange-500/25 hover:bg-orange-500/35 text-orange-300 border border-orange-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                 >
@@ -1439,6 +1441,7 @@ const ClassroomDetail = () => {
                               <div className="flex items-center gap-2 w-full">
                                 {ungradedCount > 0 ? (
                                   <button 
+                                    type="button"
                                     onClick={() => handleTabletClick(item, targetKey, cat, true)}
                                     className="flex-1 py-2 bg-amber-950/80 hover:bg-amber-900 border border-amber-500/40 text-amber-300 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer text-center"
                                   >
@@ -1450,6 +1453,7 @@ const ClassroomDetail = () => {
                                   </span>
                                 )}
                                 <button 
+                                  type="button"
                                   onClick={() => handleTabletClick(item, targetKey, cat, false)}
                                   className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase rounded-xl transition-all cursor-pointer border border-slate-700 text-center"
                                 >
@@ -1477,7 +1481,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-300 uppercase">Class Roster & Hierarchy</h3>
-              <button onClick={() => setIsMembersModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsMembersModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             
             <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-1">
@@ -1518,8 +1522,8 @@ const ClassroomDetail = () => {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {isStaffOrAdmin && (
                         <>
-                          <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">🔑 Reset</button>
-                          <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" className="px-2.5 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">✕</button>
+                          <button type="button" onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">🔑 Reset</button>
+                          <button type="button" onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" className="px-2.5 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">✕</button>
                         </>
                       )}
                     </div>
@@ -1528,7 +1532,7 @@ const ClassroomDetail = () => {
               </div>
             </div>
 
-            <button onClick={() => setIsMembersModalOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close Roster</button>
+            <button type="button" onClick={() => setIsMembersModalOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close Roster</button>
           </div>
         </div>
       )}
@@ -1539,7 +1543,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-400 uppercase">Create Evaluation Item</h3>
-              <button onClick={() => setIsItemModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -1595,7 +1599,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-300 uppercase">📊 Sync Marks via Excel/CSV</h3>
-              <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             
             {syncReport ? (
@@ -1608,7 +1612,7 @@ const ClassroomDetail = () => {
                     <p className="text-xs text-amber-300">Warnings/Skipped: {syncReport.errors.length}</p>
                   )}
                 </div>
-                <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="w-full py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Done</button>
+                <button type="button" onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="w-full py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Done</button>
               </div>
             ) : (
               <form onSubmit={handleExcelSyncSubmit} className="space-y-4">
@@ -1651,7 +1655,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (4 Pathways)</h3>
-              <button onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
@@ -1816,7 +1820,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-400 uppercase">Assign Teaching Assistant</h3>
-              <button onClick={() => setIsTaModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsTaModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleLookupTa} className="space-y-3">
               <input type="text" required placeholder="Enter student roll number" value={taRollNo} onChange={(e) => setTaRollNo(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" />
@@ -1846,7 +1850,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-300 uppercase">Assign Instructor</h3>
-              <button onClick={() => setIsAssignTeacherModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsAssignTeacherModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleLookupTeacher} className="space-y-3">
               <input type="text" required placeholder="Enter teacher email or ID" value={teacherRollNo} onChange={(e) => setTeacherRollNo(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
@@ -1876,7 +1880,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white uppercase">Classroom Settings & Weights</h3>
-              <button onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleUpdateClassSettings} className="space-y-4">
               <div>
@@ -2030,7 +2034,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-300 uppercase">Anonymous Complaint Box</h3>
-              <button onClick={() => setIsComplaintModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsComplaintModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleSendComplaint} className="space-y-3">
               <textarea rows="4" required placeholder="Write your anonymous query or complaint..." value={complaintText} onChange={(e) => setComplaintText(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs resize-none" />
@@ -2048,7 +2052,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-orange-300 uppercase">Anonymous Submissions</h3>
-              <button onClick={() => setIsViewComplaintsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setIsViewComplaintsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             {loadingComplaints ? (
               <p className="text-center text-xs text-slate-400 py-6">Loading submissions...</p>
@@ -2064,7 +2068,7 @@ const ClassroomDetail = () => {
                 ))}
               </div>
             )}
-            <button onClick={() => setIsViewComplaintsModalOpen(false)} className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close</button>
+            <button type="button" onClick={() => setIsViewComplaintsModalOpen(false)} className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close</button>
           </div>
         </div>
       )}
@@ -2075,7 +2079,7 @@ const ClassroomDetail = () => {
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/50 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 className="text-xs font-bold text-orange-400 uppercase font-mono">{selectedActivityItem.item.title} — Uploaded Photo</h3>
-              <button onClick={() => setSelectedActivityItem(null)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" onClick={() => setSelectedActivityItem(null)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
             {selectedActivityItem.scoreData?.file?.url && (
@@ -2089,6 +2093,7 @@ const ClassroomDetail = () => {
             )}
 
             <button 
+              type="button"
               onClick={() => setSelectedActivityItem(null)} 
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold uppercase text-xs rounded-xl cursor-pointer transition-all"
             >

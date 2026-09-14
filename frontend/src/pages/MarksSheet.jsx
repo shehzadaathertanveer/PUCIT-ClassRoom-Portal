@@ -81,32 +81,21 @@ const MarksSheet = () => {
       }
 
       if (activeTitle && activeTitle !== 'general') {
-        const unassignedRes = await API.get(`/classroommarks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
-        const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
-        setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
+        try {
+          const unassignedRes = await API.get(`/classroommarks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
+          const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
+          setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
+        } catch (err) {
+          console.warn('Could not fetch specific unassigned endpoint, falling back to local computation:', err);
+          computeUnassignedLocally(data.students || [], data.existingMarks || [], activeTitle);
+        }
       } else {
-        const unassigned = (data.students || []).filter(student => {
-          const studentId = student._id.toString();
-          const markDoc = (data.existingMarks || []).find(m => m.student.toString() === studentId);
-          if (!markDoc) return true;
-          
-          let list = [];
-          if (markDoc[category] && Array.isArray(markDoc[category])) {
-            list = markDoc[category];
-          } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
-            const customCat = markDoc.customActivities.find(
-              c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
-            );
-            list = customCat ? customCat.items || [] : [];
-          }
-          return list.length === 0;
-        });
-        setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
+        computeUnassignedLocally(data.students || [], data.existingMarks || [], activeTitle);
       }
 
       // Populate spreadsheet inputs
       const initialMap = {};
-      const marksMap = new Map((data.existingMarks || []).map(m => [m.student.toString(), m]));
+      const marksMap = new Map((data.existingMarks || []).map(m => [m.student?.toString() || m.student?._id?.toString(), m]));
 
       (data.students || []).forEach(student => {
         const studentId = student._id.toString();
@@ -156,6 +145,28 @@ const MarksSheet = () => {
     }
   }, [classroomId, category, itemId, itemTitle, passedTotalMarks]);
 
+  const computeUnassignedLocally = (studs, marksList, activeTitle) => {
+    const unassigned = studs.filter(student => {
+      const studentId = student._id.toString();
+      const markDoc = marksList.find(m => (m.student?.toString() || m.student?._id?.toString()) === studentId);
+      if (!markDoc) return true;
+      
+      let list = [];
+      if (markDoc[category] && Array.isArray(markDoc[category])) {
+        list = markDoc[category];
+      } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
+        const customCat = markDoc.customActivities.find(
+          c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+        );
+        list = customCat ? customCat.items || [] : [];
+      }
+      
+      const foundMatch = list.find(e => e.title?.toLowerCase() === activeTitle?.toLowerCase());
+      return !foundMatch || (foundMatch.obtainedMarks === undefined && !foundMatch.isAbsent);
+    });
+    setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
+  };
+
   useEffect(() => {
     if (classroomId && category) {
       fetchSheetData();
@@ -175,6 +186,7 @@ const MarksSheet = () => {
   };
 
   const handleFileUpload = async (studentId, e) => {
+    e.preventDefault();
     const file = e.target.files[0];
     if (!file) return;
 
@@ -246,7 +258,8 @@ const MarksSheet = () => {
     }
   };
 
-  const handleCancelEvaluation = async () => {
+  const handleCancelEvaluation = async (e) => {
+    e.preventDefault();
     const targetTitle = itemTitle || itemId;
     if (!window.confirm(`Are you sure you want to cancel and delete "${targetTitle}" across all students? This cannot be undone.`)) {
       return;
@@ -272,7 +285,8 @@ const MarksSheet = () => {
     }
   };
 
-  const handleExportToExcel = () => {
+  const handleExportToExcel = (e) => {
+    e.preventDefault();
     try {
       let csvContent = "data:text/csv;charset=utf-8,";
       csvContent += "Roll Number,Student Name,Marks Obtained,Total Marks,Status\r\n";
