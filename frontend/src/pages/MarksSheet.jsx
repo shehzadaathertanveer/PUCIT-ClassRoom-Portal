@@ -229,7 +229,7 @@ const MarksSheet = () => {
         .filter(([_, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
         .map(([studentId, data]) => ({
           studentId,
-          obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),
+          obtainedMarks: data.obtainedMarks,
           isAbsent: data.isAbsent,
           file: data.file?.url ? data.file : null
         }));
@@ -240,8 +240,8 @@ const MarksSheet = () => {
         return;
       }
 
-      await API.post('/classroommarks/batch-submit', {
-        classroomId,
+      // FIXED API ROUTE MAPPING
+      await API.post(`/classrooms/${classroomId}/batch-marks`, {
         category,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
