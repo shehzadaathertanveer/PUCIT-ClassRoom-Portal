@@ -3,9 +3,9 @@ const User = require('../models/userSchema');
 const Mark = require('../models/markSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
-const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with dark theme layout & IPv4 Render fix
+const sendStyledEmail = require('../utils/emailService');
 
-// Helper: Normalize Schema Target Keys Safely (Quizzes, Assignments, Mids, Finals)
+// Helper: Normalize Schema Target Keys Safely
 const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
   if (clean.includes('quiz')) return 'quizzes';
@@ -496,7 +496,68 @@ exports.hardDeleteClassroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10. ADD STUDENT BY ROLL NUMBER
+// 10. FEATURE 3: LOOKUP STUDENT DETAILS FOR FRONTEND DOUBLE-CONFIRMATION & ADD-DROP
+// =============================================================================
+exports.lookupStudentForAddDrop = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { rollInput } = req.body;
+
+  if (!rollInput) {
+    return next(new AppError('Roll number or registration identifier is required!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const cleanInput = rollInput.trim().toUpperCase();
+  let targetRollNo = cleanInput;
+
+  if (!cleanInput.startsWith(classroom.sectionPrefix) && !cleanInput.includes('FRESHER_')) {
+    const digitsOnly = cleanInput.replace(/\D/g, '');
+    if (digitsOnly) {
+      targetRollNo = `${classroom.sectionPrefix}${digitsOnly.padStart(3, '0')}`;
+    }
+  }
+
+  const student = await User.findOne({
+    role: 'STUDENT',
+    $or: [
+      { rollNo: targetRollNo },
+      { rollNo: cleanInput },
+      { registrationNo: rollInput.trim() }
+    ]
+  }).select('name rollNo registrationNo email personalNotificationEmail');
+
+  if (!student) {
+    return res.status(404).json({
+      status: 'fail',
+      message: `No student record found matching identifier: ${rollInput}`
+    });
+  }
+
+  const isPrefixMatch = student.rollNo && student.rollNo.toUpperCase().startsWith(classroom.sectionPrefix.toUpperCase());
+  const isAlreadyEnrolled = classroom.students.some(id => id.toString() === student._id.toString());
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      student: {
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        registrationNo: student.registrationNo || 'N/A',
+        email: student.email,
+        personalNotificationEmail: student.personalNotificationEmail,
+        isPrefixMatch,
+        isAddDrop: !isPrefixMatch,
+        isAlreadyEnrolled
+      }
+    }
+  });
+});
+
+// =============================================================================
+// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX (Feature 1 & Feature 3)
 // =============================================================================
 exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
   const { classroomId, rollInput } = req.body;
@@ -512,13 +573,22 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
   const cleanInput = rollInput.trim().toUpperCase();
   let targetRollNo = cleanInput;
 
-  if (!cleanInput.startsWith(classroom.sectionPrefix)) {
+  if (!cleanInput.startsWith(classroom.sectionPrefix) && !cleanInput.includes('FRESHER_')) {
     const digitsOnly = cleanInput.replace(/\D/g, '');
-    const paddedDigits = digitsOnly.padStart(3, '0');
-    targetRollNo = `${classroom.sectionPrefix}${paddedDigits}`;
+    if (digitsOnly) {
+      targetRollNo = `${classroom.sectionPrefix}${digitsOnly.padStart(3, '0')}`;
+    }
   }
 
-  const student = await User.findOne({ role: 'STUDENT', $or: [{ rollNo: targetRollNo }, { registrationNo: rollInput.trim() }] });
+  const student = await User.findOne({ 
+    role: 'STUDENT', 
+    $or: [
+      { rollNo: targetRollNo }, 
+      { rollNo: cleanInput },
+      { registrationNo: rollInput.trim() } 
+    ] 
+  });
+
   if (!student) {
     return next(new AppError(`No registered student found with identifier: ${rollInput}`, 404));
   }
@@ -807,7 +877,7 @@ exports.postNotice = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 15. SETTINGS & BULK ENROLLMENT HELPERS
+// 15. SETTINGS & FEATURE 1, 2, 3, 4 ENROLLMENT HELPERS
 // =============================================================================
 exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -845,6 +915,79 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   });
 });
 
+// FEATURE 1: Quick Suffix Roll Numbers Entry (e.g. 3, 53, 23 auto-detected & combined with prefix)
+exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
+  const { classroomId, rollSuffixes } = req.body;
+  const targetClassId = classroomId || req.params.classroomId;
+
+  if (!targetClassId || !Array.isArray(rollSuffixes) || rollSuffixes.length === 0) {
+    return next(new AppError('Classroom ID and rollSuffixes array are required!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: targetClassId, isActive: true }).populate('teacher', 'name email personalNotificationEmail');
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const targetRollNos = rollSuffixes.map(item => {
+    const cleanStr = item.toString().trim().toUpperCase();
+    if (cleanStr.startsWith(classroom.sectionPrefix)) return cleanStr;
+    const digits = cleanStr.replace(/\D/g, '').padStart(3, '0');
+    return `${classroom.sectionPrefix}${digits}`;
+  });
+
+  const matchingStudents = await User.find({ role: 'STUDENT', rollNo: { $in: targetRollNos } });
+  const enrolledSet = new Set(classroom.students.map((id) => id.toString()));
+  const newStudents = [];
+
+  for (const student of matchingStudents) {
+    if (classroom.students.length >= classroom.maxCapacity) break;
+    const studentIdStr = student._id.toString();
+    if (!enrolledSet.has(studentIdStr)) {
+      classroom.students.push(student._id);
+      enrolledSet.add(studentIdStr);
+      newStudents.push(student);
+    }
+  }
+
+  await classroom.save();
+  await classroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
+
+  if (newStudents.length > 0) {
+    const markPromises = newStudents.map((student) => {
+      return Mark.findOneAndUpdate(
+        { classroom: targetClassId, student: student._id },
+        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { upsert: true, returnDocument: 'after' }
+      );
+    });
+    await Promise.all(markPromises);
+
+    await Promise.all(
+      newStudents.map(async (student) => {
+        const studentEmail = student.personalNotificationEmail || student.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          await sendStyledEmail({
+            to: studentEmail,
+            subject: `Enrolled in ${classroom.className}`,
+            title: `Course Enrollment: ${classroom.className}`,
+            bodyText: `You have been officially enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
+            details: [
+              { label: 'Credit Hours', value: classroom.creditHours },
+              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
+            ]
+          });
+        }
+      })
+    );
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Successfully added ${newStudents.length} students via suffix list!`,
+    data: { classroom, addedCount: newStudents.length },
+  });
+});
+
+// FEATURE 2: Range-based Auto Enrollment (1 to classLimit)
 exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
   const { classroomId, startRoll, endRoll } = req.body;
   const targetClassId = classroomId || req.params.classroomId;
@@ -922,6 +1065,7 @@ exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
   });
 });
 
+// FEATURE 3 & Add-Drop Seniors List Support
 exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
   const { classroomId, rollNumbers } = req.body;
   const targetClassId = classroomId || req.params.classroomId;
@@ -1019,7 +1163,7 @@ exports.getClassroomMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS (Targeted Notification Fix)
+// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS
 // =============================================================================
 exports.updateStudentMarks = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
@@ -1079,7 +1223,6 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
 
   await markRecord.save();
 
-  // 🎯 TARGETED NOTIFICATION: Email ONLY the specific student whose marks were touched
   const studentEmail = student.personalNotificationEmail || student.email;
   if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     try {
@@ -1179,7 +1322,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 19. GET AUTO-DETECTABLE AVAILABLE STUDENTS (Matching Section Prefix)
+// 19. FEATURE 4: GET AUTO-DETECTABLE AVAILABLE STUDENTS WITH NAMES & ENROLLMENT FILTER
 // =============================================================================
 exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1220,7 +1363,7 @@ exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS
+// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS (Feature 4 - Add All or Individual)
 // =============================================================================
 exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;

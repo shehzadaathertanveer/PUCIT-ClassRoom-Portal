@@ -76,7 +76,7 @@ const LabroomDetail = () => {
   const [teacherLookupResult, setTeacherLookupResult] = useState(null);
   const [teacherSearching, setTeacherSearching] = useState(false);
 
-  // Advanced Add Student Modal
+  // Advanced Add Student Modal (Improved Unified Multi-Mode State)
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
   const [addModeType, setAddModeType] = useState('single');
   const [studentRollInput, setStudentRollInput] = useState('');
@@ -1486,12 +1486,12 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Add Student Modal (Advanced Auto-Detect & Bulk Controllers) */}
+      {/* 4. Advanced Add Student Modal (Improved Unified Multi-Mode State) */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (Auto-Detect / Bulk)</h3>
+              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students</h3>
               <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
@@ -1515,7 +1515,7 @@ const LabroomDetail = () => {
                     className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-blue-400" 
                   />
                   <p className="text-[10px] text-slate-500 leading-tight">
-                    The backend will automatically detect whether this user exists, link them, or provision a placeholder record.
+                    Automatically detects user accounts or provisions placeholders if they haven't signed up yet.
                   </p>
                 </div>
               )}
@@ -1533,7 +1533,7 @@ const LabroomDetail = () => {
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-500">
-                    Will automatically prefix using lab section setup (<span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>).
+                    Will auto-prefix with section setup (<span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>).
                   </p>
                 </div>
               )}
@@ -1722,7 +1722,7 @@ const LabroomDetail = () => {
       {/* 10. Focused Photo-Only Modal */}
       {selectedActivityItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/50 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">
+          <div className="w-full max-w-md bg-[#130910] border border-blue-500/55 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 className="text-xs font-bold text-blue-400 uppercase font-mono">{selectedActivityItem.item.title} — Uploaded Photo</h3>
               <button onClick={() => setSelectedActivityItem(null)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>

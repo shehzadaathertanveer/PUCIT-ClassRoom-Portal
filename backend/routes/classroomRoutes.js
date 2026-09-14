@@ -19,8 +19,9 @@ router.post('/create', restrictTo('TEACHER', 'ADMIN'), classroomController.creat
 
 // Static body-based management & bulk enrollment routes
 router.post('/add-student-by-roll', restrictToClassStaff, classroomController.addStudentByRollNo);
-router.post('/add-bulk-range', restrictToClassStaff, classroomController.addBulkStudentsByRange);
-router.post('/add-drop-seniors', restrictToClassStaff, classroomController.addDropSeniorsList);
+router.post('/add-students-by-suffix', restrictToClassStaff, classroomController.addStudentsBySuffixRolls); // Feature 1: Quick suffix entry
+router.post('/add-bulk-range', restrictToClassStaff, classroomController.addBulkStudentsByRange); // Feature 2: Range enrollment
+router.post('/add-drop-seniors', restrictToClassStaff, classroomController.addDropSeniorsList); // Feature 3: Add/Drop list
 router.post('/set-roster', restrictToClassStaff, classroomController.setClassroomRoster);
 router.post('/add-student', restrictToClassStaff, classroomController.addStudentToClassroom);
 router.patch('/update-tas', restrictToClassStaff, classroomController.updateClassroomTAs);
@@ -33,7 +34,13 @@ router.patch('/assign-teacher', restrictTo('ADMIN'), classroomController.assignT
 // Classroom Settings Update (Name, Prefix, Capacity, Placeholder Teacher Name, Weights)
 router.patch('/:classroomId/settings', restrictToClassStaff, classroomController.updateClassroomSettings);
 
-// Auto-Detect Available Students (Matching Section Prefix / Freshers)
+// Feature 3: Lookup Student Details for Frontend Double-Confirmation / Add-Drop
+router.post('/:classroomId/lookup-student', restrictToClassStaff, classroomController.lookupStudentForAddDrop);
+
+// Feature 1 & 4 Path-based alternatives for classroom context
+router.post('/:classroomId/add-students-by-suffix', restrictToClassStaff, classroomController.addStudentsBySuffixRolls);
+
+// Feature 4: Auto-Detect Available Students (Matching Section Prefix / Freshers)
 router.get('/:classroomId/available-students', restrictToClassStaff, classroomController.getAvailableStudentsByPrefix);
 router.post('/:classroomId/bulk-approve-students', restrictToClassStaff, classroomController.bulkApproveAvailableStudents);
 

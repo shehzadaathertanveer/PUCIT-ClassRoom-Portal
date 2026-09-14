@@ -484,7 +484,68 @@ exports.hardDeleteLabroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10. ADD STUDENT BY ROLL NUMBER / REGISTRATION NUMBER
+// 10. FEATURE 3: LOOKUP STUDENT DETAILS FOR FRONTEND DOUBLE-CONFIRMATION & ADD-DROP
+// =============================================================================
+exports.lookupLabStudentForAddDrop = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const { rollInput } = req.body;
+
+  if (!rollInput) {
+    return next(new AppError('Roll number or registration identifier is required!', 400));
+  }
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const cleanInput = rollInput.trim().toUpperCase();
+  let targetRollNo = cleanInput;
+
+  if (!cleanInput.startsWith(labroom.sectionPrefix) && !cleanInput.includes('FRESHER_')) {
+    const digitsOnly = cleanInput.replace(/\D/g, '');
+    if (digitsOnly) {
+      targetRollNo = `${labroom.sectionPrefix}${digitsOnly.padStart(3, '0')}`;
+    }
+  }
+
+  const student = await User.findOne({
+    role: 'STUDENT',
+    $or: [
+      { rollNo: targetRollNo },
+      { rollNo: cleanInput },
+      { registrationNo: rollInput.trim() }
+    ]
+  }).select('name rollNo registrationNo email personalNotificationEmail');
+
+  if (!student) {
+    return res.status(404).json({
+      status: 'fail',
+      message: `No student record found matching identifier: ${rollInput}`
+    });
+  }
+
+  const isPrefixMatch = student.rollNo && student.rollNo.toUpperCase().startsWith(labroom.sectionPrefix.toUpperCase());
+  const isAlreadyEnrolled = labroom.students.some(id => id.toString() === student._id.toString());
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      student: {
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        registrationNo: student.registrationNo || 'N/A',
+        email: student.email,
+        personalNotificationEmail: student.personalNotificationEmail,
+        isPrefixMatch,
+        isAddDrop: !isPrefixMatch,
+        isAlreadyEnrolled
+      }
+    }
+  });
+});
+
+// =============================================================================
+// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX (Feature 1 & Feature 3)
 // =============================================================================
 exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
   const { labroomId, rollInput } = req.body;
@@ -508,7 +569,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   const student = await User.findOne({ 
     role: 'STUDENT', 
-    $or: [{ rollNo: targetRollNo }, { registrationNo: rollInput.trim() }] 
+    $or: [{ rollNo: targetRollNo }, { rollNo: cleanInput }, { registrationNo: rollInput.trim() }] 
   });
 
   if (!student) {
@@ -555,7 +616,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 11. AUTO-DETECTABLE AVAILABLE STUDENTS (Matching Section Prefix)
+// 11. FEATURE 4: AUTO-DETECTABLE AVAILABLE STUDENTS WITH NAMES & ENROLLMENT FILTER
 // =============================================================================
 exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -596,7 +657,7 @@ exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. BULK APPROVE / ADD AUTO-DETECTED LAB STUDENTS
+// 12. FEATURE 4: BULK APPROVE / ADD AUTO-DETECTED LAB STUDENTS (Add All or Individual)
 // =============================================================================
 exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -668,7 +729,81 @@ exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 13. BULK RANGE ENROLLMENT (Roll Number to Roll Number)
+// 13. FEATURE 1: QUICK SUFFIX ROLL NUMBERS ENTRY (e.g. 3, 53, 23)
+// =============================================================================
+exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
+  const { labroomId, rollSuffixes } = req.body;
+  const targetLabId = labroomId || req.params.labroomId;
+
+  if (!targetLabId || !Array.isArray(rollSuffixes) || rollSuffixes.length === 0) {
+    return next(new AppError('Labroom ID and rollSuffixes array are required!', 400));
+  }
+
+  const labroom = await Labroom.findById(targetLabId).populate('teacher', 'name email personalNotificationEmail');
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const targetRollNos = rollSuffixes.map(item => {
+    const cleanStr = item.toString().trim().toUpperCase();
+    if (cleanStr.startsWith(labroom.sectionPrefix)) return cleanStr;
+    const digits = cleanStr.replace(/\D/g, '').padStart(3, '0');
+    return `${labroom.sectionPrefix}${digits}`;
+  });
+
+  const matchingStudents = await User.find({ role: 'STUDENT', rollNo: { $in: targetRollNos } });
+  const enrolledSet = new Set(labroom.students.map((id) => id.toString()));
+  const newStudents = [];
+
+  for (const student of matchingStudents) {
+    if (labroom.students.length >= labroom.maxCapacity) break;
+    const studentIdStr = student._id.toString();
+    if (!enrolledSet.has(studentIdStr)) {
+      labroom.students.push(student._id);
+      enrolledSet.add(studentIdStr);
+      newStudents.push(student);
+    }
+  }
+
+  await labroom.save();
+  await labroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
+
+  if (newStudents.length > 0) {
+    const markPromises = newStudents.map((student) => {
+      return LabMark.findOneAndUpdate(
+        { labroom: targetLabId, student: student._id },
+        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+        { upsert: true, returnDocument: 'after' }
+      );
+    });
+    await Promise.all(markPromises);
+
+    await Promise.all(
+      newStudents.map(async (student) => {
+        const studentEmail = student.personalNotificationEmail || student.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          await sendStyledEmail({
+            to: studentEmail,
+            subject: `Enrolled in ${labroom.labName}`,
+            title: `Lab Enrollment: ${labroom.labName}`,
+            bodyText: `You have been officially enrolled in lab <strong>${labroom.labName} (${labroom.sectionPrefix})</strong>.`,
+            details: [
+              { label: 'Credit Hours', value: labroom.creditHours },
+              { label: 'Instructor', value: labroom.teacher?.name || labroom.placeholderTeacherName }
+            ]
+          });
+        }
+      })
+    );
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Successfully added ${newStudents.length} students via suffix list!`,
+    data: { labroom, addedCount: newStudents.length },
+  });
+});
+
+// =============================================================================
+// 13 (Extended). FEATURE 2: BULK RANGE ENROLLMENT (1 to classLimit)
 // =============================================================================
 exports.addBulkLabStudentsByRange = catchAsync(async (req, res, next) => {
   const { labroomId, startRoll, endRoll } = req.body;

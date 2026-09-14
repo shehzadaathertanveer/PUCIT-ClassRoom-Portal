@@ -76,13 +76,27 @@ const ClassroomDetail = () => {
   const [teacherLookupResult, setTeacherLookupResult] = useState(null);
   const [teacherSearching, setTeacherSearching] = useState(false);
 
-  // Advanced Add Student Modal
+  // Advanced Add Student Modal (4 Enrollment Pathways)
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
-  const [addModeType, setAddModeType] = useState('single');
-  const [studentRollInput, setStudentRollInput] = useState('');
+  const [addModeType, setAddModeType] = useState('suffix'); // 'suffix', 'range', 'addDrop', 'autoDetect'
+  
+  // Pathway 1: Quick Suffix Roll Numbers
+  const [suffixInput, setSuffixInput] = useState('');
+  
+  // Pathway 2: Range-based Auto Enrollment
   const [bulkStart, setBulkStart] = useState('');
   const [bulkEnd, setBulkEnd] = useState('');
+  
+  // Pathway 3: Add/Drop Seniors List with Double-Confirmation Lookup
   const [addDropInput, setAddDropInput] = useState('');
+  const [lookupTargetStudent, setLookupTargetStudent] = useState(null);
+  const [lookingUpStudent, setLookingUpStudent] = useState(false);
+
+  // Pathway 4: Smart Auto-Detect Available Students (Prefix Match)
+  const [availableAutoStudents, setAvailableAutoStudents] = useState([]);
+  const [loadingAutoStudents, setLoadingAutoStudents] = useState(false);
+  const [selectedAutoStudentIds, setSelectedAutoStudentIds] = useState([]);
+
   const [addingStudent, setAddingStudent] = useState(false);
   const [addStudentError, setAddStudentError] = useState('');
 
@@ -190,9 +204,29 @@ const ClassroomDetail = () => {
     }
   };
 
+  // Fetch Pathway 4 Auto-Detect Available Students
+  const fetchAvailableAutoStudents = async () => {
+    try {
+      setLoadingAutoStudents(true);
+      const res = await API.get(`/classrooms/${classroomId}/available-students`);
+      const students = res.data?.data?.students || [];
+      setAvailableAutoStudents(students);
+    } catch (err) {
+      console.warn('Failed to fetch auto-detect students:', err);
+    } finally {
+      setLoadingAutoStudents(false);
+    }
+  };
+
   useEffect(() => {
     if (classroomId && user?._id) fetchClassroomData();
   }, [classroomId, user?._id]);
+
+  useEffect(() => {
+    if (isAddStudentModalOpen && addModeType === 'autoDetect') {
+      fetchAvailableAutoStudents();
+    }
+  }, [isAddStudentModalOpen, addModeType]);
 
   const isClassTeacher = (classroom?.teacher?._id || classroom?.teacher)?.toString() === user?._id?.toString();
   const isAssignedTa = (classroom?.tas || []).some(
@@ -461,39 +495,64 @@ const ClassroomDetail = () => {
     }
   };
 
+  // Handler for Feature 3: Lookup Student for Double-Confirmation before Add/Drop
+  const handleLookupStudentForAddDrop = async (e) => {
+    e.preventDefault();
+    if (!addDropInput.trim()) return;
+
+    setLookingUpStudent(true);
+    setLookupTargetStudent(null);
+    setAddStudentError('');
+
+    try {
+      const res = await API.post(`/classrooms/${classroomId}/lookup-student`, { rollInput: addDropInput.trim() });
+      setLookupTargetStudent(res.data?.data?.student || res.data?.student);
+    } catch (err) {
+      setAddStudentError(err.response?.data?.message || 'Student record not found.');
+    } finally {
+      setLookingUpStudent(false);
+    }
+  };
+
+  // Enroller handler supporting all 4 pathways
   const handleAddStudentSubmit = async (e) => {
     e.preventDefault();
     setAddingStudent(true);
     setAddStudentError('');
 
     try {
-      if (addModeType === 'single') {
-        let rawInput = studentRollInput.trim();
-        if (/^\d+$/.test(rawInput) && classroom?.sectionPrefix) {
-          const paddedNum = rawInput.padStart(3, '0');
-          rawInput = classroom.sectionPrefix.trim().toUpperCase() + paddedNum;
-        }
-
-        await API.post(`/classrooms/add-student-by-roll`, { classroomId, rollInput: rawInput });
-        showToast('Student enrolled successfully!');
-      } else if (addModeType === 'bulkRange') {
+      if (addModeType === 'suffix') {
+        // Pathway 1: Quick Suffix Roll Numbers Entry (e.g. 3, 53, 23)
+        const suffixes = suffixInput.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+        if (suffixes.length === 0) throw new Error('Please enter at least one roll number suffix.');
+        await API.post(`/classrooms/${classroomId}/add-students-by-suffix`, { rollSuffixes: suffixes });
+        showToast(`Successfully enrolled ${suffixes.length} students via suffix list!`);
+      } else if (addModeType === 'range') {
+        // Pathway 2: Range-based Auto Enrollment (1 to classLimit)
         const start = parseInt(bulkStart, 10);
         const end = parseInt(bulkEnd, 10);
         if (isNaN(start) || isNaN(end) || start > end) throw new Error('Please specify a valid numeric range.');
         await API.post(`/classrooms/add-bulk-range`, { classroomId, startRoll: start, endRoll: end });
         showToast(`Bulk range from ${start} to ${end} enrolled!`);
       } else if (addModeType === 'addDrop') {
-        const rolls = addDropInput.split(/[\n,]+/).map(r => r.trim()).filter(Boolean);
-        if (rolls.length === 0) throw new Error('Please enter at least one valid roll number.');
-        await API.post(`/classrooms/add-drop-seniors`, { classroomId, rollNumbers: rolls });
-        showToast(`Successfully enrolled ${rolls.length} students!`);
+        // Pathway 3: Add/Drop Seniors List with Double-Confirmation
+        if (!lookupTargetStudent) throw new Error('Please lookup and verify the student first.');
+        await API.post(`/classrooms/add-student-by-roll`, { classroomId, rollInput: lookupTargetStudent.rollNo || addDropInput.trim() });
+        showToast(`Student ${lookupTargetStudent.name} enrolled successfully!`);
+      } else if (addModeType === 'autoDetect') {
+        // Pathway 4: Smart Prefix Auto-Detect & Bulk Approve
+        if (selectedAutoStudentIds.length === 0) throw new Error('Please select at least one student to approve.');
+        await API.post(`/classrooms/${classroomId}/bulk-approve-students`, { studentIds: selectedAutoStudentIds });
+        showToast(`Successfully approved and added ${selectedAutoStudentIds.length} students!`);
       }
 
       setIsAddStudentModalOpen(false);
-      setStudentRollInput('');
+      setSuffixInput('');
       setBulkStart('');
       setBulkEnd('');
       setAddDropInput('');
+      setLookupTargetStudent(null);
+      setSelectedAutoStudentIds([]);
       fetchClassroomData();
     } catch (err) {
       setAddStudentError(err.response?.data?.message || err.message || 'Failed to process enrollment.');
@@ -1314,7 +1373,7 @@ const ClassroomDetail = () => {
                               {hasPhoto && (
                                 <button 
                                   onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
-                                  className="px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                  className="px-3 py-1.5 bg-orange-500/25 hover:bg-orange-500/35 text-orange-300 border border-orange-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                 >
                                   <span>📷</span> View Photo
                                 </button>
@@ -1511,77 +1570,168 @@ const ClassroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Add Student Modal (Fully Wired with Auto-Detect & Bulk Controllers) */}
+      {/* 4. Advanced Add Student Modal (Supports all 4 Enrollment Pathways) */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
+          <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (Auto-Detect / Bulk)</h3>
-              <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (4 Pathways)</h3>
+              <button onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
             
-            <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => setAddModeType('single')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'single' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Auto-Detect</button>
-              <button type="button" onClick={() => setAddModeType('bulkRange')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'bulkRange' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Range</button>
-              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Batch CSV</button>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" onClick={() => setAddModeType('suffix')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'suffix' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Suffix List</button>
+              <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'range' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
+              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Add/Drop</button>
+              <button type="button" onClick={() => setAddModeType('autoDetect')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'autoDetect' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Detect</button>
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
-              {addModeType === 'single' && (
+              {/* Pathway 1: Quick Suffix Roll Numbers Entry */}
+              {addModeType === 'suffix' && (
                 <div className="space-y-2">
-                  <label className="block text-xs font-bold uppercase text-slate-400">Roll Number or Official Email</label>
-                  <input 
-                    type="text" 
+                  <label className="block text-xs font-bold uppercase text-slate-400">Roll Number Suffixes (Comma or Newline Separated)</label>
+                  <textarea 
+                    rows="3" 
                     required 
-                    placeholder="e.g. BITF26A047 or bitf26a047@pucit.edu.pk" 
-                    value={studentRollInput} 
-                    onChange={(e) => setStudentRollInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-orange-400" 
+                    placeholder="3, 53, 23, 104" 
+                    value={suffixInput} 
+                    onChange={(e) => setSuffixInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-orange-400" 
                   />
-                  <p className="text-[10px] text-slate-500 leading-tight">
-                    The backend will automatically detect whether this user exists, link them, or provision a placeholder record.
+                  <p className="text-[10px] text-slate-500">
+                    Automatically prepends course prefix (<span className="font-mono text-orange-400">{classroom?.sectionPrefix}</span>) to short numbers.
                   </p>
                 </div>
               )}
 
-              {addModeType === 'bulkRange' && (
+              {/* Pathway 2: Range-based Auto Enrollment */}
+              {addModeType === 'range' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Roll #</label>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Suffix #</label>
                       <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Roll #</label>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Suffix #</label>
                       <input type="number" required placeholder="50" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-500">
-                    Will automatically auto-prefix using class section setup (<span className="font-mono text-orange-400">{classroom?.sectionPrefix}</span>).
+                    Range iterates from start to end with prefix <span className="font-mono text-orange-400">{classroom?.sectionPrefix}</span>.
                   </p>
                 </div>
               )}
 
+              {/* Pathway 3: Add/Drop Seniors List with Double-Confirmation */}
               {addModeType === 'addDrop' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma or Newline Separated)</label>
-                  <textarea 
-                    rows="4" 
-                    required 
-                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
-                    value={addDropInput} 
-                    onChange={(e) => setAddDropInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-orange-400" 
-                  />
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase text-slate-400">Full Roll Number or Registration No</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="e.g. BSITF23M025 or 2023123" 
+                        value={addDropInput} 
+                        onChange={(e) => { setAddDropInput(e.target.value); setLookupTargetStudent(null); }} 
+                        className="flex-1 px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={handleLookupStudentForAddDrop} 
+                        disabled={lookingUpStudent || !addDropInput.trim()}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/40 rounded-xl text-xs font-bold uppercase cursor-pointer disabled:opacity-50"
+                      >
+                        {lookingUpStudent ? 'Searching...' : 'Lookup'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {lookupTargetStudent && (
+                    <div className="bg-[#080507] border border-emerald-500/40 p-4 rounded-2xl space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Student Name:</span>
+                        <strong className="text-white">{lookupTargetStudent.name}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Roll / Reg No:</span>
+                        <strong className="font-mono text-orange-400">{lookupTargetStudent.rollNo}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Status:</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${lookupTargetStudent.isAlreadyEnrolled ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-300'}`}>
+                          {lookupTargetStudent.isAlreadyEnrolled ? 'Already Enrolled' : lookupTargetStudent.isAddDrop ? 'Add/Drop Senior' : 'Regular Prefix Match'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Pathway 4: Smart Auto-Detect & Bulk Select */}
+              {addModeType === 'autoDetect' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase text-slate-400">Matching Prefix Students ({availableAutoStudents.length})</label>
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedAutoStudentIds(availableAutoStudents.filter(s => !s.isAlreadyEnrolled).map(s => s._id))}
+                      className="text-[10px] text-orange-400 underline font-bold cursor-pointer"
+                    >
+                      Select All Unenrolled
+                    </button>
+                  </div>
+                  
+                  <div className="max-h-48 overflow-y-auto space-y-2 bg-[#080507] p-2 rounded-2xl border border-slate-800">
+                    {loadingAutoStudents ? (
+                      <p className="text-center text-xs text-slate-500 py-4">Scanning database for matching students...</p>
+                    ) : availableAutoStudents.length === 0 ? (
+                      <p className="text-center text-xs text-slate-500 py-4 italic">No matching students found for prefix {classroom?.sectionPrefix}.</p>
+                    ) : (
+                      availableAutoStudents.map(student => (
+                        <label key={student._id} className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                          student.isAlreadyEnrolled ? 'bg-slate-900/40 border-slate-800 opacity-60' : 'bg-[#130910] border-slate-800 hover:border-orange-500/40'
+                        }`}>
+                          <div className="flex items-center gap-2.5 truncate">
+                            <input 
+                              type="checkbox" 
+                              disabled={student.isAlreadyEnrolled}
+                              checked={selectedAutoStudentIds.includes(student._id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedAutoStudentIds([...selectedAutoStudentIds, student._id]);
+                                } else {
+                                  setSelectedAutoStudentIds(selectedAutoStudentIds.filter(id => id !== student._id));
+                                }
+                              }}
+                              className="rounded accent-orange-500"
+                            />
+                            <div className="truncate">
+                              <p className="text-white font-bold truncate">{student.name}</p>
+                              <p className="font-mono text-[10px] text-orange-400">{student.rollNo}</p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${student.isAlreadyEnrolled ? 'bg-slate-800 text-slate-400' : 'bg-emerald-950 text-emerald-300'}`}>
+                            {student.isAlreadyEnrolled ? 'Enrolled' : 'Available'}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setIsAddStudentModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" disabled={addingStudent} className="w-1/2 py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
-                  {addingStudent ? 'Processing...' : 'Enroll Students'}
+                <button 
+                  type="submit" 
+                  disabled={addingStudent || (addModeType === 'addDrop' && !lookupTargetStudent)} 
+                  className="w-1/2 py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {addingStudent ? 'Processing...' : 'Confirm Enrollment'}
                 </button>
               </div>
             </form>

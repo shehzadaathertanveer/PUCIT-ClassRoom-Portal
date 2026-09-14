@@ -21,11 +21,12 @@ router
   );
 
 // =============================================================================
-// ROSTER & ENROLLMENT MANAGEMENT ROUTES 
+// ROSTER & ENROLLMENT MANAGEMENT ROUTES (Static Global & Specific Paths)
 // =============================================================================
 router.post('/add-student-by-roll', restrictToLabStaff, labController.addStudentByRollNo);
-router.post('/add-bulk-range', restrictToLabStaff, labController.addBulkLabStudentsByRange);
-router.post('/add-drop-seniors', restrictToLabStaff, labController.addDropLabSeniorsList);
+router.post('/add-students-by-suffix', restrictToLabStaff, labController.addStudentsBySuffixRolls); // Feature 1
+router.post('/add-bulk-range', restrictToLabStaff, labController.addBulkLabStudentsByRange); // Feature 2
+router.post('/add-drop-seniors', restrictToLabStaff, labController.addDropLabSeniorsList); // Feature 3
 
 router
   .route('/:labroomId/roster')
@@ -42,6 +43,20 @@ router
   );
 
 router
+  .route('/:labroomId/add-students-by-suffix')
+  .post(
+    restrictToLabStaff,
+    labController.addStudentsBySuffixRolls
+  );
+
+router
+  .route('/:labroomId/lookup-student')
+  .post(
+    restrictToLabStaff,
+    labController.lookupLabStudentForAddDrop
+  ); // Feature 3: Double confirmation lookup
+
+router
   .route('/:labroomId/add-bulk-range')
   .post(
     restrictToLabStaff,
@@ -56,7 +71,7 @@ router
   );
 
 // =============================================================================
-// AUTO-DETECT & BULK APPROVE AVAILABLE FRESHERS/STUDENTS
+// AUTO-DETECT & BULK APPROVE AVAILABLE FRESHERS/STUDENTS (Feature 4)
 // =============================================================================
 router
   .route('/:labroomId/available-students')
