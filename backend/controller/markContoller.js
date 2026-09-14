@@ -96,7 +96,7 @@ const parseCloudinaryFile = (item = {}) => {
 };
 
 // =============================================================================
-// 1. GET BULK SHEET FOR ADDING MARKS
+// 1. GET BULK SHEET FOR ADDING MARKS (FIXED TO INCLUDE CUSTOM ACTIVITIES)
 // =============================================================================
 exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -153,7 +153,7 @@ exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
         finals: classroom.finals,
         finalProject: classroom.finalProject,
         sessionalActivities: classroom.sessionalActivities,
-        customActivities: classroom.customActivities || []
+        customActivities: classroom.customActivities || [] // <--- CRITICAL FIX INCLUDED
       },
       students: sortedStudents,
       existingMarks,

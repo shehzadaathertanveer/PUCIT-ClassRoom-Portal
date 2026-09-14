@@ -828,6 +828,24 @@ const ClassroomDetail = () => {
     return { obtained, total };
   };
 
+  // Helper to compute category percentages safely from marksDoc for student/rankings
+  const computeCategoryPercentage = (marksDoc, catKey) => {
+    if (!marksDoc) return 0;
+    let obt = 0;
+    let tot = 0;
+    const items = marksDoc[catKey] || [];
+    if (Array.isArray(items)) {
+      items.forEach(item => {
+        if (!item.isAbsent) obt += Number(item.obtainedMarks || 0);
+        tot += Number(item.totalMarks || 0);
+      });
+    } else if (items && typeof items === 'object' && items.totalMarks > 0) {
+      if (!items.isAbsent) obt += Number(items.obtainedMarks || 0);
+      tot += Number(items.totalMarks || 0);
+    }
+    return tot > 0 ? (obt / tot) * 100 : 0;
+  };
+
   const getStudentAnalyticsData = () => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0 || !user?._id) {
@@ -857,13 +875,15 @@ const ClassroomDetail = () => {
       };
     }
 
+    const marksDoc = found.marksDoc || found;
+
     return {
       overall: Number(found.overallPercentage || 0).toFixed(2),
       sessional: Number(found.sessionalPercentage || 0).toFixed(2),
-      quizzes: Number(found.quizPercentage || 0).toFixed(2),
-      assignments: Number(found.assignmentPercentage || 0).toFixed(2),
-      mids: Number(found.midsPercentage || 0).toFixed(2),
-      finals: Number(found.finalsPercentage || 0).toFixed(2)
+      quizzes: Number(computeCategoryPercentage(marksDoc, 'quizzes')).toFixed(2),
+      assignments: Number(computeCategoryPercentage(marksDoc, 'assignments')).toFixed(2),
+      mids: Number(computeCategoryPercentage(marksDoc, 'mids')).toFixed(2),
+      finals: Number(computeCategoryPercentage(marksDoc, 'finals')).toFixed(2)
     };
   };
 
@@ -871,7 +891,14 @@ const ClassroomDetail = () => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return [];
 
-    return [...rankings].sort((a, b) => {
+    return [...rankings].map(r => {
+      const marksDoc = r.marksDoc || r;
+      return {
+        ...r,
+        computedQuizPct: computeCategoryPercentage(marksDoc, 'quizzes'),
+        computedAssignmentPct: computeCategoryPercentage(marksDoc, 'assignments')
+      };
+    }).sort((a, b) => {
       let scoreA = 0;
       let scoreB = 0;
 
@@ -882,11 +909,11 @@ const ClassroomDetail = () => {
         scoreA = a.sessionalPercentage || 0;
         scoreB = b.sessionalPercentage || 0;
       } else if (leaderboardFilter === 'quizzes') {
-        scoreA = a.quizPercentage || 0;
-        scoreB = b.quizPercentage || 0;
+        scoreA = a.computedQuizPct || 0;
+        scoreB = b.computedQuizPct || 0;
       } else if (leaderboardFilter === 'assignments') {
-        scoreA = a.assignmentPercentage || 0;
-        scoreB = b.assignmentPercentage || 0;
+        scoreA = a.computedAssignmentPct || 0;
+        scoreB = b.computedAssignmentPct || 0;
       } else if (leaderboardFilter === 'mids') {
         scoreA = a.midsPercentage || 0;
         scoreB = b.midsPercentage || 0;
@@ -1259,8 +1286,8 @@ const ClassroomDetail = () => {
 
                       let currentScore = entry.overallPercentage || 0;
                       if (leaderboardFilter === 'sessionals') currentScore = entry.sessionalPercentage || 0;
-                      if (leaderboardFilter === 'quizzes') currentScore = entry.quizPercentage || 0;
-                      if (leaderboardFilter === 'assignments') currentScore = entry.assignmentPercentage || 0;
+                      if (leaderboardFilter === 'quizzes') currentScore = entry.computedQuizPct || 0;
+                      if (leaderboardFilter === 'assignments') currentScore = entry.computedAssignmentPct || 0;
                       if (leaderboardFilter === 'mids') currentScore = entry.midsPercentage || 0;
                       if (leaderboardFilter === 'finals') currentScore = entry.finalsPercentage || 0;
 

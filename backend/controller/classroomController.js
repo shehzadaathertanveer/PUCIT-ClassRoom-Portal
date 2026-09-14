@@ -702,7 +702,7 @@ exports.getClassroomComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. CREATE & DELETE GRADED ITEM
+// 12. CREATE & DELETE GRADED ITEM (FIXED SYNCHRONIZATION)
 // =============================================================================
 exports.createGradedItem = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -717,20 +717,29 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
 
   const rawCat = category || type || '';
   const targetKey = getNormalizedTargetKey(rawCat);
+  const cleanTitle = (title || '').trim();
+  const parsedTotal = Number(totalMarks) || 10;
+
+  if (!cleanTitle) {
+    return next(new AppError('A valid item title is required.', 400));
+  }
 
   if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-    if (classroom[targetKey] && classroom[targetKey].totalMarks > 0) {
-      return next(new AppError(`Only one ${targetKey} entry is allowed per classroom.`, 400));
+    classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal };
+  } else {
+    if (!Array.isArray(classroom[targetKey])) classroom[targetKey] = [];
+    const existsIndex = classroom[targetKey].findIndex(
+      (item) => item.title && item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
+    );
+    if (existsIndex > -1) {
+      classroom[targetKey][existsIndex].totalMarks = parsedTotal;
+    } else {
+      classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
     }
   }
+  await classroom.save();
 
-  if (!classroom[targetKey]) {
-    classroom[targetKey] = ['mids', 'finals', 'finalProject'].includes(targetKey) ? {} : [];
-  }
-
-  const cleanTitle = title.trim();
-  
-  let targetStudents = classroom.students;
+  let targetStudents = classroom.students || [];
   const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
 
   if (hasRange && !['mids', 'finals', 'finalProject'].includes(targetKey)) {
@@ -741,44 +750,49 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
       return next(new AppError('Invalid student range specified for marksheet creation.', 400));
     }
 
-    const sortedStudents = [...classroom.students].sort((a, b) => {
+    const sortedStudents = [...targetStudents].sort((a, b) => {
       const rollA = (a.rollNo || '').toLowerCase();
       const rollB = (b.rollNo || '').toLowerCase();
       return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
     });
 
     targetStudents = sortedStudents.slice(startIdx, endIdx);
-    if (targetStudents.length === 0) {
-      return next(new AppError('No students found within the specified range.', 400));
-    }
   }
-
-  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-    classroom[targetKey] = { title: cleanTitle, totalMarks: Number(totalMarks) };
-  } else {
-    const existsGlobally = classroom[targetKey].some(
-      (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
-    );
-    if (!existsGlobally) {
-      classroom[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks) });
-    }
-  }
-  await classroom.save();
 
   const studentIdsToInitialize = targetStudents.map(st => st._id);
   for (const studId of studentIdsToInitialize) {
     let markDoc = await Mark.findOne({ classroom: classroomId, student: studId });
     if (!markDoc) {
-      markDoc = await Mark.create({ classroom: classroomId, student: studId });
+      markDoc = new Mark({
+        classroom: classroomId,
+        student: studId,
+        quizzes: [],
+        assignments: [],
+        presentations: [],
+        projects: [],
+        homework: [],
+        classActivities: [],
+        classParticipation: [],
+        vivas: [],
+        specialMarks: [],
+        customActivities: []
+      });
     }
 
     if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-      markDoc[targetKey] = { title: cleanTitle, totalMarks: Number(totalMarks), obtainedMarks: 0, isAbsent: false };
+      if (!markDoc[targetKey]) {
+        markDoc[targetKey] = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: 0, isAbsent: false };
+      } else {
+        markDoc[targetKey].totalMarks = parsedTotal;
+        markDoc[targetKey].title = cleanTitle;
+      }
     } else {
-      if (!markDoc[targetKey]) markDoc[targetKey] = [];
-      const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-      if (itemIdx === -1) {
-        markDoc[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks), obtainedMarks: 0, isAbsent: false });
+      if (!Array.isArray(markDoc[targetKey])) markDoc[targetKey] = [];
+      const itemIdx = markDoc[targetKey].findIndex(i => i.title && i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      if (itemIdx > -1) {
+        markDoc[targetKey][itemIdx].totalMarks = parsedTotal;
+      } else {
+        markDoc[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: undefined, isAbsent: false });
       }
     }
     await markDoc.save();
@@ -1451,7 +1465,7 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS
+// 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS (SYNCHRONIZED)
 // =============================================================================
 exports.getBulkMarksSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1518,54 +1532,77 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   const cleanTitle = (title || 'Exam').trim();
   const parsedTotal = Number(totalMarks) || 10;
 
+  // 1. Ensure the item is permanently registered in the Classroom schema
   if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
     classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal };
     await classroom.save();
   } else {
-    if (!classroom[targetKey]) classroom[targetKey] = [];
-    const existingItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-    if (!existingItem) {
+    if (!Array.isArray(classroom[targetKey])) classroom[targetKey] = [];
+    const existingItem = classroom[targetKey].find(i => i.title && i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+    if (existingItem) {
+      existingItem.totalMarks = parsedTotal;
+    } else {
       classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
-      await classroom.save();
     }
+    await classroom.save();
   }
 
-  for (const entry of marksData) {
-    let markRec = await Mark.findOne({ classroom: classroomId, student: entry.studentId });
-    if (!markRec) {
-      markRec = await Mark.create({ classroom: classroomId, student: entry.studentId });
-    }
+  // 2. Persist marks across student Mark documents
+  if (Array.isArray(marksData)) {
+    for (const entry of marksData) {
+      const studentId = entry.studentId || entry.student || entry._id;
+      if (!studentId) continue;
 
-    const isAbsent = Boolean(entry.isAbsent);
-    const obtained = isAbsent ? 0 : Number(entry.obtainedMarks || 0);
-
-    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-      markRec[targetKey] = {
-        title: cleanTitle,
-        totalMarks: parsedTotal,
-        obtainedMarks: obtained,
-        isAbsent,
-        file: entry.file || null
-      };
-    } else {
-      if (!markRec[targetKey]) markRec[targetKey] = [];
-      const idx = markRec[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-      
-      const payload = {
-        title: cleanTitle,
-        totalMarks: parsedTotal,
-        obtainedMarks: obtained,
-        isAbsent,
-        file: entry.file || null
-      };
-
-      if (idx > -1) {
-        markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...payload };
-      } else {
-        markRec[targetKey].push(payload);
+      let markRec = await Mark.findOne({ classroom: classroomId, student: studentId });
+      if (!markRec) {
+        markRec = new Mark({
+          classroom: classroomId,
+          student: studentId,
+          quizzes: [],
+          assignments: [],
+          presentations: [],
+          projects: [],
+          homework: [],
+          classActivities: [],
+          classParticipation: [],
+          vivas: [],
+          specialMarks: [],
+          customActivities: []
+        });
       }
+
+      const rawVal = entry.obtainedMarks !== undefined ? String(entry.obtainedMarks).trim() : '';
+      const isAbsent = Boolean(entry.isAbsent) || rawVal.toUpperCase() === 'A';
+      const obtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+
+      if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+        markRec[targetKey] = {
+          title: cleanTitle,
+          totalMarks: parsedTotal,
+          obtainedMarks: obtained,
+          isAbsent,
+          file: entry.file || markRec[targetKey]?.file || null
+        };
+      } else {
+        if (!Array.isArray(markRec[targetKey])) markRec[targetKey] = [];
+        const idx = markRec[targetKey].findIndex(i => i.title && i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+        
+        const payload = {
+          title: cleanTitle,
+          totalMarks: parsedTotal,
+          obtainedMarks: obtained,
+          isAbsent,
+          file: entry.file || (idx > -1 ? markRec[targetKey][idx].file : null)
+        };
+
+        if (idx > -1) {
+          markRec[targetKey][idx] = payload;
+        } else {
+          markRec[targetKey].push(payload);
+        }
+      }
+      await markRec.save();
     }
-    await markRec.save();
   }
 
   res.status(200).json({
