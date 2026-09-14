@@ -1,5 +1,17 @@
 const mongoose = require('mongoose');
 
+const evaluationItemSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  totalMarks: { type: Number, required: true, min: 1 },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: true });
+
+const singleEvaluationSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true, default: 'Exam' },
+  totalMarks: { type: Number, required: true, min: 1, default: 30 },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const classroomSchema = new mongoose.Schema(
   {
     className: { 
@@ -73,7 +85,7 @@ const classroomSchema = new mongoose.Schema(
       default: [] 
     },
 
-    // NOTICE BOARD FOR ANNOUNCEMENTS (With attachment support & auto-url normalization)
+    // NOTICE BOARD FOR ANNOUNCEMENTS
     notices: [{
       title: { type: String, required: true, trim: true },
       content: { type: String, required: true, trim: true },
@@ -89,23 +101,40 @@ const classroomSchema = new mongoose.Schema(
       createdAt: { type: Date, default: Date.now }
     }],
 
-    // ANONYMOUS COMPLAINT BOX (Embedded per classroom)
+    // ANONYMOUS COMPLAINT BOX
     complaints: [{
       message: { type: String, required: true, trim: true },
       createdAt: { type: Date, default: Date.now }
     }],
 
-    // GRADED ITEMS TRACKING (Preset & Dynamic Custom Categories)
-    quizzes: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    assignments: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
+    // =========================================================================
+    // FIXED UNIVERSITY EVALUATION STRUCTURE (Strict Validation & No Dynamic Bugs)
+    // =========================================================================
+    
+    // Multiple-entry sessional activities
+    quizzes: [evaluationItemSchema],
+    assignments: [evaluationItemSchema],
+    presentations: [evaluationItemSchema],
+    projects: [evaluationItemSchema],
+    homework: [evaluationItemSchema],
+    classActivities: [evaluationItemSchema],
+    classParticipation: [evaluationItemSchema],
+    vivas: [evaluationItemSchema],
+    specialMarks: [evaluationItemSchema],
+
+    // Strictly single-entry exams & major milestones
+    mids: { 
+      type: singleEvaluationSchema, 
+      default: null 
+    },
+    finals: { 
+      type: singleEvaluationSchema, 
+      default: null 
+    },
+    finalProject: { 
+      type: singleEvaluationSchema, 
+      default: null 
+    },
 
     isActive: { 
       type: Boolean, 
@@ -119,7 +148,7 @@ const classroomSchema = new mongoose.Schema(
   },
   { 
     timestamps: true,
-    strict: false // Allows dynamic custom activity arrays & fields without stripping them
+    strict: true // Locked down tightly to prevent arbitrary schema pollution
   }
 );
 
@@ -129,7 +158,7 @@ const normalizeNoticeAttachments = (doc) => {
     doc.notices.forEach(notice => {
       if (notice.attachment && notice.attachment.url) {
         const isRaw = notice.attachment.fileType === 'raw' || 
-                      notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
+                    notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
         
         if (isRaw && notice.attachment.url.includes('/image/upload/')) {
           notice.attachment.url = notice.attachment.url.replace('/image/upload/', '/raw/upload/');
@@ -140,12 +169,12 @@ const normalizeNoticeAttachments = (doc) => {
   }
 };
 
-// Pre-save hook using async/await (No next callback required)
+// Pre-save hook using async/await
 classroomSchema.pre('save', async function () {
   normalizeNoticeAttachments(this);
 });
 
-// Post-query middleware to fix any legacy URLs returned to the client
+// Post-query middleware to fix legacy URLs returned to the client
 classroomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
   if (!docs) return;
   if (Array.isArray(docs)) {

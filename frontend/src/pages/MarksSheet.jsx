@@ -42,6 +42,28 @@ const MarksSheet = () => {
     setTimeout(() => setToastMessage(''), 2500);
   }, []);
 
+  const computeUnassignedLocally = useCallback((studs, marksList, activeTitle) => {
+    const unassigned = studs.filter(student => {
+      const studentId = student._id.toString();
+      const markDoc = marksList.find(m => (m.student?.toString() || m.student?._id?.toString()) === studentId);
+      if (!markDoc) return true;
+      
+      let list = [];
+      if (markDoc[category] && Array.isArray(markDoc[category])) {
+        list = markDoc[category];
+      } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
+        const customCat = markDoc.customActivities.find(
+          c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+        );
+        list = customCat ? customCat.items || [] : [];
+      }
+      
+      const foundMatch = list.find(e => e.title?.toLowerCase() === activeTitle?.toLowerCase());
+      return !foundMatch || (foundMatch.obtainedMarks === undefined && !foundMatch.isAbsent);
+    });
+    setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
+  }, [category]);
+
   const fetchSheetData = useCallback(async () => {
     try {
       setLoading(true);
@@ -143,29 +165,7 @@ const MarksSheet = () => {
     } finally {
       setLoading(false);
     }
-  }, [classroomId, category, itemId, itemTitle, passedTotalMarks]);
-
-  const computeUnassignedLocally = (studs, marksList, activeTitle) => {
-    const unassigned = studs.filter(student => {
-      const studentId = student._id.toString();
-      const markDoc = marksList.find(m => (m.student?.toString() || m.student?._id?.toString()) === studentId);
-      if (!markDoc) return true;
-      
-      let list = [];
-      if (markDoc[category] && Array.isArray(markDoc[category])) {
-        list = markDoc[category];
-      } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
-        const customCat = markDoc.customActivities.find(
-          c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
-        );
-        list = customCat ? customCat.items || [] : [];
-      }
-      
-      const foundMatch = list.find(e => e.title?.toLowerCase() === activeTitle?.toLowerCase());
-      return !foundMatch || (foundMatch.obtainedMarks === undefined && !foundMatch.isAbsent);
-    });
-    setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
-  };
+  }, [classroomId, category, itemId, itemTitle, passedTotalMarks, computeUnassignedLocally]);
 
   useEffect(() => {
     if (classroomId && category) {
@@ -186,11 +186,10 @@ const MarksSheet = () => {
   };
 
   const handleFileUpload = async (studentId, e) => {
-    e.preventDefault();
     const file = e.target.files[0];
     if (!file) return;
 
-    showToast('Uploading script to Cloudinary...');
+    showToast('Uploading script attachment...');
     try {
       const uploadedData = await uploadToCloudinary(file);
       setMarkInputs(prev => ({
@@ -214,7 +213,7 @@ const MarksSheet = () => {
     try {
       const resolvedTitle = (itemTitle || (itemId !== 'new' ? itemId : '')).trim();
       if (!resolvedTitle || resolvedTitle === 'general') {
-        showToast('Please provide a valid evaluation title (e.g. Lab Task 1).');
+        showToast('Please provide a valid evaluation title (e.g. Quiz 1).');
         setSaving(false);
         return;
       }
@@ -258,8 +257,7 @@ const MarksSheet = () => {
     }
   };
 
-  const handleCancelEvaluation = async (e) => {
-    e.preventDefault();
+  const handleCancelEvaluation = async () => {
     const targetTitle = itemTitle || itemId;
     if (!window.confirm(`Are you sure you want to cancel and delete "${targetTitle}" across all students? This cannot be undone.`)) {
       return;
@@ -285,8 +283,7 @@ const MarksSheet = () => {
     }
   };
 
-  const handleExportToExcel = (e) => {
-    e.preventDefault();
+  const handleExportToExcel = () => {
     try {
       let csvContent = "data:text/csv;charset=utf-8,";
       csvContent += "Roll Number,Student Name,Marks Obtained,Total Marks,Status\r\n";
@@ -334,7 +331,7 @@ const MarksSheet = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-4">
-        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3">
+        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3 shadow-xl">
           <p className="text-red-300 font-bold text-sm">Error Loading Sheet</p>
           <p className="text-xs text-slate-300">{error}</p>
           <Link to={`/classroom/${classroomId}`} className="block py-3 bg-orange-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Classroom</Link>
@@ -344,10 +341,10 @@ const MarksSheet = () => {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-orange-400 selection:text-black">
+    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-3 sm:px-6 lg:px-8 py-5 selection:bg-orange-400 selection:text-black overflow-x-hidden">
       
       {toastMessage && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
+        <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
           <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-orange-500/50 bg-[#130910]/95 text-orange-300 shadow-2xl backdrop-blur-xl">
             <span className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</span>
           </div>
@@ -355,24 +352,24 @@ const MarksSheet = () => {
       )}
 
       {/* Header */}
-      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-orange-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-          <Link to={`/classroom/${classroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
+      <header className="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#130910]/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-4 shadow-xl">
+        <div className="flex items-center justify-between sm:justify-start gap-3">
+          <Link to={`/classroom/${classroomId}`} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
             ← Back
           </Link>
           <div>
             <h1 className="text-sm sm:text-base font-black text-white uppercase">{classroom?.className}</h1>
-            <p className="text-xs text-orange-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
+            <p className="text-[11px] text-orange-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800">
           <button
             type="button"
             onClick={handleExportToExcel}
             className="px-3.5 py-2 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 text-xs font-extrabold uppercase rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
           >
-            📥 Export Excel
+            📊 Export Excel
           </button>
           <button
             type="button"
@@ -385,126 +382,128 @@ const MarksSheet = () => {
       </header>
 
       {/* Spreadsheet Main Area */}
-      <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
-        <div className="bg-[#130910]/90 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-          
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
-            <div className="w-full sm:w-1/3">
-              <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Evaluation Title</label>
-              <input 
-                type="text" 
-                value={itemTitle} 
-                onChange={(e) => setItemTitle(e.target.value)} 
-                placeholder="e.g. Lab Task 1" 
-                className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
-              />
+      <main className="relative z-10 w-full max-w-6xl mx-auto my-6 space-y-6 flex-grow">
+        <div className="space-y-4">
+          <div className="bg-[#130910]/90 border border-orange-500/25 rounded-3xl p-5 sm:p-7 shadow-xl space-y-5 backdrop-blur-2xl">
+            
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="w-full sm:w-1/3">
+                <label className="block text-xs font-bold uppercase text-orange-400 mb-1.5">Evaluation Title</label>
+                <input 
+                  type="text" 
+                  value={itemTitle} 
+                  onChange={(e) => setItemTitle(e.target.value)} 
+                  placeholder="e.g. Quiz 1" 
+                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
+                />
+              </div>
+              <div className="w-full sm:w-1/4">
+                <label className="block text-xs font-bold uppercase text-orange-400 mb-1.5">Total Marks</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  required
+                  value={totalMarks} 
+                  onChange={(e) => setTotalMarks(e.target.value)} 
+                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
+                />
+              </div>
+              <div className="w-full sm:w-auto flex items-center gap-2 pt-2 sm:pt-0">
+                <button 
+                  type="button"
+                  onClick={handleCancelEvaluation}
+                  disabled={deleting}
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleSubmitBatch}
+                  disabled={saving}
+                  className="flex-1 sm:flex-none px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
+                >
+                  {saving ? 'Saving...' : 'Save All Marks ✓'}
+                </button>
+              </div>
             </div>
-            <div className="w-full sm:w-1/4">
-              <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Total Marks</label>
-              <input 
-                type="number" 
-                min="1" 
-                required
-                value={totalMarks} 
-                onChange={(e) => setTotalMarks(e.target.value)} 
-                className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
-              />
+
+            {/* Student Roster Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
+                    <th className="py-3 px-3">#</th>
+                    <th className="py-3 px-3">Roll Number</th>
+                    <th className="py-3 px-3">Student Name</th>
+                    <th className="py-3 px-3">Marks (or 'A') / Out of {totalMarks}</th>
+                    <th className="py-3 px-3">Attachment Script</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-xs">
+                  {displayedStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="text-center py-8 text-slate-500 italic">No students found matching filter.</td>
+                    </tr>
+                  ) : (
+                    displayedStudents.map((student, idx) => {
+                      const studentId = student._id.toString();
+                      const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
+
+                      return (
+                        <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
+                          <td className="py-3.5 px-3 font-mono text-slate-500">{idx + 1}</td>
+                          <td className="py-3.5 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
+                          <td className="py-3.5 px-3 text-white font-medium">{student.name}</td>
+                          <td className="py-3.5 px-3">
+                            <input 
+                              type="text" 
+                              value={inputData.obtainedMarks} 
+                              onChange={(e) => handleInputChange(studentId, e.target.value)} 
+                              placeholder="Score or A" 
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                            />
+                          </td>
+                          <td className="py-3.5 px-3">
+                            <div className="flex items-center gap-2">
+                              {inputData.file?.url ? (
+                                <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
+                              ) : (
+                                <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded-lg border border-slate-700">
+                                  Upload
+                                  <input type="file" onChange={(e) => handleFileUpload(studentId, e)} className="hidden" />
+                                </label>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div className="w-full sm:w-auto flex items-center gap-2 self-end">
+
+            <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
               <button 
                 type="button"
                 onClick={handleCancelEvaluation}
                 disabled={deleting}
-                className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
               >
-                {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
+                {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
               </button>
               <button 
                 type="button" 
                 onClick={handleSubmitBatch}
                 disabled={saving}
-                className="px-6 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+                className="px-6 py-2.5 bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
               >
-                {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
+                {saving ? 'Saving...' : 'Save All Marks ✓'}
               </button>
             </div>
+
           </div>
-
-          {/* Student Roster Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
-                  <th className="py-3 px-3">#</th>
-                  <th className="py-3 px-3">Roll Number</th>
-                  <th className="py-3 px-3">Student Name</th>
-                  <th className="py-3 px-3">Marks (or 'A') / Out of {totalMarks}</th>
-                  <th className="py-3 px-3">Attachment Script</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-xs">
-                {displayedStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="text-center py-8 text-slate-500 italic">No students found matching filter.</td>
-                  </tr>
-                ) : (
-                  displayedStudents.map((student, idx) => {
-                    const studentId = student._id.toString();
-                    const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
-
-                    return (
-                      <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
-                        <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
-                        <td className="py-3 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
-                        <td className="py-3 px-3 text-white font-medium">{student.name}</td>
-                        <td className="py-3 px-3">
-                          <input 
-                            type="text" 
-                            value={inputData.obtainedMarks} 
-                            onChange={(e) => handleInputChange(studentId, e.target.value)} 
-                            placeholder="Score or A" 
-                            className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
-                          />
-                        </td>
-                        <td className="py-3 px-3">
-                          <div className="flex items-center gap-2">
-                            {inputData.file?.url ? (
-                              <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
-                            ) : (
-                              <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded-lg border border-slate-700">
-                                Upload
-                                <input type="file" onChange={(e) => handleFileUpload(studentId, e)} className="hidden" />
-                              </label>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="pt-4 flex items-center justify-end gap-3">
-            <button 
-              type="button"
-              onClick={handleCancelEvaluation}
-              disabled={deleting}
-              className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
-            >
-              {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
-            </button>
-            <button 
-              type="button" 
-              onClick={handleSubmitBatch}
-              disabled={saving}
-              className="px-8 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
-            >
-              {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
-            </button>
-          </div>
-
         </div>
       </main>
 

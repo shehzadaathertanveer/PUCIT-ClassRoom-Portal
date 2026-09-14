@@ -48,7 +48,7 @@ const LabroomDetail = () => {
   const [complaintsList, setComplaintsList] = useState([]);
   const [loadingComplaints, setLoadingComplaints] = useState(false);
 
-  // Create student result / graded item sheet modal state (Supercharged with Mode Selection)
+  // Create student result / graded item sheet modal state
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [evaluationMode, setEvaluationMode] = useState(null); // 'full' or 'range'
   const [itemCategory, setItemCategory] = useState('Lab Tasks');
@@ -79,9 +79,9 @@ const LabroomDetail = () => {
   const [teacherLookupResult, setTeacherLookupResult] = useState(null);
   const [teacherSearching, setTeacherSearching] = useState(false);
 
-  // Advanced Add Student Modal (Supercharged Multi-Mode State with Smart Class Picker)
+  // Advanced Add Student Modal
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
-  const [addModeType, setAddModeType] = useState('shorthand'); // 'shorthand', 'range', 'batch', 'smartDetect'
+  const [addModeType, setAddModeType] = useState('shorthand');
   const [studentRollInput, setStudentRollInput] = useState('');
   const [bulkStart, setBulkStart] = useState('');
   const [bulkEnd, setBulkEnd] = useState('');
@@ -120,13 +120,7 @@ const LabroomDetail = () => {
     if (clean.includes('project')) return 'projects';
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
-    
-    // Robust camelCase conversion for custom names, handling special characters and spaces safely
-    const camel = clean
-      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
-      .replace(/[^a-zA-Z0-9]/g, '');
-    
-    return camel.endsWith('s') ? camel : camel + 's';
+    return 'labTasks';
   };
 
   const fetchLabroomData = async () => {
@@ -162,7 +156,6 @@ const LabroomDetail = () => {
       try {
         const analyticsRes = await API.get(`/labmarks/analytics/${labroomId}`);
         const analyticsData = analyticsRes?.data?.data || analyticsRes?.data;
-        
         if (analyticsData) {
           setLabAnalytics(analyticsData);
           if (analyticsData.studentMark) {
@@ -271,7 +264,7 @@ const LabroomDetail = () => {
       setNoticeTitle('');
       setNoticeContent('');
       setNoticeFile(null);
-      fetchLabroomData();
+      await fetchLabroomData();
       showToast('Lab notice published successfully!');
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to post lab notice.', 'error');
@@ -1016,7 +1009,7 @@ const LabroomDetail = () => {
           </div>
         </section>
 
-        {/* NAVIGATION TABS WITH ACTIVITY COUNTS & LEADERBOARD ICON FOR STAFF */}
+        {/* NAVIGATION TABS WITH ACTIVITY COUNTS */}
         <div className="flex items-center bg-[#130910]/80 border border-blue-500/20 rounded-2xl p-2 gap-1 overflow-x-auto">
           <button onClick={() => setActiveTab('overview')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${activeTab === 'overview' ? 'bg-blue-400 text-black' : 'text-slate-400'}`}>📊 Overview</button>
           
@@ -1793,7 +1786,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 7. Settings Modal with Dropdown & Custom Option for Lab Activities */}
+      {/* 7. Settings Modal with Strict Backend Options */}
       {isSettingsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
@@ -1821,7 +1814,7 @@ const LabroomDetail = () => {
                 <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
               </div>
 
-              {/* Dynamic Sessional Activities Manager with Predefined Dropdown & Custom Option */}
+              {/* Dynamic Sessional Activities Manager with Backend Options Only */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-blue-400 uppercase">Lab Activities & Mark Weights</p>
@@ -1837,50 +1830,23 @@ const LabroomDetail = () => {
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                   {editSessionalActivities.map((act, index) => {
                     const presetCategories = ['Lab Tasks', 'Vivas', 'Lab Tests', 'Projects', 'Quizzes', 'Assignments'];
-                    const isCustom = !presetCategories.includes(act.category);
 
                     return (
                       <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
                         <select
-                          value={isCustom ? 'Custom' : act.category}
+                          value={act.category}
                           onChange={(e) => {
                             const val = e.target.value;
                             const updated = [...editSessionalActivities];
-                            if (val === 'Custom') {
-                              updated[index].category = '';
-                            } else {
-                              updated[index].category = val;
-                            }
+                            updated[index].category = val;
                             setEditSessionalActivities(updated);
                           }}
-                          className="w-32 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono uppercase"
+                          className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono uppercase"
                         >
                           {presetCategories.map(cat => (
                             <option key={cat} value={cat}>{cat}</option>
                           ))}
-                          <option value="Custom">Custom...</option>
                         </select>
-
-                        {(isCustom || act.category === '') && (
-                          <input 
-                            type="text" 
-                            placeholder="Custom Subject Name" 
-                            value={act.category} 
-                            onChange={(e) => {
-                              const updated = [...editSessionalActivities];
-                              updated[index].category = e.target.value;
-                              setEditSessionalActivities(updated);
-                            }}
-                            className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
-                            required
-                          />
-                        )}
-
-                        {!isCustom && act.category !== '' && (
-                          <div className="flex-1 px-2.5 py-1.5 bg-[#130910]/50 border border-slate-800 rounded-lg text-slate-300 text-xs truncate">
-                            {act.category}
-                          </div>
-                        )}
 
                         <input 
                           type="number" 

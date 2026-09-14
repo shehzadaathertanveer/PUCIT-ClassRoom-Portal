@@ -19,9 +19,9 @@ const LabMarksSheet = () => {
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
   
-  // Safely extract totalMarks from router state if available, otherwise default to 100 for labs
+  // Safely extract totalMarks from router state if available, otherwise default to 10 for labs
   const passedTotalMarks = location.state?.totalMarks;
-  const [totalMarks, setTotalMarks] = useState(passedTotalMarks || 100);
+  const [totalMarks, setTotalMarks] = useState(passedTotalMarks || 10);
   
   // Cleanly decode the item title from URL parameters
   const initialDecodedTitle = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
@@ -43,7 +43,7 @@ const LabMarksSheet = () => {
     setTimeout(() => setToastMessage(''), 2500);
   }, []);
 
-  // Robust matching LabroomDetail's category mapping for preset & custom subjects
+  // Strict backend-matching category key helper
   const getCategoryTargetKey = useCallback((catName = '') => {
     const clean = catName.trim().toLowerCase();
     if (clean.includes('task')) return 'labTasks';
@@ -52,12 +52,7 @@ const LabMarksSheet = () => {
     if (clean.includes('project')) return 'projects';
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
-    
-    const camel = clean
-      .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
-      .replace(/[^a-zA-Z0-9]/g, '');
-    
-    return camel.endsWith('s') ? camel : camel + 's';
+    return 'labTasks';
   }, []);
 
   const fetchSheetData = useCallback(async () => {
@@ -315,7 +310,7 @@ const LabMarksSheet = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-4">
-        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3">
+        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3 shadow-xl">
           <p className="text-red-300 font-bold text-sm">Error Loading Lab Sheet</p>
           <p className="text-xs text-slate-300">{error}</p>
           <Link to={`/labrooms/${labroomId}`} className="block py-3 bg-blue-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Lab Room</Link>
@@ -325,35 +320,35 @@ const LabMarksSheet = () => {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-blue-400 selection:text-black">
+    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-3 sm:px-6 lg:px-8 py-5 selection:bg-blue-400 selection:text-black overflow-x-hidden">
       
       {toastMessage && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-blue-500/50 bg-[#090d16]/95 text-blue-300 shadow-2xl backdrop-blur-xl">
+        <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-blue-500/50 bg-[#130910]/95 text-blue-300 shadow-2xl backdrop-blur-xl">
             <span className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</span>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#090d16]/90 backdrop-blur-2xl border border-blue-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-          <Link to={`/labrooms/${labroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
+      <header className="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#130910]/95 backdrop-blur-2xl border border-blue-500/30 rounded-2xl p-4 shadow-xl">
+        <div className="flex items-center justify-between sm:justify-start gap-3">
+          <Link to={`/labrooms/${labroomId}`} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
             ← Back
           </Link>
           <div>
             <h1 className="text-sm sm:text-base font-black text-white uppercase">{labroom?.labName || labroom?.name}</h1>
-            <p className="text-xs text-blue-400 font-mono uppercase">🧪 Lab Component • {category} • {itemTitle || itemId}</p>
+            <p className="text-[11px] text-blue-400 font-mono uppercase">🧪 Lab Component • {category} • {itemTitle || itemId}</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800">
           <button
             type="button"
             onClick={handleExportToExcel}
             className="px-3.5 py-2 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 text-xs font-extrabold uppercase rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
           >
-            📥 Export Excel
+            📊 Export Excel
           </button>
           <button
             type="button"
@@ -366,48 +361,48 @@ const LabMarksSheet = () => {
       </header>
 
       {/* Spreadsheet Main Area */}
-      <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
+      <main className="relative z-10 w-full max-w-6xl mx-auto my-6 space-y-6 flex-grow">
         <div className="space-y-4">
-          <div className="bg-[#090d16]/90 border border-blue-500/25 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+          <div className="bg-[#130910]/90 border border-blue-500/25 rounded-3xl p-5 sm:p-7 shadow-xl space-y-5 backdrop-blur-2xl">
             
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
               <div className="w-full sm:w-1/3">
-                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Lab Activity Title</label>
+                <label className="block text-xs font-bold uppercase text-blue-400 mb-1.5">Lab Activity Title</label>
                 <input 
                   type="text" 
                   value={itemTitle} 
                   onChange={(e) => setItemTitle(e.target.value)} 
                   placeholder="e.g. Lab Task 1" 
-                  className="w-full px-4 py-2.5 bg-[#05080e] border border-slate-700 rounded-xl text-white text-xs"
+                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
                 />
               </div>
               <div className="w-full sm:w-1/4">
-                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Total Marks</label>
+                <label className="block text-xs font-bold uppercase text-blue-400 mb-1.5">Total Marks</label>
                 <input 
                   type="number" 
                   min="1" 
                   required
                   value={totalMarks} 
                   onChange={(e) => setTotalMarks(e.target.value)} 
-                  className="w-full px-4 py-2.5 bg-[#05080e] border border-slate-700 rounded-xl text-white text-xs font-mono"
+                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
                 />
               </div>
-              <div className="w-full sm:w-auto flex items-center gap-2 self-end">
+              <div className="w-full sm:w-auto flex items-center gap-2 pt-2 sm:pt-0">
                 <button 
                   type="button"
                   onClick={handleCancelEvaluation}
                   disabled={deleting}
-                  className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
                 >
-                  {deleting ? 'Cancelling...' : 'Cancel Lab Task ✕'}
+                  {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
                 </button>
                 <button 
                   type="button" 
                   onClick={handleSubmitBatch}
                   disabled={saving}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-400 to-indigo-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
+                  className="flex-1 sm:flex-none px-5 py-2.5 bg-blue-500 hover:bg-blue-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
                 >
-                  {saving ? 'Saving Lab Sheet...' : 'Save All Lab Marks ✓'}
+                  {saving ? 'Saving...' : 'Save All Marks ✓'}
                 </button>
               </div>
             </div>
@@ -436,19 +431,19 @@ const LabMarksSheet = () => {
 
                       return (
                         <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
-                          <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="py-3 px-3 font-mono text-blue-400 font-bold">{student.rollNo || 'N/A'}</td>
-                          <td className="py-3 px-3 text-white font-medium">{student.name}</td>
-                          <td className="py-3 px-3">
+                          <td className="py-3.5 px-3 font-mono text-slate-500">{idx + 1}</td>
+                          <td className="py-3.5 px-3 font-mono text-blue-400 font-bold">{student.rollNo || 'N/A'}</td>
+                          <td className="py-3.5 px-3 text-white font-medium">{student.name}</td>
+                          <td className="py-3.5 px-3">
                             <input 
                               type="text" 
                               value={inputData.obtainedMarks} 
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
                               placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#05080e] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
                             />
                           </td>
-                          <td className="py-3 px-3">
+                          <td className="py-3.5 px-3">
                             <div className="flex items-center gap-2">
                               {inputData.file?.url ? (
                                 <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
@@ -468,22 +463,22 @@ const LabMarksSheet = () => {
               </table>
             </div>
 
-            <div className="pt-4 flex items-center justify-end gap-3">
+            <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
               <button 
                 type="button"
                 onClick={handleCancelEvaluation}
                 disabled={deleting}
-                className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
               >
-                {deleting ? 'Cancelling...' : 'Cancel Lab Task ✕'}
+                {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
               </button>
               <button 
                 type="button" 
                 onClick={handleSubmitBatch}
                 disabled={saving}
-                className="px-8 py-3 bg-gradient-to-r from-blue-400 to-indigo-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
+                className="px-6 py-2.5 bg-blue-500 hover:bg-blue-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
               >
-                {saving ? 'Saving Lab Sheet...' : 'Save All Lab Marks ✓'}
+                {saving ? 'Saving...' : 'Save All Marks ✓'}
               </button>
             </div>
 

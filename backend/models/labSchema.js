@@ -19,12 +19,13 @@ const labRoomSchema = new mongoose.Schema(
       uppercase: true, 
       trim: true 
     },
-    // Lab Grading Scheme (100% Continuous Sessional Weight)
+    
+    // Lab Grading Scheme (100% Continuous Sessional Weight by default, fully flexible)
     gradingScheme: {
-      sessionalWeight: { type: Number, default: 100, min: 100, max: 100 }
+      sessionalWeight: { type: Number, default: 100, min: 0, max: 100 }
     },
     
-    // Dynamic Activity Categories Configured by Teacher (e.g., Lab Tasks, Vivas, or any custom dropdown/typed option)
+    // Dynamic Activity Categories Configured by Teacher
     sessionalActivities: [{
       category: { type: String, required: true, trim: true },
       allocatedMarks: { type: Number, required: true, min: 0 }
@@ -75,7 +76,7 @@ const labRoomSchema = new mongoose.Schema(
       default: [] 
     },
 
-    // NOTICE BOARD FOR LAB ANNOUNCEMENTS (Supports image/file attachments & auto-url normalization)
+    // NOTICE BOARD FOR LAB ANNOUNCEMENTS
     notices: [{
       title: { type: String, required: true, trim: true },
       content: { type: String, required: true, trim: true },
@@ -97,23 +98,13 @@ const labRoomSchema = new mongoose.Schema(
       createdAt: { type: Date, default: Date.now }
     }],
 
-    // 🚀 STANDARD & CUSTOM EVALUATION STORAGE ARRAYS
+    // 🚀 FULLY EXPANDED LAB EVALUATION STORAGE ARRAYS
     labTasks: [{
       title: { type: String, required: true, trim: true },
       totalMarks: { type: Number, required: true, min: 1 },
       createdAt: { type: Date, default: Date.now }
     }],
-    vivas: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
     labTests: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    projects: [{
       title: { type: String, required: true, trim: true },
       totalMarks: { type: Number, required: true, min: 1 },
       createdAt: { type: Date, default: Date.now }
@@ -128,15 +119,70 @@ const labRoomSchema = new mongoose.Schema(
       totalMarks: { type: Number, required: true, min: 1 },
       createdAt: { type: Date, default: Date.now }
     }],
-
-    // 🌟 UNIVERSAL FALLBACK: Handles any custom activity a teacher picks or types on the fly!
-    customActivities: [{
-      categoryName: { type: String, required: true, trim: true },
-      items: [{
-        title: { type: String, required: true, trim: true },
-        totalMarks: { type: Number, required: true, min: 1 },
-        createdAt: { type: Date, default: Date.now }
-      }]
+    presentations: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    vivas: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    projects: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    homework: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    classParticipation: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    specialMarks: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    finalProject: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    labMids: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    labFinals: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    labActivities: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    labBehavior: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    labWorksheets: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    troubleshooting: [{
+      title: { type: String, required: true, trim: true },
+      totalMarks: { type: Number, required: true, min: 1 },
+      createdAt: { type: Date, default: Date.now }
     }],
 
     isActive: { 
@@ -161,7 +207,7 @@ const normalizeNoticeAttachments = (doc) => {
     doc.notices.forEach(notice => {
       if (notice.attachment && notice.attachment.url) {
         const isRaw = notice.attachment.fileType === 'raw' || 
-                      notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
+                    notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
         
         if (isRaw && notice.attachment.url.includes('/image/upload/')) {
           notice.attachment.url = notice.attachment.url.replace('/image/upload/', '/raw/upload/');
@@ -172,12 +218,12 @@ const normalizeNoticeAttachments = (doc) => {
   }
 };
 
-// Pre-save hook using async/await (No next callback required)
+// Pre-save hook using async/await
 labRoomSchema.pre('save', async function () {
   normalizeNoticeAttachments(this);
 });
 
-// Post-query middleware to fix any legacy URLs returned to the client
+// Post-query middleware to fix legacy URLs returned to client
 labRoomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
   if (!docs) return;
   if (Array.isArray(docs)) {

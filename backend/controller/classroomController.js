@@ -5,18 +5,23 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 
-// Helper: Normalize Schema Target Keys Safely (Supports Custom Sessional Activities)
+// Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
 const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
-  if (clean.includes('lab')) return 'labMarks';
-  if (clean.includes('mid')) return 'mids';
-  if (clean.includes('final')) return 'finals';
+  if (clean.includes('present')) return 'presentations';
+  if (clean.includes('final project') || clean.includes('finalproject')) return 'finalProject';
+  if (clean.includes('project')) return 'projects';
+  if (clean.includes('homework')) return 'homework';
+  if (clean.includes('class activ')) return 'classActivities';
+  if (clean.includes('particip')) return 'classParticipation';
+  if (clean.includes('viva')) return 'vivas';
+  if (clean.includes('special')) return 'specialMarks';
+  if (clean === 'mids' || clean === 'midterm' || clean.includes('mid')) return 'mids';
+  if (clean === 'finals' || clean === 'final' || clean.includes('final')) return 'finals';
   
-  // Dynamic normalization for custom activities (e.g., "Homework" -> "homeworks")
-  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
-  return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
+  return 'quizzes';
 };
 
 // Helper: Contextual Staff Authorization
@@ -221,8 +226,6 @@ exports.setClassroomRoster = catchAsync(async (req, res, next) => {
           $setOnInsert: {
             classroom: classroom._id,
             student: student._id,
-            quizzes: [],
-            assignments: [],
           },
         },
         { upsert: true, returnDocument: 'after' }
@@ -391,7 +394,7 @@ exports.addStudentToClassroom = catchAsync(async (req, res, next) => {
 
   const studentMark = await Mark.findOneAndUpdate(
     { classroom: targetClassId, student: studentId },
-    { $setOnInsert: { classroom: targetClassId, student: studentId, quizzes: [], assignments: [], labMarks: [] } },
+    { $setOnInsert: { classroom: targetClassId, student: studentId } },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -417,7 +420,7 @@ exports.addStudentToClassroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 7. REMOVE STUDENT FROM CLASSROOM (With Formal Dropout Notification Email)
+// 7. REMOVE STUDENT FROM CLASSROOM
 // =============================================================================
 exports.removeStudentFromClassroom = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
@@ -441,7 +444,7 @@ exports.removeStudentFromClassroom = catchAsync(async (req, res, next) => {
           to: studentEmail,
           subject: `Enrollment Update: Removed from ${classroom.className}`,
           title: `Course Dropout / Removal Notice`,
-          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the classroom <strong>${classroom.className} (${classroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).<br><br>If you believe this action was taken in error or require further assistance regarding your course registration, please contact your course TA or Teacher directly.`,
+          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the classroom <strong>${classroom.className} (${classroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).`,
           details: [
             { label: 'Course Name', value: classroom.className },
             { label: 'Section Prefix', value: classroom.sectionPrefix },
@@ -524,7 +527,7 @@ exports.hardDeleteClassroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10. FEATURE 3: LOOKUP STUDENT DETAILS FOR FRONTEND DOUBLE-CONFIRMATION & ADD-DROP
+// 10. LOOKUP STUDENT DETAILS
 // =============================================================================
 exports.lookupStudentForAddDrop = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -585,7 +588,7 @@ exports.lookupStudentForAddDrop = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX (Feature 1 & Feature 3)
+// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX
 // =============================================================================
 exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
   const { classroomId, rollInput } = req.body;
@@ -635,7 +638,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   await Mark.findOneAndUpdate(
     { classroom: targetClassId, student: student._id },
-    { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+    { $setOnInsert: { classroom: targetClassId, student: student._id } },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -699,7 +702,7 @@ exports.getClassroomComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. CREATE & DELETE GRADED ITEM (With Range Verification & Overlap Check)
+// 12. CREATE & DELETE GRADED ITEM
 // =============================================================================
 exports.createGradedItem = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -715,32 +718,22 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
   const rawCat = category || type || '';
   const targetKey = getNormalizedTargetKey(rawCat);
 
-  const standardKeys = ['quizzes', 'assignments', 'labMarks', 'mids', 'finals'];
-  const isStandardKey = standardKeys.includes(targetKey);
-  
-  if (!isStandardKey && classroom.sessionalActivities) {
-    const isValidCustom = classroom.sessionalActivities.some(
-      act => act.category.trim().toLowerCase() === rawCat.trim().toLowerCase() ||
-             getNormalizedTargetKey(act.category) === targetKey
-    );
-    if (!isValidCustom) {
-      return next(new AppError(`Invalid evaluation category specified: "${rawCat}".`, 400));
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    if (classroom[targetKey] && classroom[targetKey].totalMarks > 0) {
+      return next(new AppError(`Only one ${targetKey} entry is allowed per classroom.`, 400));
     }
   }
 
   if (!classroom[targetKey]) {
-    classroom[targetKey] = [];
+    classroom[targetKey] = ['mids', 'finals', 'finalProject'].includes(targetKey) ? {} : [];
   }
 
   const cleanTitle = title.trim();
-  const existsGlobally = classroom[targetKey].some(
-    (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
-  );
-
+  
   let targetStudents = classroom.students;
   const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
 
-  if (hasRange) {
+  if (hasRange && !['mids', 'finals', 'finalProject'].includes(targetKey)) {
     const startIdx = parseInt(rangeStart, 10) - 1;
     const endIdx = parseInt(rangeEnd, 10);
     
@@ -758,67 +751,43 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
     if (targetStudents.length === 0) {
       return next(new AppError('No students found within the specified range.', 400));
     }
+  }
 
-    const targetStudentIds = targetStudents.map(st => st._id);
-    const existingMarksDocs = await Mark.find({
-      classroom: classroomId,
-      student: { $in: targetStudentIds }
-    });
-
-    for (const doc of existingMarksDocs) {
-      const activityList = doc[targetKey] || [];
-      const hasActivity = activityList.some(item => 
-        item.title.trim().toLowerCase() === cleanTitle.toLowerCase() &&
-        (item.obtainedMarks !== undefined && item.obtainedMarks !== null || item.isAbsent)
-      );
-
-      if (hasActivity) {
-        const studentInfo = targetStudents.find(s => s._id.toString() === doc.student.toString());
-        return next(new AppError(`Overlap Error: Student ${studentInfo ? studentInfo.rollNo : 'in range'} already has a recorded grade for "${cleanTitle}". Please check your selected range or ensure no duplicate grading sheet is created.`, 400));
-      }
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    classroom[targetKey] = { title: cleanTitle, totalMarks: Number(totalMarks) };
+  } else {
+    const existsGlobally = classroom[targetKey].some(
+      (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
+    );
+    if (!existsGlobally) {
+      classroom[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks) });
     }
   }
-
-  if (!existsGlobally) {
-    classroom[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks) });
-    await classroom.save();
-  }
-
-  const itemPayload = {
-    title: cleanTitle,
-    totalMarks: Number(totalMarks),
-    obtainedMarks: 0,
-    isAbsent: false
-  };
+  await classroom.save();
 
   const studentIdsToInitialize = targetStudents.map(st => st._id);
   for (const studId of studentIdsToInitialize) {
     let markDoc = await Mark.findOne({ classroom: classroomId, student: studId });
     if (!markDoc) {
-      markDoc = await Mark.create({
-        classroom: classroomId,
-        student: studId,
-        quizzes: [],
-        assignments: [],
-        labMarks: []
-      });
+      markDoc = await Mark.create({ classroom: classroomId, student: studId });
     }
 
-    if (!markDoc[targetKey]) markDoc[targetKey] = [];
-    const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-    
-    if (itemIdx === -1) {
-      markDoc[targetKey].push(itemPayload);
-      await markDoc.save();
+    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+      markDoc[targetKey] = { title: cleanTitle, totalMarks: Number(totalMarks), obtainedMarks: 0, isAbsent: false };
+    } else {
+      if (!markDoc[targetKey]) markDoc[targetKey] = [];
+      const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      if (itemIdx === -1) {
+        markDoc[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks), obtainedMarks: 0, isAbsent: false });
+      }
     }
+    await markDoc.save();
   }
-
-  const newItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
 
   res.status(201).json({
     status: 'success',
-    message: hasRange ? `Marksheet created successfully for students range (${rangeStart} to ${rangeEnd})!` : 'Graded category item created successfully for whole class!',
-    data: { item: newItem, targetedCount: targetStudents.length },
+    message: 'Graded category item created successfully!',
+    data: { targetedCount: targetStudents.length },
   });
 });
 
@@ -833,31 +802,32 @@ exports.deleteGradedItem = catchAsync(async (req, res, next) => {
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   const targetKey = getNormalizedTargetKey(category || type || req.params.categoryKey);
-  const cleanTitle = title.trim();
+  const cleanTitle = (title || '').trim();
 
-  if (!classroom[targetKey]) {
-    return next(new AppError('Invalid grading category type.', 400));
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    classroom[targetKey] = { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false };
+    await classroom.save();
+    await Mark.updateMany(
+      { classroom: classroomId },
+      { $set: { [targetKey]: { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false } } }
+    );
+  } else {
+    if (!classroom[targetKey]) {
+      return next(new AppError('Invalid grading category type.', 400));
+    }
+    classroom[targetKey] = classroom[targetKey].filter(
+      (item) => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
+    );
+    await classroom.save();
+    await Mark.updateMany(
+      { classroom: classroomId },
+      { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
+    );
   }
-
-  const beforeCount = classroom[targetKey].length;
-  classroom[targetKey] = classroom[targetKey].filter(
-    (item) => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
-  );
-
-  if (classroom[targetKey].length === beforeCount) {
-    return next(new AppError(`Grading item "${cleanTitle}" not found in ${targetKey}.`, 404));
-  }
-
-  await classroom.save();
-
-  await Mark.updateMany(
-    { classroom: classroomId },
-    { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
-  );
 
   res.status(200).json({
     status: 'success',
-    message: `Grading item "${cleanTitle}" successfully deleted and removed from calculations!`,
+    message: 'Grading item successfully deleted!',
     data: { classroom },
   });
 });
@@ -991,7 +961,7 @@ exports.postNotice = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 15. SETTINGS & FEATURE 1, 2, 3, 4 ENROLLMENT HELPERS
+// 15. SETTINGS & ENROLLMENT HELPERS
 // =============================================================================
 exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1068,29 +1038,11 @@ exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: targetClassId, student: student._id },
-        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { $setOnInsert: { classroom: targetClassId, student: student._id } },
         { upsert: true, returnDocument: 'after' }
       );
     });
     await Promise.all(markPromises);
-
-    await Promise.all(
-      newStudents.map(async (student) => {
-        const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          await sendStyledEmail({
-            to: studentEmail,
-            subject: `Enrolled in ${classroom.className}`,
-            title: `Course Enrollment: ${classroom.className}`,
-            bodyText: `You have been officially enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
-            details: [
-              { label: 'Credit Hours', value: classroom.creditHours },
-              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
-            ]
-          });
-        }
-      })
-    );
   }
 
   res.status(200).json({
@@ -1145,29 +1097,11 @@ exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: targetClassId, student: student._id },
-        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { $setOnInsert: { classroom: targetClassId, student: student._id } },
         { upsert: true, returnDocument: 'after' }
       );
     });
     await Promise.all(markPromises);
-
-    await Promise.all(
-      newStudents.map(async (student) => {
-        const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          await sendStyledEmail({
-            to: studentEmail,
-            subject: `Enrolled in ${classroom.className}`,
-            title: `Course Enrollment: ${classroom.className}`,
-            bodyText: `You have been officially enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
-            details: [
-              { label: 'Credit Hours', value: classroom.creditHours },
-              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
-            ]
-          });
-        }
-      })
-    );
   }
 
   res.status(200).json({
@@ -1211,29 +1145,11 @@ exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: targetClassId, student: student._id },
-        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { $setOnInsert: { classroom: targetClassId, student: student._id } },
         { upsert: true, returnDocument: 'after' }
       );
     });
     await Promise.all(markPromises);
-
-    await Promise.all(
-      newStudents.map(async (student) => {
-        const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          await sendStyledEmail({
-            to: studentEmail,
-            subject: `Enrolled in ${classroom.className}`,
-            title: `Course Enrollment: ${classroom.className}`,
-            bodyText: `You have been officially enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
-            details: [
-              { label: 'Credit Hours', value: classroom.creditHours },
-              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
-            ]
-          });
-        }
-      })
-    );
   }
 
   res.status(200).json({
@@ -1274,11 +1190,11 @@ exports.getClassroomMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS (With Targeted Single-Student Email)
+// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS
 // =============================================================================
 exports.updateStudentMarks = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
-  const { category, type, title, obtainedMarks, totalMarks, isAbsent, remarks } = req.body;
+  const { category, type, title, obtainedMarks, totalMarks, isAbsent } = req.body;
 
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to update student marks.', 403));
@@ -1293,17 +1209,12 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
 
   let markRecord = await Mark.findOne({ classroom: classroomId, student: studentId });
   if (!markRecord) {
-    markRecord = await Mark.create({
-      classroom: classroomId,
-      student: studentId,
-      quizzes: [],
-      assignments: [],
-      labMarks: [],
-    });
+    markRecord = await Mark.create({ classroom: classroomId, student: studentId });
   }
 
-  if (['mids', 'finals'].includes(targetKey)) {
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
     markRecord[targetKey] = {
+      title: title || 'Exam',
       totalMarks: Number(totalMarks) || markRecord[targetKey]?.totalMarks || 0,
       obtainedMarks: isAbsent ? 0 : Number(obtainedMarks) || 0,
       isAbsent: Boolean(isAbsent),
@@ -1333,27 +1244,6 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
 
   await markRecord.save();
 
-  const studentEmail = student.personalNotificationEmail || student.email;
-  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-    try {
-      await sendStyledEmail({
-        to: studentEmail,
-        subject: `Marks Updated: ${classroom.className}`,
-        title: `Marks Update Notification`,
-        bodyText: `Your marks for <strong>${classroom.className}</strong> have been updated by <strong>${req.user.name}</strong>.`,
-        details: [
-          { label: 'Course', value: classroom.className },
-          { label: 'Category', value: targetKey.toUpperCase() },
-          { label: 'Activity', value: title || targetKey.toUpperCase() },
-          { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtainedMarks} / ${totalMarks}` },
-          { label: 'Current Grade', value: markRecord.letterGrade || 'In Progress' }
-        ]
-      });
-    } catch (mailErr) {
-      console.warn('Failed to send targeted mark update email:', mailErr.message);
-    }
-  }
-
   res.status(200).json({
     status: 'success',
     message: `Marks updated successfully for ${student.name}!`,
@@ -1362,7 +1252,7 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. WHOLE-CLASS BATCH RESULTS UPLOAD (With Targeted Individual Student Emails)
+// 18. WHOLE-CLASS BATCH RESULTS UPLOAD
 // =============================================================================
 exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1371,7 +1261,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to upload whole-class marks.', 403));
 
-  const classroom = await Classroom.findById(classroomId).populate('students', 'name email personalNotificationEmail rollNo');
+  const classroom = await Classroom.findById(classroomId);
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   if (!Array.isArray(studentScores) || studentScores.length === 0) {
@@ -1381,7 +1271,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
   const targetKey = getNormalizedTargetKey(category || type);
   const parsedTotal = Number(totalMarks);
 
-  if (['mids', 'finals'].includes(targetKey)) {
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
     for (const scoreEntry of studentScores) {
       const isAbsent = Boolean(scoreEntry.isAbsent);
       const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
@@ -1391,6 +1281,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
         {
           $set: {
             [targetKey]: {
+              title: title || 'Exam',
               totalMarks: parsedTotal,
               obtainedMarks: obtained,
               isAbsent: isAbsent,
@@ -1399,24 +1290,6 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
         },
         { upsert: true, returnDocument: 'after' }
       );
-
-      const studentObj = classroom.students.find(s => s._id.toString() === scoreEntry.studentId.toString());
-      if (studentObj) {
-        const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          sendStyledEmail({
-            to: studentEmail,
-            subject: `Marks Updated: ${classroom.className}`,
-            title: `Marks Update Notification`,
-            bodyText: `Your marks for <strong>${classroom.className}</strong> have been updated.`,
-            details: [
-              { label: 'Course', value: classroom.className },
-              { label: 'Evaluation', value: targetKey.toUpperCase() },
-              { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
-            ]
-          }).catch(err => console.warn('Email send warning:', err.message));
-        }
-      }
     }
   } else {
     if (!title) return next(new AppError('Title is required for evaluation mark entries.', 400));
@@ -1424,7 +1297,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
     for (const scoreEntry of studentScores) {
       let markRec = await Mark.findOne({ classroom: classroomId, student: scoreEntry.studentId });
       if (!markRec) {
-        markRec = await Mark.create({ classroom: classroomId, student: scoreEntry.studentId, quizzes: [], assignments: [], labMarks: [] });
+        markRec = await Mark.create({ classroom: classroomId, student: scoreEntry.studentId });
       }
 
       const isAbsent = Boolean(scoreEntry.isAbsent);
@@ -1441,35 +1314,17 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
         markRec[targetKey].push(itemPayload);
       }
       await markRec.save();
-
-      const studentObj = classroom.students.find(s => s._id.toString() === scoreEntry.studentId.toString());
-      if (studentObj) {
-        const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          sendStyledEmail({
-            to: studentEmail,
-            subject: `Marks Updated: ${classroom.className} - ${cleanTitle}`,
-            title: `Marks Update: ${cleanTitle}`,
-            bodyText: `Your marks for <strong>${cleanTitle}</strong> in <strong>${classroom.className}</strong> have been updated.`,
-            details: [
-              { label: 'Course', value: classroom.className },
-              { label: 'Activity', value: cleanTitle },
-              { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
-            ]
-          }).catch(err => console.warn('Email send warning:', err.message));
-        }
-      }
     }
   }
 
   res.status(200).json({
     status: 'success',
-    message: `Whole-class marks successfully uploaded for ${studentScores.length} students with targeted notifications!`,
+    message: `Whole-class marks successfully uploaded for ${studentScores.length} students!`,
   });
 });
 
 // =============================================================================
-// 19. FEATURE 4: GET AUTO-DETECTABLE AVAILABLE STUDENTS WITH NAMES & ENROLLMENT FILTER
+// 19. GET AUTO-DETECTABLE AVAILABLE STUDENTS
 // =============================================================================
 exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1510,7 +1365,7 @@ exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS (Feature 4)
+// 20. BULK APPROVE AVAILABLE STUDENTS
 // =============================================================================
 exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1550,29 +1405,11 @@ exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
     const markPromises = successfullyAdded.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: classroomId, student: student._id },
-        { $setOnInsert: { classroom: classroomId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { $setOnInsert: { classroom: classroomId, student: student._id } },
         { upsert: true, returnDocument: 'after' }
       );
     });
     await Promise.all(markPromises);
-
-    await Promise.all(
-      successfullyAdded.map(async (student) => {
-        const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-          await sendStyledEmail({
-            to: studentEmail,
-            subject: `Enrolled in ${classroom.className}`,
-            title: `Course Enrollment: ${classroom.className}`,
-            bodyText: `You have been officially approved and enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
-            details: [
-              { label: 'Credit Hours', value: classroom.creditHours },
-              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
-            ]
-          });
-        }
-      })
-    );
   }
 
   res.status(200).json({
@@ -1583,7 +1420,7 @@ exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 21. ADMIN USER DELETION CONTROL (Prevents self-deletion)
+// 21. ADMIN USER DELETION CONTROL
 // =============================================================================
 exports.adminDeleteUser = catchAsync(async (req, res, next) => {
   if (req.user.role !== 'ADMIN') {
@@ -1614,7 +1451,7 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS (Frontend Integration Bridge)
+// 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS
 // =============================================================================
 exports.getBulkMarksSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1652,16 +1489,12 @@ exports.getUnassignedStudentsForActivity = catchAsync(async (req, res, next) => 
     const markDoc = existingMarks.find(m => m.student.toString() === studentId);
     if (!markDoc) return true;
 
-    let list = [];
-    if (markDoc[targetKey] && Array.isArray(markDoc[targetKey])) {
-      list = markDoc[targetKey];
-    } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
-      const customCat = markDoc.customActivities.find(
-        c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
-      );
-      list = customCat ? customCat.items || [] : [];
+    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+      const examObj = markDoc[targetKey];
+      return !examObj || (examObj.obtainedMarks === undefined && !examObj.isAbsent);
     }
 
+    let list = markDoc[targetKey] && Array.isArray(markDoc[targetKey]) ? markDoc[targetKey] : [];
     const foundItem = list.find(e => e.title?.trim().toLowerCase() === cleanTitle);
     return !foundItem || (foundItem.obtainedMarks === undefined && !foundItem.isAbsent);
   });
@@ -1682,41 +1515,55 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   const targetKey = getNormalizedTargetKey(category);
-  const cleanTitle = title.trim();
+  const cleanTitle = (title || 'Exam').trim();
   const parsedTotal = Number(totalMarks) || 10;
 
-  // Ensure item exists in classroom schema definition
-  if (!classroom[targetKey]) classroom[targetKey] = [];
-  const existingItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-  if (!existingItem) {
-    classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal };
     await classroom.save();
+  } else {
+    if (!classroom[targetKey]) classroom[targetKey] = [];
+    const existingItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+    if (!existingItem) {
+      classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+      await classroom.save();
+    }
   }
 
   for (const entry of marksData) {
     let markRec = await Mark.findOne({ classroom: classroomId, student: entry.studentId });
     if (!markRec) {
-      markRec = await Mark.create({ classroom: classroomId, student: entry.studentId, quizzes: [], assignments: [], labMarks: [] });
+      markRec = await Mark.create({ classroom: classroomId, student: entry.studentId });
     }
 
     const isAbsent = Boolean(entry.isAbsent);
     const obtained = isAbsent ? 0 : Number(entry.obtainedMarks || 0);
 
-    if (!markRec[targetKey]) markRec[targetKey] = [];
-    const idx = markRec[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-    
-    const payload = {
-      title: cleanTitle,
-      totalMarks: parsedTotal,
-      obtainedMarks: obtained,
-      isAbsent,
-      file: entry.file || null
-    };
-
-    if (idx > -1) {
-      markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...payload };
+    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+      markRec[targetKey] = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent,
+        file: entry.file || null
+      };
     } else {
-      markRec[targetKey].push(payload);
+      if (!markRec[targetKey]) markRec[targetKey] = [];
+      const idx = markRec[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      
+      const payload = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent,
+        file: entry.file || null
+      };
+
+      if (idx > -1) {
+        markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...payload };
+      } else {
+        markRec[targetKey].push(payload);
+      }
     }
     await markRec.save();
   }
@@ -1739,17 +1586,25 @@ exports.deleteEvaluationItemRoute = catchAsync(async (req, res, next) => {
   const targetKey = getNormalizedTargetKey(category);
   const cleanTitle = (itemTitle || '').trim();
 
-  if (classroom[targetKey]) {
-    classroom[targetKey] = classroom[targetKey].filter(
-      item => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
-    );
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    classroom[targetKey] = { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false };
     await classroom.save();
+    await Mark.updateMany(
+      { classroom: classroomId },
+      { $set: { [targetKey]: { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false } } }
+    );
+  } else {
+    if (classroom[targetKey]) {
+      classroom[targetKey] = classroom[targetKey].filter(
+        item => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
+      );
+      await classroom.save();
+    }
+    await Mark.updateMany(
+      { classroom: classroomId },
+      { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
+    );
   }
-
-  await Mark.updateMany(
-    { classroom: classroomId },
-    { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
-  );
 
   res.status(200).json({
     status: 'success',

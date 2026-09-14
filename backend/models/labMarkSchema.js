@@ -19,11 +19,6 @@ const LabItemScoreSchema = new mongoose.Schema({
   file: { type: cloudinaryFileSchema, default: () => ({}) } // 👈 Persists file attachments in lab grading sheets
 }, { _id: false });
 
-const CustomCategoryScoreSchema = new mongoose.Schema({
-  categoryName: { type: String, required: true, trim: true },
-  items: [LabItemScoreSchema]
-}, { _id: false });
-
 const labMarkSchema = new mongoose.Schema(
   {
     labroom: { 
@@ -39,14 +34,20 @@ const labMarkSchema = new mongoose.Schema(
       index: true 
     },
 
-    // Individual scores per category
+    // 🚀 Updated Individual Scores matching Labroom Schema Categories
     labTasks: [LabItemScoreSchema],
-    vivas: [LabItemScoreSchema],
-    labTests: [LabItemScoreSchema],
-    projects: [LabItemScoreSchema],
     quizzes: [LabItemScoreSchema],
     assignments: [LabItemScoreSchema],
-    customActivities: [CustomCategoryScoreSchema],
+    presentations: [LabItemScoreSchema],
+    vivas: [LabItemScoreSchema],
+    projects: [LabItemScoreSchema],
+    finalProject: [LabItemScoreSchema],
+    labMids: [LabItemScoreSchema],
+    labFinals: [LabItemScoreSchema],
+    labActivities: [LabItemScoreSchema],
+    labBehavior: [LabItemScoreSchema],
+    labWorksheets: [LabItemScoreSchema],
+    troubleshooting: [LabItemScoreSchema],
 
     // Cached performance metrics for rapid analytics
     studentLabPercentage: { type: Number, default: 0 },

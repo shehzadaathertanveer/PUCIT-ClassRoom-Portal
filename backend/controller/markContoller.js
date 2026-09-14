@@ -5,22 +5,38 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 
-const STANDARD_CATEGORIES = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects', 'mids', 'finals'];
+const STANDARD_CATEGORIES = [
+  'quizzes', 
+  'assignments', 
+  'presentations', 
+  'projects', 
+  'homework', 
+  'classActivities', 
+  'classParticipation', 
+  'vivas', 
+  'specialMarks', 
+  'mids', 
+  'finals', 
+  'finalProject'
+];
 
-// Helper: Normalize Schema Target Keys Safely (Supports Custom Sessional Activities)
+// Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
 const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
-  if (clean.includes('task')) return 'labTasks';
-  if (clean.includes('viva')) return 'vivas';
-  if (clean.includes('test')) return 'labTests';
-  if (clean.includes('project')) return 'projects';
-  if (clean.includes('quiz') || clean.includes('quizzes')) return 'quizzes';
+  if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
-  if (clean.includes('lab')) return 'labMarks';
+  if (clean.includes('present')) return 'presentations';
+  if (clean.includes('final project')) return 'finalProject';
+  if (clean.includes('project')) return 'projects';
+  if (clean.includes('homework')) return 'homework';
+  if (clean.includes('class activ')) return 'classActivities';
+  if (clean.includes('particip')) return 'classParticipation';
+  if (clean.includes('viva')) return 'vivas';
+  if (clean.includes('special')) return 'specialMarks';
   if (clean === 'mids' || clean === 'midterm') return 'mids';
   if (clean === 'finals' || clean === 'final') return 'finals';
   
-  // Dynamic normalization for custom activities (e.g., "Homework" -> "homeworks")
+  // Dynamic normalization fallback for safety
   const sanitizedCamel = clean
     .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
     .replace(/[^a-zA-Z0-9]/g, '');
@@ -33,16 +49,22 @@ const CATEGORY_MAP = {
   quizzes: 'quizzes',
   assignment: 'assignments',
   assignments: 'assignments',
-  labmark: 'labMarks',
-  labmarks: 'labMarks',
-  labtask: 'labTasks',
-  labtasks: 'labTasks',
-  viva: 'vivas',
-  vivas: 'vivas',
-  labtest: 'labTests',
-  labtests: 'labTests',
+  presentation: 'presentations',
+  presentations: 'presentations',
   project: 'projects',
   projects: 'projects',
+  'final project': 'finalProject',
+  finalproject: 'finalProject',
+  homework: 'homework',
+  'class activity': 'classActivities',
+  classactivity: 'classActivities',
+  classactivities: 'classActivities',
+  'class participation': 'classParticipation',
+  classparticipation: 'classParticipation',
+  viva: 'vivas',
+  vivas: 'vivas',
+  'special marks': 'specialMarks',
+  specialmarks: 'specialMarks',
   mids: 'mids',
   midterm: 'mids',
   finals: 'finals',
@@ -120,13 +142,16 @@ exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
         sectionPrefix: classroom.sectionPrefix,
         quizzes: classroom.quizzes,
         assignments: classroom.assignments,
-        labMarks: classroom.labMarks,
-        labTasks: classroom.labTasks,
-        vivas: classroom.vivas,
-        labTests: classroom.labTests,
+        presentations: classroom.presentations,
         projects: classroom.projects,
+        homework: classroom.homework,
+        classActivities: classroom.classActivities,
+        classParticipation: classroom.classParticipation,
+        vivas: classroom.vivas,
+        specialMarks: classroom.specialMarks,
         mids: classroom.mids,
         finals: classroom.finals,
+        finalProject: classroom.finalProject,
         sessionalActivities: classroom.sessionalActivities,
         customActivities: classroom.customActivities || []
       },
@@ -169,7 +194,7 @@ exports.getUnassignedStudents = catchAsync(async (req, res, next) => {
   const cleanTitle = title.trim().toLowerCase();
 
   markDocs.forEach(doc => {
-    if (['mids', 'finals'].includes(resolvedCategory)) {
+    if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
       if (doc[resolvedCategory] && doc[resolvedCategory].totalMarks > 0) {
         gradedStudentIds.add(doc.student.toString());
       }
@@ -219,7 +244,11 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
   const markDocs = await Mark.find({ classroom: classroomId }).lean();
   const gradedCountMap = {};
 
-  const trackingCategories = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects'];
+  const trackingCategories = [
+    'quizzes', 'assignments', 'presentations', 'projects', 
+    'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'
+  ];
+
   markDocs.forEach(doc => {
     const studentId = doc.student.toString();
     trackingCategories.forEach(cat => {
@@ -253,11 +282,13 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
   const checkListCategories = [
     { key: 'quizzes', items: classroom.quizzes || [] },
     { key: 'assignments', items: classroom.assignments || [] },
-    { key: 'labMarks', items: classroom.labMarks || [] },
-    { key: 'labTasks', items: classroom.labTasks || [] },
+    { key: 'presentations', items: classroom.presentations || [] },
+    { key: 'projects', items: classroom.projects || [] },
+    { key: 'homework', items: classroom.homework || [] },
+    { key: 'classActivities', items: classroom.classActivities || [] },
+    { key: 'classParticipation', items: classroom.classParticipation || [] },
     { key: 'vivas', items: classroom.vivas || [] },
-    { key: 'labTests', items: classroom.labTests || [] },
-    { key: 'projects', items: classroom.projects || [] }
+    { key: 'specialMarks', items: classroom.specialMarks || [] }
   ];
 
   checkListCategories.forEach(catGroup => {
@@ -345,20 +376,27 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     const doc = markMap.get(studentIdStr) || { 
       quizzes: [], 
       assignments: [], 
-      labMarks: [],
-      labTasks: [],
-      vivas: [],
-      labTests: [],
+      presentations: [],
       projects: [],
+      homework: [],
+      classActivities: [],
+      classParticipation: [],
+      vivas: [],
+      specialMarks: [],
       customActivities: [],
       mids: { totalMarks: 0, obtainedMarks: 0 }, 
-      finals: { totalMarks: 0, obtainedMarks: 0 } 
+      finals: { totalMarks: 0, obtainedMarks: 0 },
+      finalProject: { totalMarks: 0, obtainedMarks: 0 } 
     };
 
     let totalObtSessional = 0;
     let totalTotSessional = 0;
 
-    const evaluationCategories = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects'];
+    const evaluationCategories = [
+      'quizzes', 'assignments', 'presentations', 'projects', 
+      'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'
+    ];
+
     evaluationCategories.forEach(cat => {
       if (Array.isArray(doc[cat])) {
         doc[cat].forEach(item => {
@@ -467,7 +505,14 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
     let file = null;
 
     if (markDoc) {
-      if (isStandard) {
+      if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
+        const examObj = markDoc[targetCategory];
+        if (examObj) {
+          obtainedMarks = examObj.obtainedMarks;
+          isAbsent = Boolean(examObj.isAbsent);
+          file = examObj.file || null;
+        }
+      } else if (isStandard) {
         if (Array.isArray(markDoc[targetCategory])) {
           const entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodedTitle);
           if (entry) {
@@ -527,7 +572,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const parsedTotal = Number(totalMarks) || 10;
   let cleanTitle = (title || '').trim();
 
-  if (!['mids', 'finals'].includes(targetCategory)) {
+  if (!['mids', 'finals', 'finalProject'].includes(targetCategory)) {
     if (isStandard) {
       if (!Array.isArray(classroom[targetCategory])) classroom[targetCategory] = [];
       const existingIndex = classroom[targetCategory].findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
@@ -558,6 +603,9 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       }
     }
     await classroom.save();
+  } else {
+    classroom[targetCategory] = { title: cleanTitle || 'Exam', totalMarks: parsedTotal };
+    await classroom.save();
   }
 
   const updatedStudentIds = [];
@@ -581,7 +629,13 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           student: studentId,
           quizzes: [],
           assignments: [],
-          labMarks: [],
+          presentations: [],
+          projects: [],
+          homework: [],
+          classActivities: [],
+          classParticipation: [],
+          vivas: [],
+          specialMarks: [],
           customActivities: []
         });
       }
@@ -589,8 +643,9 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       const obtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
       const fileData = parseCloudinaryFile(m);
 
-      if (['mids', 'finals'].includes(targetCategory)) {
+      if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
         markDoc[targetCategory] = {
+          title: cleanTitle || 'Exam',
           totalMarks: parsedTotal,
           obtainedMarks: obtained,
           isAbsent,
@@ -725,7 +780,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findById(classroomId);
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
-  if (!['mids', 'finals'].includes(resolvedCategory)) {
+  if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+    classroom[resolvedCategory] = { title: cleanTitle, totalMarks: parsedTotal };
+    await classroom.save();
+  } else {
     if (isStandard) {
       if (!Array.isArray(classroom[resolvedCategory])) classroom[resolvedCategory] = [];
       const existingClassItem = classroom[resolvedCategory].find(
@@ -787,16 +845,25 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         student: studentId,
         quizzes: [],
         assignments: [],
-        labMarks: [],
+        presentations: [],
+        projects: [],
+        homework: [],
+        classActivities: [],
+        classParticipation: [],
+        vivas: [],
+        specialMarks: [],
         customActivities: []
       });
     }
 
-    if (['mids', 'finals'].includes(resolvedCategory)) {
-      markDoc[resolvedCategory].totalMarks = parsedTotal;
-      markDoc[resolvedCategory].obtainedMarks = parsedObtained;
-      markDoc[resolvedCategory].isAbsent = absentFlag;
-      if (file) markDoc[resolvedCategory].file = file;
+    if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+      markDoc[resolvedCategory] = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: parsedObtained,
+        isAbsent: absentFlag,
+        file: file || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
+      };
     } else if (isStandard) {
       if (!Array.isArray(markDoc[resolvedCategory])) markDoc[resolvedCategory] = [];
       const existingIdx = markDoc[resolvedCategory].findIndex(
@@ -919,14 +986,20 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       student: studentId,
       quizzes: [],
       assignments: [],
-      labMarks: [],
+      presentations: [],
+      projects: [],
+      homework: [],
+      classActivities: [],
+      classParticipation: [],
+      vivas: [],
+      specialMarks: [],
       customActivities: []
     });
   }
 
   const fileData = parseCloudinaryFile(req.body);
 
-  if (['mids', 'finals'].includes(resolvedCategory)) {
+  if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
@@ -938,6 +1011,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     }
 
     markDoc[resolvedCategory] = {
+      title: itemTitle || 'Exam',
       totalMarks: currentTotal,
       obtainedMarks: currentObtained,
       isAbsent: absentFlag,
@@ -1064,8 +1138,8 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
     return next(new AppError('Classroom ID, Category, and Item Title are required!', 400));
   }
 
-  if (['mids', 'finals'].includes(resolvedCategory)) {
-    return next(new AppError('Midterm and Final exam slots cannot be deleted.', 400));
+  if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+    return next(new AppError('Exam slots cannot be deleted.', 400));
   }
 
   const cleanTitle = itemTitle.trim().toLowerCase();
@@ -1120,7 +1194,13 @@ exports.getStudentMarks = catchAsync(async (req, res, next) => {
       student: studentId,
       quizzes: [],
       assignments: [],
-      labMarks: [],
+      presentations: [],
+      projects: [],
+      homework: [],
+      classActivities: [],
+      classParticipation: [],
+      vivas: [],
+      specialMarks: [],
       customActivities: []
     });
     

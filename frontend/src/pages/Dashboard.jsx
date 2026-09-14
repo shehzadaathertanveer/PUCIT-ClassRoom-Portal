@@ -183,7 +183,7 @@ const Dashboard = () => {
     if (type === 'CLASSROOM') {
       setSessionalActivities([...sessionalActivities, { category: 'Quiz', customCategory: '', allocatedMarks: 5 }]);
     } else {
-      setLabActivities([...labActivities, { category: 'Lab Task', customCategory: '', allocatedMarks: 20 }]);
+      setLabActivities([...labActivities, { category: 'Lab Tasks', customCategory: '', allocatedMarks: 20 }]);
     }
   };
 
@@ -1629,8 +1629,11 @@ const Dashboard = () => {
                               <option value="Assignment">Assignment</option>
                               <option value="Presentation">Presentation</option>
                               <option value="Project">Project</option>
+                              <option value="Homework">Homework</option>
                               <option value="Class Activity">Class Activity</option>
+                              <option value="Class Participation">Class Participation</option>
                               <option value="Viva">Viva</option>
+                              <option value="Special Marks">Special Marks</option>
                               <option value="Other">Other (Custom)</option>
                             </select>
                             <input 
@@ -1656,7 +1659,7 @@ const Dashboard = () => {
                             <input 
                               type="text" 
                               required
-                              placeholder="Enter custom activity name (e.g. Quizzes)"
+                              placeholder="Enter custom activity name"
                               value={act.customCategory}
                               onChange={(e) => handleActivityChange(idx, 'customCategory', e.target.value, 'CLASSROOM')}
                               className="w-full px-3 py-1.5 bg-[#080507] border border-orange-500/40 rounded-xl text-white text-xs"
@@ -1696,11 +1699,22 @@ const Dashboard = () => {
                             className="flex-grow px-3 py-1.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono"
                           >
                             <option value="Lab Tasks">Lab Tasks</option>
-                            <option value="Vivas">Vivas</option>
                             <option value="Lab Tests">Lab Tests</option>
-                            <option value="Projects">Projects</option>
                             <option value="Quizzes">Quizzes</option>
                             <option value="Assignments">Assignments</option>
+                            <option value="Presentations">Presentations</option>
+                            <option value="Vivas">Vivas</option>
+                            <option value="Projects">Projects</option>
+                            <option value="Homework">Homework</option>
+                            <option value="Class Participation">Class Participation</option>
+                            <option value="Special Marks">Special Marks</option>
+                            <option value="Final Project">Final Project</option>
+                            <option value="Lab Mids">Lab Mids</option>
+                            <option value="Lab Finals">Lab Finals</option>
+                            <option value="Lab Activities">Lab Activities</option>
+                            <option value="Lab Behavior">Lab Behavior</option>
+                            <option value="Lab Worksheets">Lab Worksheets</option>
+                            <option value="Troubleshooting">Troubleshooting</option>
                             <option value="Other">Other (Custom)</option>
                           </select>
                           <input 

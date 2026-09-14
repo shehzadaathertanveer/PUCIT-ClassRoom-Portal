@@ -137,24 +137,23 @@ const ClassroomDetail = () => {
     if (clean.includes('viva')) return 'vivas';
     if (clean.includes('test')) return 'labTests';
     if (clean.includes('project')) return 'projects';
+    if (clean.includes('present')) return 'presentations';
+    if (clean.includes('lab')) return 'labs';
     
-    const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'labtasks', 'vivas', 'labtests', 'projects'];
+    const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'labtasks', 'vivas', 'labtests', 'projects', 'presentations', 'labs'];
     const potentialKey = clean.endsWith('s') ? clean : clean + 's';
     if (standardKeys.includes(potentialKey)) return potentialKey;
     
-    return clean;
+    return 'quizzes';
   };
 
   const getItemsForCategory = (catName = '') => {
     if (!classroom) return [];
     const targetKey = getCategoryTargetKey(catName);
-    if (targetKey !== 'customActivities' && classroom[targetKey] && Array.isArray(classroom[targetKey])) {
+    if (classroom[targetKey] && Array.isArray(classroom[targetKey])) {
       return classroom[targetKey];
     }
-    const customCat = (classroom.customActivities || []).find(
-      c => c.categoryName?.trim().toLowerCase() === catName?.trim().toLowerCase()
-    );
-    return customCat ? customCat.items || [] : [];
+    return [];
   };
 
   const fetchClassroomData = async () => {
@@ -735,16 +734,8 @@ const ClassroomDetail = () => {
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
       let match = null;
-      if (targetKey !== 'customActivities') {
-        const scores = doc[targetKey] || r[targetKey] || [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      } else {
-        const customCat = (doc.customActivities || r.customActivities || []).find(
-          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
-        );
-        const scores = customCat ? customCat.items || [] : [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      }
+      const scores = doc[targetKey] || r[targetKey] || [];
+      match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
       if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
         totalObtained += Number(match.obtainedMarks);
@@ -767,16 +758,8 @@ const ClassroomDetail = () => {
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
       let match = null;
-      if (targetKey !== 'customActivities') {
-        const scores = doc[targetKey] || r[targetKey] || [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      } else {
-        const customCat = (doc.customActivities || r.customActivities || []).find(
-          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
-        );
-        const scores = customCat ? customCat.items || [] : [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      }
+      const scores = doc[targetKey] || r[targetKey] || [];
+      match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
       if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
         totalObtained += Number(match.obtainedMarks);
@@ -796,16 +779,8 @@ const ClassroomDetail = () => {
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
       let match = null;
-      if (targetKey !== 'customActivities') {
-        const scores = doc[targetKey] || r[targetKey] || [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      } else {
-        const customCat = (doc.customActivities || r.customActivities || []).find(
-          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
-        );
-        const scores = customCat ? customCat.items || [] : [];
-        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      }
+      const scores = doc[targetKey] || r[targetKey] || [];
+      match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
       if (match && ((match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) || match.isAbsent === true)) {
         graded++;
@@ -842,25 +817,13 @@ const ClassroomDetail = () => {
         obtained += Number(item.obtainedMarks || 0);
         total += Number(item.totalMarks || 0);
       }
-    } else if (targetKey !== 'customActivities' && studentMark[targetKey] && Array.isArray(studentMark[targetKey])) {
+    } else if (studentMark[targetKey] && Array.isArray(studentMark[targetKey])) {
       studentMark[targetKey].forEach(item => {
         if (!item.isAbsent) {
           obtained += Number(item.obtainedMarks || 0);
           total += Number(item.totalMarks || 0);
         }
       });
-    } else if (studentMark.customActivities && Array.isArray(studentMark.customActivities)) {
-      const customMatch = studentMark.customActivities.find(
-        c => c.categoryName?.trim().toLowerCase() === catName?.trim().toLowerCase()
-      );
-      if (customMatch && customMatch.items) {
-        customMatch.items.forEach(item => {
-          if (!item.isAbsent) {
-            obtained += Number(item.obtainedMarks || 0);
-            total += Number(item.totalMarks || 0);
-          }
-        });
-      }
     }
     return { obtained, total };
   };
@@ -1061,7 +1024,7 @@ const ClassroomDetail = () => {
                         </a>
                       ) : (
                         <a href={n.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
-                          <span>📄</span> Download {n.attachment.fileName || 'Document / PDF'}
+                          <span>📄</span> Open {n.attachment.fileName || 'Document / PDF'}
                         </a>
                       )}
                     </div>
@@ -1080,7 +1043,7 @@ const ClassroomDetail = () => {
                       </a>
                     ) : (
                       <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
-                        <span>📄</span> Download {latestNotice.attachment.fileName || 'Document / PDF'}
+                        <span>📄</span> Open {latestNotice.attachment.fileName || 'Document / PDF'}
                       </a>
                     )}
                   </div>
@@ -1341,13 +1304,8 @@ const ClassroomDetail = () => {
                   {itemsList.map((item, idx) => {
                     let studentItemScore = null;
                     if (studentMark) {
-                      if (targetKey !== 'customActivities' && studentMark[targetKey]) {
+                      if (studentMark[targetKey]) {
                         studentItemScore = studentMark[targetKey].find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
-                      } else if (studentMark.customActivities) {
-                        const customCat = studentMark.customActivities.find(c => c.categoryName?.trim().toLowerCase() === cat.trim().toLowerCase());
-                        if (customCat && customCat.items) {
-                          studentItemScore = customCat.items.find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
-                        }
                       }
                     }
 
@@ -1920,7 +1878,7 @@ const ClassroomDetail = () => {
                 </div>
               </div>
 
-              {/* Dynamic Sessional Activities Manager with Case-Insensitive Dropdown Matching */}
+              {/* Strict Preset Sessional Activities Manager */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-orange-400 uppercase">Sessional Activities & Mark Allocations</p>
@@ -1936,45 +1894,23 @@ const ClassroomDetail = () => {
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                   {editSessionalActivities.map((act, index) => {
                     const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs', 'Lab Tasks', 'Vivas', 'Lab Tests'];
-                    const matchedPreset = presetOptions.find(opt => opt.toLowerCase() === act.category.trim().toLowerCase());
-                    const isCustom = !matchedPreset;
 
                     return (
                       <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
                         <select
-                          value={isCustom ? 'Custom...' : matchedPreset}
+                          value={act.category}
                           onChange={(e) => {
                             const val = e.target.value;
                             const updated = [...editSessionalActivities];
-                            if (val === 'Custom...') {
-                              updated[index].category = '';
-                            } else {
-                              updated[index].category = val;
-                            }
+                            updated[index].category = val;
                             setEditSessionalActivities(updated);
                           }}
-                          className="w-36 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs uppercase font-mono"
+                          className="flex-1 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs uppercase font-mono"
                         >
                           {presetOptions.map(opt => (
                             <option key={opt} value={opt}>{opt}</option>
                           ))}
-                          <option value="Custom...">Custom...</option>
                         </select>
-
-                        {isCustom && (
-                          <input 
-                            type="text" 
-                            placeholder="Custom Category Name" 
-                            value={act.category} 
-                            onChange={(e) => {
-                              const updated = [...editSessionalActivities];
-                              updated[index].category = e.target.value;
-                              setEditSessionalActivities(updated);
-                            }}
-                            className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
-                            required
-                          />
-                        )}
 
                         <input 
                           type="number" 

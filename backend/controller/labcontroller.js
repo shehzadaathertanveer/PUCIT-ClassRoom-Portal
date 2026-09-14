@@ -6,18 +6,31 @@ const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 
 // =============================================================================
-// HELPER: Normalize Lab Target Keys Safely (Supports Custom Sessional Activities)
+// HELPER: Normalize Lab Target Keys Safely (Mapped to Expanded Lab Schema)
 // =============================================================================
 const getNormalizedLabTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
   if (clean.includes('task')) return 'labTasks';
   if (clean.includes('viva')) return 'vivas';
   if (clean.includes('test')) return 'labTests';
+  if (clean.includes('final project') || clean.includes('finalproject')) return 'finalProject';
   if (clean.includes('project')) return 'projects';
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
+  if (clean.includes('present')) return 'presentations';
+  if (clean === 'mids' || clean === 'midterm' || clean.includes('lab mid') || clean.includes('labmid')) return 'labMids';
+  if (clean === 'finals' || clean === 'final' || clean.includes('lab final') || clean.includes('labfinal')) return 'labFinals';
+  if (clean.includes('activ')) return 'labActivities';
+  if (clean.includes('behavior') || clean.includes('behaviour')) return 'labBehavior';
+  if (clean.includes('worksheet')) return 'labWorksheets';
+  if (clean.includes('troubleshoot')) return 'troubleshooting';
   
-  const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
+  const standardKeys = [
+    'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
+    'presentations', 'finalProject', 'labMids', 'labFinals',
+    'labActivities', 'labBehavior', 'labWorksheets', 'troubleshooting'
+  ];
+  
   const sanitizedCamel = clean
     .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
     .replace(/[^a-zA-Z0-9]/g, '');
@@ -25,8 +38,8 @@ const getNormalizedLabTargetKey = (rawType = '') => {
   
   if (standardKeys.includes(potentialKey)) return potentialKey;
   
-  // Fallback to customActivities bucket for any user-defined custom categories
-  return 'customActivities';
+  // Default fallback
+  return 'labTasks';
 };
 
 // =============================================================================
@@ -226,12 +239,18 @@ exports.setLabroomRoster = catchAsync(async (req, res, next) => {
             labroom: labroom._id,
             student: student._id,
             labTasks: [],
-            vivas: [],
-            labTests: [],
-            projects: [],
             quizzes: [],
             assignments: [],
-            customActivities: [],
+            presentations: [],
+            vivas: [],
+            projects: [],
+            finalProject: [],
+            labMids: [],
+            labFinals: [],
+            labActivities: [],
+            labBehavior: [],
+            labWorksheets: [],
+            troubleshooting: []
           },
         },
         { upsert: true, returnDocument: 'after' }
@@ -387,7 +406,15 @@ exports.addStudentToLabroom = catchAsync(async (req, res, next) => {
 
   const studentMark = await LabMark.findOneAndUpdate(
     { labroom: targetLabId, student: studentId },
-    { $setOnInsert: { labroom: targetLabId, student: studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+    { 
+      $setOnInsert: { 
+        labroom: targetLabId, 
+        student: studentId, 
+        labTasks: [], quizzes: [], assignments: [], presentations: [], 
+        vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+        labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+      } 
+    },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -626,7 +653,15 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   await LabMark.findOneAndUpdate(
     { labroom: targetLabId, student: student._id },
-    { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+    { 
+      $setOnInsert: { 
+        labroom: targetLabId, 
+        student: student._id, 
+        labTasks: [], quizzes: [], assignments: [], presentations: [], 
+        vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+        labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+      } 
+    },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -733,7 +768,15 @@ exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
     const markPromises = successfullyAdded.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: labroomId, student: student._id },
-        { $setOnInsert: { labroom: labroomId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+        { 
+          $setOnInsert: { 
+            labroom: labroomId, 
+            student: student._id, 
+            labTasks: [], quizzes: [], assignments: [], presentations: [], 
+            vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+            labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+          } 
+        },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -807,7 +850,15 @@ exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+        { 
+          $setOnInsert: { 
+            labroom: targetLabId, 
+            student: student._id, 
+            labTasks: [], quizzes: [], assignments: [], presentations: [], 
+            vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+            labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+          } 
+        },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -887,7 +938,15 @@ exports.addBulkLabStudentsByRange = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+        { 
+          $setOnInsert: { 
+            labroom: targetLabId, 
+            student: student._id, 
+            labTasks: [], quizzes: [], assignments: [], presentations: [], 
+            vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+            labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+          } 
+        },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -959,7 +1018,15 @@ exports.addDropLabSeniorsList = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
+        { 
+          $setOnInsert: { 
+            labroom: targetLabId, 
+            student: student._id, 
+            labTasks: [], quizzes: [], assignments: [], presentations: [], 
+            vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+            labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+          } 
+        },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -1046,34 +1113,25 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
   for (const scoreEntry of studentScores) {
     let markRec = await LabMark.findOne({ labroom: labroomId, student: scoreEntry.studentId });
     if (!markRec) {
-      markRec = await LabMark.create({ labroom: labroomId, student: scoreEntry.studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] });
+      markRec = await LabMark.create({ 
+        labroom: labroomId, 
+        student: scoreEntry.studentId, 
+        labTasks: [], quizzes: [], assignments: [], presentations: [], 
+        vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+        labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: [] 
+      });
     }
 
     const isAbsent = Boolean(scoreEntry.isAbsent);
     const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
     const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
 
-    if (targetKey !== 'customActivities') {
-      if (!markRec[targetKey]) markRec[targetKey] = [];
-      const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-      if (idx > -1) {
-        markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...itemPayload };
-      } else {
-        markRec[targetKey].push(itemPayload);
-      }
+    if (!markRec[targetKey]) markRec[targetKey] = [];
+    const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+    if (idx > -1) {
+      markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...itemPayload };
     } else {
-      if (!Array.isArray(markRec.customActivities)) markRec.customActivities = [];
-      let markCat = markRec.customActivities.find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
-      if (!markCat) {
-        markCat = { categoryName: cleanCategory, items: [] };
-        markRec.customActivities.push(markCat);
-      }
-      const idx = markCat.items.findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-      if (idx > -1) {
-        markCat.items[idx] = { ...markCat.items[idx], ...itemPayload };
-      } else {
-        markCat.items.push(itemPayload);
-      }
+      markRec[targetKey].push(itemPayload);
     }
     await markRec.save();
 
@@ -1141,7 +1199,7 @@ exports.getLabComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. CREATE & DELETE GRADED LAB ITEM (Fixed custom category validation)
+// 18. CREATE & DELETE GRADED LAB ITEM
 // =============================================================================
 exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1158,30 +1216,17 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const tMarks = Number(totalMarks) || 10;
   const targetKey = getNormalizedLabTargetKey(cleanCategory);
 
-  const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
-  const isStandardKey = standardKeys.includes(targetKey);
-
-  // Relaxed custom category validation check
-  if (!isStandardKey) {
-    if (!Array.isArray(labroom.sessionalActivities)) {
-      labroom.sessionalActivities = [];
-    }
-    const isValidCustom = labroom.sessionalActivities.some(
-      act => act.category && act.category.trim().toLowerCase() === cleanCategory.toLowerCase()
-    );
-    if (!isValidCustom) {
-      // Automatically push custom activity schema configuration if missing
-      labroom.sessionalActivities.push({
-        category: cleanCategory,
-        allocatedMarks: tMarks
-      });
+  // Enforce single-entry constraint for unique lab exams if applicable
+  if (['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
+    if (labroom[targetKey] && labroom[targetKey].length > 0) {
+      return next(new AppError(`Only one ${targetKey} entry is allowed per labroom.`, 400));
     }
   }
 
   let targetStudents = labroom.students;
   const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
 
-  if (hasRange) {
+  if (hasRange && !['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
     const startIdx = parseInt(rangeStart, 10) - 1;
     const endIdx = parseInt(rangeEnd, 10);
     
@@ -1201,30 +1246,17 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
     }
   }
 
-  if (targetKey !== 'customActivities') {
-    if (!labroom[targetKey]) labroom[targetKey] = [];
+  if (!labroom[targetKey]) labroom[targetKey] = [];
+  
+  if (['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
+    labroom[targetKey] = [{ title: trimmedTitle, totalMarks: tMarks }];
+  } else {
     const exists = labroom[targetKey].some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
     if (!exists) {
       labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks });
-      await labroom.save();
-    }
-  } else {
-    if (!labroom.customActivities) labroom.customActivities = [];
-    let customCat = labroom.customActivities.find(c => c.categoryName.toLowerCase() === cleanCategory.toLowerCase());
-    if (!customCat) {
-      labroom.customActivities.push({
-        categoryName: cleanCategory,
-        items: [{ title: trimmedTitle, totalMarks: tMarks }]
-      });
-      await labroom.save();
-    } else {
-      const exists = customCat.items.some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
-      if (!exists) {
-        customCat.items.push({ title: trimmedTitle, totalMarks: tMarks });
-        await labroom.save();
-      }
     }
   }
+  await labroom.save();
 
   const itemPayload = { title: trimmedTitle, totalMarks: tMarks, obtainedMarks: 0, isAbsent: false };
   const studentIdsToInit = targetStudents.map(st => st._id);
@@ -1235,36 +1267,23 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
       markDoc = await LabMark.create({
         labroom: labroomId,
         student: studId,
-        labTasks: [],
-        vivas: [],
-        labTests: [],
-        projects: [],
-        quizzes: [],
-        assignments: [],
-        customActivities: []
+        labTasks: [], quizzes: [], assignments: [], presentations: [], 
+        vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [], 
+        labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: []
       });
     }
 
-    if (targetKey !== 'customActivities') {
-      if (!markDoc[targetKey]) markDoc[targetKey] = [];
+    if (!markDoc[targetKey]) markDoc[targetKey] = [];
+    
+    if (['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
+      markDoc[targetKey] = [itemPayload];
+    } else {
       const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
       if (itemIdx === -1) {
         markDoc[targetKey].push(itemPayload);
-        await markDoc.save();
-      }
-    } else {
-      if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
-      let markCat = markDoc.customActivities.find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
-      if (!markCat) {
-        markCat = { categoryName: cleanCategory, items: [] };
-        markDoc.customActivities.push(markCat);
-      }
-      const itemIdx = markCat.items.findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
-      if (itemIdx === -1) {
-        markCat.items.push(itemPayload);
-        await markDoc.save();
       }
     }
+    await markDoc.save();
   }
 
   res.status(201).json({
@@ -1284,12 +1303,21 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  const cleanTitle = title.trim();
+  const cleanTitle = (title || '').trim();
   const cleanCategory = (category || '').trim();
   const targetKey = getNormalizedLabTargetKey(cleanCategory);
-  const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
-  if (standardKeys.includes(targetKey)) {
+  if (['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
+    labroom[targetKey] = [];
+    await labroom.save();
+    await LabMark.updateMany(
+      { labroom: labroomId },
+      { $set: { [targetKey]: [] } }
+    );
+  } else {
+    if (!labroom[targetKey]) {
+      return next(new AppError('Invalid lab category type.', 400));
+    }
     const beforeCount = labroom[targetKey].length;
     labroom[targetKey] = labroom[targetKey].filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
     if (labroom[targetKey].length === beforeCount) {
@@ -1301,36 +1329,11 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
       { labroom: labroomId },
       { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
     );
-  } else {
-    let found = false;
-    if (labroom.customActivities) {
-      labroom.customActivities.forEach(cat => {
-        if (!cleanCategory || cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
-          const initLen = cat.items.length;
-          cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
-          if (cat.items.length < initLen) found = true;
-        }
-      });
-    }
-    if (!found) return next(new AppError(`Custom lab item "${cleanTitle}" not found.`, 404));
-    await labroom.save();
-
-    const markDocs = await LabMark.find({ labroom: labroomId });
-    for (const doc of markDocs) {
-      if (Array.isArray(doc.customActivities)) {
-        doc.customActivities.forEach(cat => {
-          if (!cleanCategory || cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
-            cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
-          }
-        });
-        await doc.save();
-      }
-    }
   }
 
   res.status(200).json({
     status: 'success',
-    message: `Lab item "${cleanTitle}" successfully deleted!`,
+    message: `Lab item successfully deleted!`,
     data: { labroom },
   });
 });
@@ -1464,8 +1467,9 @@ exports.lookupLabTeacher = catchAsync(async (req, res, next) => {
 
   res.status(200).json({ status: 'success', data: { status: 'found', user } });
 });
+
 // =============================================================================
-// 22. GET BULK LAB MARK SHEET (With Custom Activities Support)
+// 22. GET BULK LAB MARK SHEET
 // =============================================================================
 exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1488,13 +1492,19 @@ exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
         labName: labroom.labName,
         sectionPrefix: labroom.sectionPrefix,
         labTasks: labroom.labTasks || [],
-        vivas: labroom.vivas || [],
-        labTests: labroom.labTests || [],
-        projects: labroom.projects || [],
         quizzes: labroom.quizzes || [],
         assignments: labroom.assignments || [],
-        sessionalActivities: labroom.sessionalActivities || [],
-        customActivities: labroom.customActivities || []
+        presentations: labroom.presentations || [],
+        vivas: labroom.vivas || [],
+        projects: labroom.projects || [],
+        finalProject: labroom.finalProject || [],
+        labMids: labroom.labMids || [],
+        labFinals: labroom.labFinals || [],
+        labActivities: labroom.labActivities || [],
+        labBehavior: labroom.labBehavior || [],
+        labWorksheets: labroom.labWorksheets || [],
+        troubleshooting: labroom.troubleshooting || [],
+        sessionalActivities: labroom.sessionalActivities || []
       },
       students: labroom.students || [],
       existingMarks,
@@ -1522,19 +1532,13 @@ exports.getUnassignedLabStudents = catchAsync(async (req, res, next) => {
 
   const gradedStudentIds = new Set();
   markDocs.forEach(doc => {
-    if (targetKey !== 'customActivities') {
-      const itemsList = doc[targetKey] || [];
+    const itemsList = doc[targetKey] || [];
+    if (Array.isArray(itemsList)) {
       if (itemsList.some(item => item.title?.trim().toLowerCase() === cleanTitle)) {
         gradedStudentIds.add(doc.student.toString());
       }
-    } else if (Array.isArray(doc.customActivities)) {
-      doc.customActivities.forEach(cat => {
-        if (cat.categoryName?.trim().toLowerCase() === category.trim().toLowerCase()) {
-          if ((cat.items || []).some(i => i.title?.trim().toLowerCase() === cleanTitle)) {
-            gradedStudentIds.add(doc.student.toString());
-          }
-        }
-      });
+    } else if (itemsList && itemsList.title?.trim().toLowerCase() === cleanTitle) {
+      gradedStudentIds.add(doc.student.toString());
     }
   });
 
