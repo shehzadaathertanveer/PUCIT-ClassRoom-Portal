@@ -48,11 +48,14 @@ const LabroomDetail = () => {
   const [complaintsList, setComplaintsList] = useState([]);
   const [loadingComplaints, setLoadingComplaints] = useState(false);
 
-  // Create student result / graded item sheet modal state
+  // Create student result / graded item sheet modal state (Supercharged with Mode Selection)
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [evaluationMode, setEvaluationMode] = useState(null); // 'full' or 'range'
   const [itemCategory, setItemCategory] = useState('Lab Tasks');
   const [itemTitle, setItemTitle] = useState('');
   const [itemTotalMarks, setItemTotalMarks] = useState(10);
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
   const [creatingItem, setCreatingItem] = useState(false);
 
   // Excel / CSV Sync states for Staff
@@ -309,12 +312,20 @@ const LabroomDetail = () => {
       });
 
       setIsItemModalOpen(false);
+      setEvaluationMode(null);
       setItemTitle('');
       setItemTotalMarks(10);
+      setRangeStart('');
+      setRangeEnd('');
       showToast('Opening lab result sheet...');
 
+      const sheetState = { totalMarks: tMarks };
+      if (evaluationMode === 'range') {
+        sheetState.filterRange = { start: Number(rangeStart), end: Number(rangeEnd) };
+      }
+
       navigate(`/labrooms/${labroomId}/sheet/${catKey}/${encodeURIComponent(trimmedTitle)}`, {
-        state: { totalMarks: tMarks }
+        state: sheetState
       });
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to open lab result sheet.', 'error');
@@ -363,8 +374,6 @@ const LabroomDetail = () => {
     e.preventDefault();
     setUpdatingSettings(true);
     try {
-      const totalAllocated = editSessionalActivities.reduce((acc, curr) => acc + (Number(curr.allocatedMarks) || 0), 0);
-
       await API.patch(`/labrooms/${labroomId}/settings`, {
         labName: editLabName.trim(),
         sectionPrefix: editSectionPrefix.trim().toUpperCase(),
@@ -1033,7 +1042,6 @@ const LabroomDetail = () => {
               </h3>
               {user?.role === 'STUDENT' && !isAssignedTa ? (
                 <div className="space-y-4">
-                  {/* Overall Lab Percentage & Rank Cards Side by Side */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-gradient-to-br from-blue-950/60 to-[#080507] border border-blue-500/40 p-5 rounded-3xl space-y-2 shadow-2xl">
                       <p className="text-xs text-blue-400 uppercase font-extrabold tracking-widest">Overall Lab Percentage</p>
@@ -1045,7 +1053,6 @@ const LabroomDetail = () => {
                     </div>
                   </div>
 
-                  {/* Activity Category Breakdown */}
                   <div className="bg-[#080507] border border-slate-800 p-4 rounded-3xl space-y-3 shadow-lg">
                     <p className="text-xs font-bold uppercase text-slate-300">Activity Category Breakdown</p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1434,38 +1441,73 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 2. Create Result Sheet Modal */}
+      {/* 2. Create Result Sheet Modal (Supercharged with 2 Options: Full Sheet or Range) */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-blue-400 uppercase">Create Evaluation Item</h3>
-              <button onClick={() => setIsItemModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button onClick={() => { setIsItemModalOpen(false); setEvaluationMode(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
-            <form onSubmit={handleCreateAndOpenSheet} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
-                <select value={itemCategory} onChange={(e) => setItemCategory(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono">
-                  {sessionalActivitiesList.map(act => (
-                    <option key={act.category} value={act.category}>{act.category}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Item Title</label>
-                <input type="text" required placeholder="e.g. Lab Task 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
-                <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setIsItemModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" disabled={creatingItem} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
-                  {creatingItem ? 'Opening...' : 'Open Sheet'}
+
+            {!evaluationMode ? (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-300">Select evaluation spread configuration:</p>
+                <button 
+                  onClick={() => setEvaluationMode('full')} 
+                  className="w-full p-4 bg-[#080507] hover:bg-blue-950/40 border border-slate-800 hover:border-blue-500/40 rounded-2xl text-left transition-all group cursor-pointer space-y-1"
+                >
+                  <p className="text-xs font-bold text-white group-hover:text-blue-300 uppercase">1. Full Class Spreadsheet</p>
+                  <p className="text-[10px] text-slate-400">Generates or opens the grading sheet for all enrolled students in the lab.</p>
+                </button>
+                <button 
+                  onClick={() => setEvaluationMode('range')} 
+                  className="w-full p-4 bg-[#080507] hover:bg-blue-950/40 border border-slate-800 hover:border-blue-500/40 rounded-2xl text-left transition-all group cursor-pointer space-y-1"
+                >
+                  <p className="text-xs font-bold text-white group-hover:text-blue-300 uppercase">2. Select From a Range</p>
+                  <p className="text-[10px] text-slate-400">Filters sheet rows to a specific numeric suffix or ID range (e.g., 1 to 25).</p>
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleCreateAndOpenSheet} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
+                  <select value={itemCategory} onChange={(e) => setItemCategory(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono">
+                    {sessionalActivitiesList.map(act => (
+                      <option key={act.category} value={act.category}>{act.category}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Item Title</label>
+                  <input type="text" required placeholder="e.g. Lab Task 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
+                  <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                </div>
+
+                {evaluationMode === 'range' && (
+                  <div className="grid grid-cols-2 gap-3 bg-[#080507] p-3 rounded-2xl border border-slate-800">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Start #</label>
+                      <input type="number" required placeholder="1" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} className="w-full px-3 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">End #</label>
+                      <input type="number" required placeholder="25" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} className="w-full px-3 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setEvaluationMode(null)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">← Back</button>
+                  <button type="submit" disabled={creatingItem} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                    {creatingItem ? 'Opening...' : 'Open Sheet'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -1526,7 +1568,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Supercharged Add Student Modal (Reordered & Darkened Enrolled State) */}
+      {/* 4. Supercharged Add Student Modal */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
@@ -1540,7 +1582,6 @@ const LabroomDetail = () => {
             
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
             
-            {/* Reordered Mode Toggle Buttons: 1. Shorthand, 2. Range, 3. Full Roll, 4. Smart Add */}
             <div className="grid grid-cols-4 gap-1.5">
               <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Shorthand</button>
               <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
@@ -1549,8 +1590,6 @@ const LabroomDetail = () => {
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
-              
-              {/* MODE 1: SHORTHAND (e.g. 3, 4, 56) */}
               {addModeType === 'shorthand' && (
                 <div className="space-y-2">
                   <label className="block text-xs font-bold uppercase text-slate-400">Quick Suffix Entry (e.g. 3, 4, 56)</label>
@@ -1568,7 +1607,6 @@ const LabroomDetail = () => {
                 </div>
               )}
 
-              {/* MODE 2: RANGE (Start to End) */}
               {addModeType === 'range' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -1587,7 +1625,6 @@ const LabroomDetail = () => {
                 </div>
               )}
 
-              {/* MODE 3: FULL ROLL (Batch CSV / List) */}
               {addModeType === 'batch' && (
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Full Roll Numbers / Add-Drop List</label>
@@ -1603,7 +1640,6 @@ const LabroomDetail = () => {
                 </div>
               )}
 
-              {/* MODE 4: SMART ADD / SMART DETECT */}
               {addModeType === 'smartDetect' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs text-slate-400">
@@ -1751,7 +1787,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 7. Settings Modal */}
+      {/* 7. Settings Modal with Dropdown & Custom Option for Lab Activities */}
       {isSettingsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
@@ -1779,59 +1815,93 @@ const LabroomDetail = () => {
                 <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
               </div>
 
-              {/* Dynamic Sessional Activities Manager */}
+              {/* Dynamic Sessional Activities Manager with Predefined Dropdown & Custom Option */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-blue-400 uppercase">Lab Activities & Mark Weights</p>
                   <button 
                     type="button" 
-                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: '', allocatedMarks: 20 }])}
+                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: 'Lab Tasks', allocatedMarks: 20 }])}
                     className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
                   >
                     + Add Activity
                   </button>
                 </div>
                 
-                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {editSessionalActivities.map((act, index) => (
-                    <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
-                      <input 
-                        type="text" 
-                        placeholder="Category Name (e.g. Lab Tasks)" 
-                        value={act.category} 
-                        onChange={(e) => {
-                          const updated = [...editSessionalActivities];
-                          updated[index].category = e.target.value;
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
-                        required
-                      />
-                      <input 
-                        type="number" 
-                        placeholder="Weight" 
-                        value={act.allocatedMarks} 
-                        onChange={(e) => {
-                          const updated = [...editSessionalActivities];
-                          updated[index].allocatedMarks = Number(e.target.value);
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="w-20 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
-                        min="1"
-                        required
-                      />
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          const updated = editSessionalActivities.filter((_, i) => i !== index);
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {editSessionalActivities.map((act, index) => {
+                    const presetCategories = ['Lab Tasks', 'Vivas', 'Lab Tests', 'Projects', 'Quizzes', 'Assignments'];
+                    const isCustom = !presetCategories.includes(act.category);
+
+                    return (
+                      <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
+                        <select
+                          value={isCustom ? 'Custom' : act.category}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const updated = [...editSessionalActivities];
+                            if (val === 'Custom') {
+                              updated[index].category = '';
+                            } else {
+                              updated[index].category = val;
+                            }
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="w-32 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono uppercase"
+                        >
+                          {presetCategories.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                          <option value="Custom">Custom...</option>
+                        </select>
+
+                        {(isCustom || act.category === '') && (
+                          <input 
+                            type="text" 
+                            placeholder="Custom Category Name" 
+                            value={act.category} 
+                            onChange={(e) => {
+                              const updated = [...editSessionalActivities];
+                              updated[index].category = e.target.value;
+                              setEditSessionalActivities(updated);
+                            }}
+                            className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
+                            required
+                          />
+                        )}
+
+                        {!isCustom && act.category !== '' && (
+                          <div className="flex-1 px-2.5 py-1.5 bg-[#130910]/50 border border-slate-800 rounded-lg text-slate-300 text-xs truncate">
+                            {act.category}
+                          </div>
+                        )}
+
+                        <input 
+                          type="number" 
+                          placeholder="Weight" 
+                          value={act.allocatedMarks} 
+                          onChange={(e) => {
+                            const updated = [...editSessionalActivities];
+                            updated[index].allocatedMarks = Number(e.target.value);
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="w-16 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
+                          min="1"
+                          required
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const updated = editSessionalActivities.filter((_, i) => i !== index);
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

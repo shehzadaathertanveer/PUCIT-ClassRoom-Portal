@@ -1040,6 +1040,7 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
     const isAbsent = Boolean(scoreEntry.isAbsent);
     const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
 
+    if (!markRec[targetKey]) markRec[targetKey] = [];
     const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
     const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
 
@@ -1133,6 +1134,17 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
 
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
+  // Validate custom categories against labroom sessionalActivities if not standard
+  const isStandardKey = standardKeys.includes(targetKey);
+  if (!isStandardKey && labroom.sessionalActivities) {
+    const isValidCustom = labroom.sessionalActivities.some(
+      act => act.category.trim().toLowerCase() === cleanCategory.toLowerCase()
+    );
+    if (!isValidCustom) {
+      return next(new AppError(`Invalid evaluation category specified: "${cleanCategory}".`, 400));
+    }
+  }
+
   let targetStudents = labroom.students;
   const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
 
@@ -1175,13 +1187,15 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
     }
   }
 
-  if (standardKeys.includes(targetKey)) {
+  if (isStandardKey) {
+    if (!labroom[targetKey]) labroom[targetKey] = [];
     const exists = labroom[targetKey].some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
     if (!exists) {
       labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks });
       await labroom.save();
     }
   } else {
+    if (!labroom.customActivities) labroom.customActivities = [];
     let customCat = labroom.customActivities.find(c => c.categoryName.toLowerCase() === cleanCategory.toLowerCase());
     if (!customCat) {
       labroom.customActivities.push({
@@ -1260,11 +1274,13 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
     );
   } else {
     let found = false;
-    labroom.customActivities.forEach(cat => {
-      const initLen = cat.items.length;
-      cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
-      if (cat.items.length < initLen) found = true;
-    });
+    if (labroom.customActivities) {
+      labroom.customActivities.forEach(cat => {
+        const initLen = cat.items.length;
+        cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
+        if (cat.items.length < initLen) found = true;
+      });
+    }
     if (!found) return next(new AppError(`Custom lab item "${cleanTitle}" not found.`, 404));
     await labroom.save();
   }

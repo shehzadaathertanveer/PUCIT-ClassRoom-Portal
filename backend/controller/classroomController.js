@@ -5,7 +5,7 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 
-// Helper: Normalize Schema Target Keys Safely
+// Helper: Normalize Schema Target Keys Safely (Supports Custom Sessional Activities)
 const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
   if (clean.includes('quiz')) return 'quizzes';
@@ -13,6 +13,7 @@ const getNormalizedTargetKey = (rawType = '') => {
   if (clean.includes('lab')) return 'labMarks';
   if (clean.includes('mid')) return 'mids';
   if (clean.includes('final')) return 'finals';
+  // For custom activities like "Homework", map safely or fallback
   return clean.endsWith('s') ? clean : clean + 's';
 };
 
@@ -709,7 +710,19 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
     .populate('students', 'name rollNo');
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
-  const targetKey = getNormalizedTargetKey(category || type);
+  const rawCat = category || type || '';
+  const targetKey = getNormalizedTargetKey(rawCat);
+
+  // If standard keys don't match, check if it's a valid custom sessional activity defined in the classroom
+  const isStandardKey = ['quizzes', 'assignments', 'labMarks', 'mids', 'finals'].includes(targetKey);
+  if (!isStandardKey && classroom.sessionalActivities) {
+    const isValidCustom = classroom.sessionalActivities.some(
+      act => act.category.trim().toLowerCase() === rawCat.trim().toLowerCase()
+    );
+    if (!isValidCustom) {
+      return next(new AppError(`Invalid evaluation category specified: "${rawCat}".`, 400));
+    }
+  }
 
   if (!classroom[targetKey]) {
     classroom[targetKey] = [];
@@ -1291,10 +1304,11 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
       obtainedMarks: isAbsent ? 0 : Number(obtainedMarks) || 0,
       isAbsent: Boolean(isAbsent),
     };
-  } else if (['quizzes', 'assignments', 'labMarks'].includes(targetKey)) {
-    if (!title) return next(new AppError('Item title is required for quizzes, assignments, or lab marks.', 400));
+  } else {
+    if (!title) return next(new AppError('Item title is required for evaluations.', 400));
     
     const cleanTitle = title.trim();
+    if (!markRecord[targetKey]) markRecord[targetKey] = [];
     const itemIndex = markRecord[targetKey].findIndex(
       (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
     );
@@ -1311,8 +1325,6 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
     } else {
       markRecord[targetKey].push(itemData);
     }
-  } else {
-    return next(new AppError('Invalid evaluation category specified.', 400));
   }
 
   await markRecord.save();
@@ -1402,8 +1414,8 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
         }
       }
     }
-  } else if (['quizzes', 'assignments', 'labMarks'].includes(targetKey)) {
-    if (!title) return next(new AppError('Title is required for whole-class quiz/assignment/lab mark entries.', 400));
+  } else {
+    if (!title) return next(new AppError('Title is required for evaluation mark entries.', 400));
     
     for (const scoreEntry of studentScores) {
       let markRec = await Mark.findOne({ classroom: classroomId, student: scoreEntry.studentId });
@@ -1415,6 +1427,7 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
       const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
       const cleanTitle = title.trim();
 
+      if (!markRec[targetKey]) markRec[targetKey] = [];
       const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
       const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
 
@@ -1578,7 +1591,6 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     return next(new AppError('Target User ID is required!', 400));
   }
 
-  // Prevent admin from deleting themselves
   if (userId.toString() === req.user._id.toString()) {
     return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
   }
@@ -1589,8 +1601,6 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
   }
 
   await User.findByIdAndDelete(userId);
-
-  // Clean up references in mark records or class rosters if needed
   await Mark.deleteMany({ student: userId });
 
   res.status(200).json({

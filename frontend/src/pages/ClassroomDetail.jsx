@@ -50,10 +50,16 @@ const ClassroomDetail = () => {
 
   // Create student result / graded item sheet modal state
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [itemCreationMode, setItemCreationMode] = useState('all'); // 'all' or 'range'
   const [itemCategory, setItemCategory] = useState('Quizzes');
   const [itemTitle, setItemTitle] = useState('');
   const [itemTotalMarks, setItemTotalMarks] = useState(10);
+  const [itemStartRoll, setItemStartRoll] = useState('');
+  const [itemEndRoll, setItemEndRoll] = useState('');
   const [creatingItem, setCreatingItem] = useState(false);
+
+  // State tracking for custom category selection in settings
+  const [customCategoryInputs, setCustomCategoryInputs] = useState({});
 
   // Excel / CSV Sync states for Staff
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
@@ -310,22 +316,37 @@ const ClassroomDetail = () => {
       const tMarks = Number(itemTotalMarks) || 10;
       const catKey = getCategoryTargetKey(itemCategory);
 
-      await API.post(`/classrooms/${classroomId}/items`, {
+      const payload = {
         category: catKey,
         title: trimmedTitle,
-        totalMarks: tMarks
-      });
+        totalMarks: tMarks,
+        mode: itemCreationMode
+      };
+
+      if (itemCreationMode === 'range') {
+        const start = parseInt(itemStartRoll, 10);
+        const end = parseInt(itemEndRoll, 10);
+        if (isNaN(start) || isNaN(end) || start > end) {
+          throw new Error('Please specify a valid numeric roll suffix range.');
+        }
+        payload.startRoll = start;
+        payload.endRoll = end;
+      }
+
+      await API.post(`/classrooms/${classroomId}/items`, payload);
 
       setIsItemModalOpen(false);
       setItemTitle('');
       setItemTotalMarks(10);
+      setItemStartRoll('');
+      setItemEndRoll('');
       showToast('Opening grading sheet...');
 
       navigate(`/classroom/${classroomId}/sheet/${catKey}/${encodeURIComponent(trimmedTitle)}`, {
         state: { totalMarks: tMarks }
       });
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to open student result sheet.', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to open student result sheet.', 'error');
     } finally {
       setCreatingItem(false);
     }
@@ -1479,6 +1500,12 @@ const ClassroomDetail = () => {
               <h3 className="text-base font-extrabold text-orange-400 uppercase">Create Evaluation Item</h3>
               <button onClick={() => setIsItemModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setItemCreationMode('all')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${itemCreationMode === 'all' ? 'bg-orange-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Whole Class</button>
+              <button type="button" onClick={() => setItemCreationMode('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${itemCreationMode === 'range' ? 'bg-orange-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Roll Number Range</button>
+            </div>
+
             <form onSubmit={handleCreateAndOpenSheet} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
@@ -1496,6 +1523,20 @@ const ClassroomDetail = () => {
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
                 <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
               </div>
+
+              {itemCreationMode === 'range' && (
+                <div className="grid grid-cols-2 gap-3 bg-[#080507] p-3 rounded-2xl border border-slate-800">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Start Suffix</label>
+                    <input type="number" required placeholder="1" value={itemStartRoll} onChange={(e) => setItemStartRoll(e.target.value)} className="w-full px-2.5 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">End Suffix</label>
+                    <input type="number" required placeholder="25" value={itemEndRoll} onChange={(e) => setItemEndRoll(e.target.value)} className="w-full px-2.5 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setIsItemModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
                 <button type="submit" disabled={creatingItem} className="w-1/2 py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
@@ -1834,13 +1875,13 @@ const ClassroomDetail = () => {
                 </div>
               </div>
 
-              {/* Dynamic Sessional Activities Manager */}
+              {/* Dynamic Sessional Activities Manager with Dropdown & Custom Option */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-orange-400 uppercase">Sessional Activities & Mark Allocations</p>
                   <button 
                     type="button" 
-                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: '', allocatedMarks: 10 }])}
+                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: 'Quizzes', allocatedMarks: 10 }])}
                     className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
                   >
                     + Add Activity
@@ -1848,45 +1889,73 @@ const ClassroomDetail = () => {
                 </div>
                 
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {editSessionalActivities.map((act, index) => (
-                    <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
-                      <input 
-                        type="text" 
-                        placeholder="Category Name (e.g. Quizzes)" 
-                        value={act.category} 
-                        onChange={(e) => {
-                          const updated = [...editSessionalActivities];
-                          updated[index].category = e.target.value;
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
-                        required
-                      />
-                      <input 
-                        type="number" 
-                        placeholder="Marks" 
-                        value={act.allocatedMarks} 
-                        onChange={(e) => {
-                          const updated = [...editSessionalActivities];
-                          updated[index].allocatedMarks = Number(e.target.value);
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="w-20 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
-                        min="1"
-                        required
-                      />
-                      <button 
-                        type="button" 
-                        onClick={() => {
-                          const updated = editSessionalActivities.filter((_, i) => i !== index);
-                          setEditSessionalActivities(updated);
-                        }}
-                        className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                  {editSessionalActivities.map((act, index) => {
+                    const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs'];
+                    const isCustom = !presetOptions.includes(act.category);
+
+                    return (
+                      <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
+                        <select
+                          value={isCustom ? 'Custom...' : act.category}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const updated = [...editSessionalActivities];
+                            if (val === 'Custom...') {
+                              updated[index].category = '';
+                            } else {
+                              updated[index].category = val;
+                            }
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="w-36 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs uppercase font-mono"
+                        >
+                          {presetOptions.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                          <option value="Custom...">Custom...</option>
+                        </select>
+
+                        {isCustom && (
+                          <input 
+                            type="text" 
+                            placeholder="Custom Category Name" 
+                            value={act.category} 
+                            onChange={(e) => {
+                              const updated = [...editSessionalActivities];
+                              updated[index].category = e.target.value;
+                              setEditSessionalActivities(updated);
+                            }}
+                            className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
+                            required
+                          />
+                        )}
+
+                        <input 
+                          type="number" 
+                          placeholder="Marks" 
+                          value={act.allocatedMarks} 
+                          onChange={(e) => {
+                            const updated = [...editSessionalActivities];
+                            updated[index].allocatedMarks = Number(e.target.value);
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="w-20 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
+                          min="1"
+                          required
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const updated = editSessionalActivities.filter((_, i) => i !== index);
+                            setEditSessionalActivities(updated);
+                          }}
+                          className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
