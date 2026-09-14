@@ -624,13 +624,14 @@ exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  const prefix = labroom.sectionPrefix.toUpperCase();
+  const prefix = (labroom.sectionPrefix || '').trim();
 
   const matchingStudents = await User.find({
     role: 'STUDENT',
     $or: [
-      { rollNo: { $regex: `^${prefix}`, $options: 'i' } },
-      { rollNo: { $regex: `^FRESHER_`, $options: 'i' } }
+      { rollNo: { $regex: new RegExp(`^${prefix}`, 'i') } },
+      { registrationNo: { $regex: new RegExp(`^${prefix}`, 'i') } },
+      { rollNo: { $regex: /^FRESHER_/i } }
     ]
   }).select('name rollNo registrationNo email personalNotificationEmail');
 

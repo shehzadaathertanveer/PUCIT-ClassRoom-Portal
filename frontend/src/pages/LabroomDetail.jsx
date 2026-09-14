@@ -78,7 +78,7 @@ const LabroomDetail = () => {
 
   // Advanced Add Student Modal (Supercharged Multi-Mode State with Smart Class Picker)
   const [isAddStudentModalOpen, setIsAddStudentModalOpen] = useState(false);
-  const [addModeType, setAddModeType] = useState('smartDetect'); // 'smartDetect', 'shorthand', 'range', 'batch'
+  const [addModeType, setAddModeType] = useState('shorthand'); // 'shorthand', 'range', 'batch', 'smartDetect'
   const [studentRollInput, setStudentRollInput] = useState('');
   const [bulkStart, setBulkStart] = useState('');
   const [bulkEnd, setBulkEnd] = useState('');
@@ -187,11 +187,10 @@ const LabroomDetail = () => {
     if (!prefix) return;
     try {
       setLoadingDirectory(true);
-      const res = await API.get(`/users/directory-by-prefix?prefix=${encodeURIComponent(prefix)}`);
+      const res = await API.get(`/labrooms/${labroomId}/available-students`);
       setClassDirectoryStudents(res.data?.data?.students || res.data?.students || []);
     } catch (err) {
       console.warn('Could not load class prefix directory:', err);
-      // Fallback or empty list if endpoint is named differently in your backend
       setClassDirectoryStudents([]);
     } finally {
       setLoadingDirectory(false);
@@ -378,12 +377,7 @@ const LabroomDetail = () => {
     setAddStudentError('');
 
     try {
-      if (addModeType === 'smartDetect') {
-        if (selectedDirectoryRolls.length === 0) throw new Error('Please select at least one student from the directory.');
-        await API.post(`/labrooms/add-drop-seniors`, { labroomId, rollNumbers: selectedDirectoryRolls });
-        showToast(`Successfully enrolled ${selectedDirectoryRolls.length} students!`);
-      } else if (addModeType === 'shorthand') {
-        // Parse numbers like "2, 43, 54" or "2 43 54" and auto-prefix with section prefix + 3-digit zero padding
+      if (addModeType === 'shorthand') {
         const nums = studentRollInput.split(/[\s,]+/).filter(Boolean);
         if (nums.length === 0) throw new Error('Enter at least one roll number.');
         
@@ -408,6 +402,14 @@ const LabroomDetail = () => {
         if (rolls.length === 0) throw new Error('Enter at least one roll number.');
         await API.post(`/labrooms/add-drop-seniors`, { labroomId, rollNumbers: rolls });
         showToast(`Successfully enrolled ${rolls.length} students!`);
+      } else if (addModeType === 'smartDetect') {
+        if (selectedDirectoryRolls.length === 0) throw new Error('Please select at least one student from the directory.');
+        // Map selected rollNos to their User IDs if needed, or send roll numbers
+        const selectedIds = classDirectoryStudents
+          .filter(st => selectedDirectoryRolls.includes(st.rollNo))
+          .map(st => st._id);
+        await API.post(`/labrooms/${labroomId}/bulk-approve`, { studentIds: selectedIds });
+        showToast(`Successfully enrolled ${selectedDirectoryRolls.length} students!`);
       }
 
       setIsAddStudentModalOpen(false);
@@ -1511,27 +1513,84 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Supercharged Add Student Modal with Smart Class Directory Checkboxes & Shorthand */}
+      {/* 4. Supercharged Add Student Modal (Reordered & Darkened Enrolled State) */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students</h3>
+              <div>
+                <h3 className="text-base font-extrabold text-white uppercase">Enroll Students</h3>
+                <p className="text-[11px] text-slate-400">Choose your preferred quick-entry method for section <strong className="text-blue-400 font-mono">{labroom?.sectionPrefix}</strong></p>
+              </div>
               <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
+            
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
             
-            {/* Mode Toggle Buttons */}
+            {/* Reordered Mode Toggle Buttons: 1. Shorthand, 2. Range, 3. Full Roll, 4. Smart Add */}
             <div className="grid grid-cols-4 gap-1.5">
-              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Smart Detect</button>
-              <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Shorthand</button>
-              <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Range</button>
-              <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Batch CSV</button>
+              <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Shorthand</button>
+              <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
+              <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Full Roll</button>
+              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Add</button>
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
               
-              {/* MODE 1: SMART DETECT / CLASS DIRECTORY */}
+              {/* MODE 1: SHORTHAND (e.g. 3, 4, 56) */}
+              {addModeType === 'shorthand' && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase text-slate-400">Quick Suffix Entry (e.g. 3, 4, 56)</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. 3, 4, 56, 23" 
+                    value={studentRollInput} 
+                    onChange={(e) => setStudentRollInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-blue-400" 
+                  />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Quickly maps digits into full roll numbers using <span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span> prefix (e.g., <span className="font-mono text-cyan-400">3</span> becomes <span className="font-mono text-blue-400">{labroom?.sectionPrefix}003</span>).
+                  </p>
+                </div>
+              )}
+
+              {/* MODE 2: RANGE (Start to End) */}
+              {addModeType === 'range' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Suffix / #</label>
+                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Suffix / #</label>
+                      <input type="number" required placeholder="40" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Bulk enrolls a continuous numeric sequence under <span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>.
+                  </p>
+                </div>
+              )}
+
+              {/* MODE 3: FULL ROLL (Batch CSV / List) */}
+              {addModeType === 'batch' && (
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Full Roll Numbers / Add-Drop List</label>
+                  <textarea 
+                    rows="4" 
+                    required 
+                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
+                    value={addDropInput} 
+                    onChange={(e) => setAddDropInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-blue-400" 
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Accepts full roll numbers or registration numbers separated by commas or newlines.</p>
+                </div>
+              )}
+
+              {/* MODE 4: SMART ADD / SMART DETECT */}
               {addModeType === 'smartDetect' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-xs text-slate-400">
@@ -1540,7 +1599,7 @@ const LabroomDetail = () => {
                       type="button" 
                       onClick={() => {
                         const unenrolled = classDirectoryStudents
-                          .filter(st => !activeStudents.some(as => as.rollNo?.toUpperCase() === st.rollNo?.toUpperCase()))
+                          .filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString()))
                           .map(st => st.rollNo);
                         setSelectedDirectoryRolls(unenrolled);
                       }} 
@@ -1557,7 +1616,7 @@ const LabroomDetail = () => {
                       <p className="text-center text-xs text-slate-500 py-6 italic">No registered user accounts found matching prefix {labroom?.sectionPrefix}. Try shorthand or range mode.</p>
                     ) : (
                       classDirectoryStudents.map((st, i) => {
-                        const alreadyEnrolled = activeStudents.some(as => as.rollNo?.toUpperCase() === st.rollNo?.toUpperCase());
+                        const alreadyEnrolled = activeStudents.some(as => as._id?.toString() === st._id?.toString());
                         const isSelected = selectedDirectoryRolls.includes(st.rollNo);
 
                         return (
@@ -1571,9 +1630,12 @@ const LabroomDetail = () => {
                                 setSelectedDirectoryRolls([...selectedDirectoryRolls, st.rollNo]);
                               }
                             }}
-                            className={`p-2.5 rounded-xl border flex items-center justify-between text-xs cursor-pointer transition-all ${
-                              alreadyEnrolled ? 'bg-slate-900/30 border-slate-800/50 opacity-60 cursor-not-allowed' :
-                              isSelected ? 'bg-blue-950/60 border-blue-500/50 text-white' : 'bg-[#130910] border-slate-800 hover:border-slate-700 text-slate-300'
+                            className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                              alreadyEnrolled 
+                                ? 'bg-slate-950/40 border-slate-900/60 opacity-40 cursor-not-allowed select-none' 
+                                : isSelected 
+                                  ? 'bg-blue-950/60 border-blue-500/50 text-white cursor-pointer' 
+                                  : 'bg-[#130910] border-slate-800 hover:border-slate-700 text-slate-300 cursor-pointer'
                             }`}
                           >
                             <div className="flex items-center gap-2.5 truncate">
@@ -1582,14 +1644,18 @@ const LabroomDetail = () => {
                                 checked={isSelected || alreadyEnrolled} 
                                 disabled={alreadyEnrolled}
                                 onChange={() => {}} 
-                                className="rounded accent-blue-500 cursor-pointer" 
+                                className={`rounded accent-blue-500 ${alreadyEnrolled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
                               />
                               <div className="truncate">
-                                <p className="font-bold text-white truncate">{st.name}</p>
+                                <p className={`font-bold truncate ${alreadyEnrolled ? 'text-slate-500 line-through' : 'text-white'}`}>{st.name}</p>
                                 <p className="font-mono text-cyan-400 text-[11px]">{st.rollNo}</p>
                               </div>
                             </div>
-                            <span className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold ${alreadyEnrolled ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}`}>
+                            <span className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                              alreadyEnrolled 
+                                ? 'bg-slate-900 text-slate-500 border border-slate-800' 
+                                : 'bg-slate-800 text-slate-400'
+                            }`}>
                               {alreadyEnrolled ? 'Enrolled' : 'Available'}
                             </span>
                           </div>
@@ -1597,59 +1663,7 @@ const LabroomDetail = () => {
                       })
                     )}
                   </div>
-                  <p className="text-[10px] text-slate-500">Selected: <strong className="text-emerald-400 font-mono">{selectedDirectoryRolls.length}</strong> students ready to enroll.</p>
-                </div>
-              )}
-
-              {/* MODE 2: SHORTHAND (e.g. 2, 43, 54) */}
-              {addModeType === 'shorthand' && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold uppercase text-slate-400">Roll Numbers (Shorthand)</label>
-                  <input 
-                    type="text" 
-                    required 
-                    placeholder="e.g. 2, 43, 54, 88" 
-                    value={studentRollInput} 
-                    onChange={(e) => setStudentRollInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-blue-400" 
-                  />
-                  <p className="text-[10px] text-slate-500 leading-tight">
-                    Automatically converts numbers into <span className="font-mono text-blue-400">{labroom?.sectionPrefix}002</span>, <span className="font-mono text-blue-400">{labroom?.sectionPrefix}043</span>, etc.
-                  </p>
-                </div>
-              )}
-
-              {/* MODE 3: RANGE (Start to End) */}
-              {addModeType === 'range' && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Roll #</label>
-                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Roll #</label>
-                      <input type="number" required placeholder="40" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    Will auto-prefix with section setup (<span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>).
-                  </p>
-                </div>
-              )}
-
-              {/* MODE 4: BATCH CSV / FULL LIST */}
-              {addModeType === 'batch' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma or Newline Separated)</label>
-                  <textarea 
-                    rows="4" 
-                    required 
-                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
-                    value={addDropInput} 
-                    onChange={(e) => setAddDropInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-blue-400" 
-                  />
+                  <p className="text-[10px] text-slate-500">Selected: <strong className="text-emerald-400 font-mono">{selectedDirectoryRolls.length}</strong> new students ready to enroll.</p>
                 </div>
               )}
 
