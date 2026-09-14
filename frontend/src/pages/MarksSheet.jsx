@@ -4,8 +4,55 @@ import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
+const CATEGORY_MAP = {
+  quiz: 'quizzes',
+  quizzes: 'quizzes',
+  assignment: 'assignments',
+  assignments: 'assignments',
+  presentation: 'presentations',
+  presentations: 'presentations',
+  project: 'projects',
+  projects: 'projects',
+  'final project': 'finalProject',
+  finalproject: 'finalProject',
+  homework: 'homework',
+  'class activity': 'classActivities',
+  classactivity: 'classActivities',
+  classactivities: 'classActivities',
+  'class participation': 'classParticipation',
+  classparticipation: 'classParticipation',
+  viva: 'vivas',
+  vivas: 'vivas',
+  'special marks': 'specialMarks',
+  specialmarks: 'specialMarks',
+  mids: 'mids',
+  midterm: 'mids',
+  finals: 'finals',
+  final: 'finals',
+};
+
+const getNormalizedCategory = (rawType = '') => {
+  const clean = rawType.trim().toLowerCase();
+  if (CATEGORY_MAP[clean]) return CATEGORY_MAP[clean];
+  if (clean.includes('quiz')) return 'quizzes';
+  if (clean.includes('assign')) return 'assignments';
+  if (clean.includes('present')) return 'presentations';
+  if (clean.includes('final project')) return 'finalProject';
+  if (clean.includes('project')) return 'projects';
+  if (clean.includes('homework')) return 'homework';
+  if (clean.includes('class activ')) return 'classActivities';
+  if (clean.includes('particip')) return 'classParticipation';
+  if (clean.includes('viva')) return 'vivas';
+  if (clean.includes('special')) return 'specialMarks';
+  if (clean === 'mids' || clean === 'midterm') return 'mids';
+  if (clean === 'finals' || clean === 'final') return 'finals';
+  return clean.endsWith('s') ? clean : clean + 's';
+};
+
 const MarksSheet = () => {
-  const { classroomId, category, itemId } = useParams();
+  const { classroomId, category: rawCategory, itemId } = useParams();
+  const category = getNormalizedCategory(rawCategory);
+
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
