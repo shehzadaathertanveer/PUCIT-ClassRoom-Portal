@@ -1464,3 +1464,84 @@ exports.lookupLabTeacher = catchAsync(async (req, res, next) => {
 
   res.status(200).json({ status: 'success', data: { status: 'found', user } });
 });
+// =============================================================================
+// 22. GET BULK LAB MARK SHEET (With Custom Activities Support)
+// =============================================================================
+exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+
+  const labroom = await Labroom.findById(labroomId)
+    .populate('students', 'name rollNo email personalNotificationEmail')
+    .lean();
+
+  if (!labroom) {
+    return next(new AppError('Labroom not found!', 404));
+  }
+
+  const existingMarks = await LabMark.find({ labroom: labroomId }).lean();
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      labroom: {
+        _id: labroom._id,
+        labName: labroom.labName,
+        sectionPrefix: labroom.sectionPrefix,
+        labTasks: labroom.labTasks || [],
+        vivas: labroom.vivas || [],
+        labTests: labroom.labTests || [],
+        projects: labroom.projects || [],
+        quizzes: labroom.quizzes || [],
+        assignments: labroom.assignments || [],
+        sessionalActivities: labroom.sessionalActivities || [],
+        customActivities: labroom.customActivities || []
+      },
+      students: labroom.students || [],
+      existingMarks,
+    },
+  });
+});
+
+// =============================================================================
+// 23. GET UNASSIGNED STUDENTS FOR A LAB EVALUATION ITEM
+// =============================================================================
+exports.getUnassignedLabStudents = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const { category, title } = req.query;
+
+  if (!category || !title) {
+    return next(new AppError('Category and item title are required!', 400));
+  }
+
+  const labroom = await Labroom.findById(labroomId).populate('students', 'name rollNo').lean();
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const markDocs = await LabMark.find({ labroom: labroomId }).lean();
+  const targetKey = getNormalizedLabTargetKey(category);
+  const cleanTitle = title.trim().toLowerCase();
+
+  const gradedStudentIds = new Set();
+  markDocs.forEach(doc => {
+    if (targetKey !== 'customActivities') {
+      const itemsList = doc[targetKey] || [];
+      if (itemsList.some(item => item.title?.trim().toLowerCase() === cleanTitle)) {
+        gradedStudentIds.add(doc.student.toString());
+      }
+    } else if (Array.isArray(doc.customActivities)) {
+      doc.customActivities.forEach(cat => {
+        if (cat.categoryName?.trim().toLowerCase() === category.trim().toLowerCase()) {
+          if ((cat.items || []).some(i => i.title?.trim().toLowerCase() === cleanTitle)) {
+            gradedStudentIds.add(doc.student.toString());
+          }
+        }
+      });
+    }
+  });
+
+  const unassignedStudents = (labroom.students || []).filter(s => !gradedStudentIds.has(s._id.toString()));
+
+  res.status(200).json({
+    status: 'success',
+    data: { unassignedStudents }
+  });
+});

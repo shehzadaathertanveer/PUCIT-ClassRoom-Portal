@@ -1612,3 +1612,147 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     message: `User account ${targetUser.name} (${targetUser.email}) successfully deleted by admin.`,
   });
 });
+
+// =============================================================================
+// 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS (Frontend Integration Bridge)
+// =============================================================================
+exports.getBulkMarksSheet = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', 'name rollNo registrationNo email');
+  
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const existingMarks = await Mark.find({ classroom: classroomId });
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      classroom,
+      students: classroom.students || [],
+      existingMarks
+    }
+  });
+});
+
+exports.getUnassignedStudentsForActivity = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { category, title } = req.query;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', 'name rollNo registrationNo email');
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const existingMarks = await Mark.find({ classroom: classroomId });
+  const targetKey = getNormalizedTargetKey(category);
+  const cleanTitle = (title || '').trim().toLowerCase();
+
+  const unassignedStudents = (classroom.students || []).filter(student => {
+    const studentId = student._id.toString();
+    const markDoc = existingMarks.find(m => m.student.toString() === studentId);
+    if (!markDoc) return true;
+
+    let list = [];
+    if (markDoc[targetKey] && Array.isArray(markDoc[targetKey])) {
+      list = markDoc[targetKey];
+    } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
+      const customCat = markDoc.customActivities.find(
+        c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+      );
+      list = customCat ? customCat.items || [] : [];
+    }
+
+    const foundItem = list.find(e => e.title?.trim().toLowerCase() === cleanTitle);
+    return !foundItem || (foundItem.obtainedMarks === undefined && !foundItem.isAbsent);
+  });
+
+  res.status(200).json({
+    status: 'success',
+    data: { unassignedStudents }
+  });
+});
+
+exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
+  const { classroomId, category, title, totalMarks, marksData } = req.body;
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to batch submit marks.', 403));
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const targetKey = getNormalizedTargetKey(category);
+  const cleanTitle = title.trim();
+  const parsedTotal = Number(totalMarks) || 10;
+
+  // Ensure item exists in classroom schema definition
+  if (!classroom[targetKey]) classroom[targetKey] = [];
+  const existingItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+  if (!existingItem) {
+    classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+    await classroom.save();
+  }
+
+  for (const entry of marksData) {
+    let markRec = await Mark.findOne({ classroom: classroomId, student: entry.studentId });
+    if (!markRec) {
+      markRec = await Mark.create({ classroom: classroomId, student: entry.studentId, quizzes: [], assignments: [], labMarks: [] });
+    }
+
+    const isAbsent = Boolean(entry.isAbsent);
+    const obtained = isAbsent ? 0 : Number(entry.obtainedMarks || 0);
+
+    if (!markRec[targetKey]) markRec[targetKey] = [];
+    const idx = markRec[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+    
+    const payload = {
+      title: cleanTitle,
+      totalMarks: parsedTotal,
+      obtainedMarks: obtained,
+      isAbsent,
+      file: entry.file || null
+    };
+
+    if (idx > -1) {
+      markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...payload };
+    } else {
+      markRec[targetKey].push(payload);
+    }
+    await markRec.save();
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Batch marks submitted successfully!'
+  });
+});
+
+exports.deleteEvaluationItemRoute = catchAsync(async (req, res, next) => {
+  const { classroomId, category, itemTitle } = req.body;
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to delete evaluation.', 403));
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const targetKey = getNormalizedTargetKey(category);
+  const cleanTitle = (itemTitle || '').trim();
+
+  if (classroom[targetKey]) {
+    classroom[targetKey] = classroom[targetKey].filter(
+      item => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
+    );
+    await classroom.save();
+  }
+
+  await Mark.updateMany(
+    { classroom: classroomId },
+    { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
+  );
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Evaluation removed successfully!'
+  });
+});

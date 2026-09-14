@@ -1,5 +1,5 @@
 const express = require("express");
-const labController = require("../controller/labcontroller");
+const labController = require("../controller/labController");
 const labMarkController = require("../controller/labMarkController");
 const authController = require("../controller/authController");
 const {

@@ -12,12 +12,15 @@ router.use(protect);
 // =============================================================================
 // 1. GENERAL & CREATION ROUTES (Static paths first to prevent parameter collisions)
 // =============================================================================
+
+// Get all active classrooms based on user role (Student, TA, Teacher, Admin)
 router.get('/', classroomController.getAllClassrooms);
 
+// Create a new classroom (Restricted to Teachers and Admins)
 router.post('/', restrictTo('TEACHER', 'ADMIN'), classroomController.createClassroom);
 router.post('/create', restrictTo('TEACHER', 'ADMIN'), classroomController.createClassroom);
 
-// Static body-based management & bulk enrollment routes
+// Static body-based management & bulk enrollment routes (Restricted to Class Staff)
 router.post('/add-student-by-roll', restrictToClassStaff, classroomController.addStudentByRollNo);
 router.post('/add-students-by-suffix', restrictToClassStaff, classroomController.addStudentsBySuffixRolls); // Feature 1: Quick suffix entry
 router.post('/add-bulk-range', restrictToClassStaff, classroomController.addBulkStudentsByRange); // Feature 2: Range enrollment
@@ -25,6 +28,8 @@ router.post('/add-drop-seniors', restrictToClassStaff, classroomController.addDr
 router.post('/set-roster', restrictToClassStaff, classroomController.setClassroomRoster);
 router.post('/add-student', restrictToClassStaff, classroomController.addStudentToClassroom);
 router.patch('/update-tas', restrictToClassStaff, classroomController.updateClassroomTAs);
+
+// Instructor Assignment (Admin only)
 router.patch('/assign-teacher', restrictTo('ADMIN'), classroomController.assignTeacherToClassroom);
 
 // =============================================================================
@@ -68,7 +73,11 @@ router.post('/:classroomId/notices', restrictToClassStaff, classroomController.p
 // =============================================================================
 // 3. SINGLE CLASSROOM DETAILS & DELETION ROUTES
 // =============================================================================
+
+// Get single classroom details with populated references
 router.get('/:classroomId', classroomController.getClassroomById);
+
+// Hard delete classroom and wipe all associated marks records (Teacher/Admin)
 router.delete('/:classroomId', restrictTo('TEACHER', 'ADMIN'), classroomController.hardDeleteClassroom);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const express = require('express');
-const markController = require('../controller/markContoller');
+const markController = require('../controller/markController'); // Fixed typo from markContoller
 const { protect, restrictToClassStaff } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -39,5 +39,8 @@ router.post('/batch-submit', restrictToClassStaff, markController.batchSubmitMar
 
 // Update single evaluation entry for a specific student
 router.patch('/update-single-item', restrictToClassStaff, markController.updateSingleStudentMark);
+
+// Delete / Cancel an evaluation entry across the entire classroom (CRITICAL FIX)
+router.delete('/delete-evaluation', restrictToClassStaff, markController.deleteEvaluationEntry);
 
 module.exports = router;

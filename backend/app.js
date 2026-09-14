@@ -73,12 +73,25 @@ if (typeof labMarkRoutes !== "function") {
 }
 
 // Mount API v1 Routes
+// =============================================================================
+// MOUNT API ROUTES (Dual-supported for both /api/v1 and /api prefixes)
+// =============================================================================
+
+// v1 Mounts
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/classrooms", classroomRoutes);
 app.use("/api/v1/marks", marksRoutes);
 app.use("/api/v1/classroommarks", marksRoutes);
 app.use("/api/v1/labrooms", labRoutes);
 app.use("/api/v1/labmarks", labMarkRoutes);
+
+// Legacy / Direct /api Fallback Mounts (Prevents 404s if frontend base URL omits /v1)
+app.use("/api/auth", authRoutes);
+app.use("/api/classrooms", classroomRoutes);
+app.use("/api/marks", marksRoutes);
+app.use("/api/classroommarks", marksRoutes);
+app.use("/api/labrooms", labRoutes);
+app.use("/api/labmarks", labMarkRoutes);
 
 // Handle Unhandled Routes (Fixed for Express 5 path-to-regexp compatibility)
 app.all(/(.*)/, (req, res, next) => {
