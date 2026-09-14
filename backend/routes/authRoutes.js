@@ -12,6 +12,7 @@ router.post('/verify-otp', authController.verifyRegistrationOTP);
 router.post('/login', authController.login);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password/verify-otp', authController.resetPasswordWithOTP);
+router.post('/verify-recovery-otp', authController.verifyRecoveryOtp);
 
 // Public maintenance status endpoint (so frontend login/banner can check if site is down)
 router.get('/maintenance/status', authController.getMaintenanceStatus);

@@ -852,3 +852,38 @@ exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+// =============================================================================
+// VERIFY PASSWORD RECOVERY OTP (Standalone step for 3-page flow)
+// =============================================================================
+exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return next(new AppError("Email and OTP code are required!", 400));
+  }
+
+  const identifier = email.trim().toLowerCase();
+  const cleanOtp = otp.trim();
+
+  const user = await User.findOne({
+    $or: [
+      { email: identifier },
+      { rollNo: identifier.toUpperCase() },
+      { registrationNo: email.trim() },
+      { personalNotificationEmail: identifier }
+    ],
+    isEmailVerified: true,
+    otpCode: hashOtp(cleanOtp),
+    otpExpiresAt: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    return next(new AppError("Invalid or expired OTP code!", 400));
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: "OTP verified successfully. Please set your new password.",
+  });
+});
