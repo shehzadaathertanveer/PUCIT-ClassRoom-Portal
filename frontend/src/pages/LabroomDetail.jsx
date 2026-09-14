@@ -55,6 +55,15 @@ const LabroomDetail = () => {
   const [itemTotalMarks, setItemTotalMarks] = useState(10);
   const [creatingItem, setCreatingItem] = useState(false);
 
+  // Excel / CSV Sync states for Staff
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
+  const [excelCategory, setExcelCategory] = useState('Lab Tasks');
+  const [excelTitle, setExcelTitle] = useState('');
+  const [excelTotalMarks, setExcelTotalMarks] = useState(10);
+  const [excelFile, setExcelFile] = useState(null);
+  const [syncingExcel, setSyncingExcel] = useState(false);
+  const [syncReport, setSyncReport] = useState(null);
+
   // Add TA modal state
   const [isTaModalOpen, setIsTaModalOpen] = useState(false);
   const [taRollNo, setTaRollNo] = useState('');
@@ -289,6 +298,42 @@ const LabroomDetail = () => {
     }
   };
 
+  const handleExcelSyncSubmit = async (e) => {
+    e.preventDefault();
+    if (!excelFile) {
+      showToast('Please select a CSV or Excel file.', 'error');
+      return;
+    }
+    const trimmedTitle = excelTitle.trim();
+    if (!trimmedTitle) {
+      showToast('Please provide an evaluation title.', 'error');
+      return;
+    }
+
+    setSyncingExcel(true);
+    setSyncReport(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', excelFile);
+      formData.append('category', getCategoryTargetKey(excelCategory));
+      formData.append('title', trimmedTitle);
+      formData.append('totalMarks', excelTotalMarks);
+
+      const res = await API.post(`/labrooms/${labroomId}/sync-excel`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      setSyncReport(res.data?.data || res.data);
+      showToast('Excel/CSV synced successfully!');
+      fetchLabroomData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to parse and sync Excel file.', 'error');
+    } finally {
+      setSyncingExcel(false);
+    }
+  };
+
   const handleUpdateLabSettings = async (e) => {
     e.preventDefault();
     setUpdatingSettings(true);
@@ -450,7 +495,6 @@ const LabroomDetail = () => {
     }
   };
 
-  // Completely Client-Side Excel / CSV Export (Guarantees headers display ONLY exact titles like "Lab 1" without category prefixes)
   const handleExportExcelSheet = () => {
     try {
       const rankings = labAnalytics?.rankings || [];
@@ -459,7 +503,6 @@ const LabroomDetail = () => {
         return;
       }
 
-      // Collect all active item names across every sessional activity category dynamically
       let allEvaluationItems = [];
       sessionalActivitiesList.forEach(act => {
         const targetKey = getCategoryTargetKey(act.category);
@@ -473,7 +516,6 @@ const LabroomDetail = () => {
         });
       });
 
-      // Build CSV Headers using strictly the item titles (e.g. Lab 1, Viva 1)
       let headers = ['Roll Number', 'Student Name'];
       allEvaluationItems.forEach(ev => {
         headers.push(`${ev.title} (${ev.totalMarks})`);
@@ -482,7 +524,6 @@ const LabroomDetail = () => {
 
       let csvRows = [headers.join(',')];
 
-      // Sort students strictly by Roll Number ascending
       const sortedRankings = [...rankings].sort((a, b) => {
         const rollA = (a.student?.rollNo || '').toString().toLowerCase();
         const rollB = (b.student?.rollNo || '').toString().toLowerCase();
@@ -497,14 +538,12 @@ const LabroomDetail = () => {
           `"${student.name || 'Unknown'}"`
         ];
 
-        // Push individual scores matching exactly by item title
         allEvaluationItems.forEach(ev => {
           const scoresList = marksDoc[ev.targetKey] || r[ev.targetKey] || [];
           const match = scoresList.find(s => s.title?.trim().toLowerCase() === ev.title?.trim().toLowerCase());
           row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
         });
 
-        // Overall Percentage
         const calcObj = getStudentAnalyticsData();
         const overallPct = r.overallPercentage || r.percentage || calcObj.overall || 0;
         row.push(`${Number(overallPct).toFixed(2)}%`);
@@ -837,6 +876,7 @@ const LabroomDetail = () => {
           {isStaffOrAdmin && (
             <>
               <button onClick={() => setIsAddStudentModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Student</button>
+              <button onClick={() => setIsExcelModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">📊 Upload Sync</button>
               <button onClick={() => setIsItemModalOpen(true)} className="px-3.5 py-2 bg-gradient-to-r from-blue-400 to-cyan-500 text-black text-[10px] font-extrabold uppercase rounded-xl shadow-md transition-all">+ Evaluation</button>
             </>
           )}
@@ -1110,21 +1150,19 @@ const LabroomDetail = () => {
                     <th className="py-3 px-3">Rank</th>
                     <th className="py-3 px-3">Roll Number</th>
                     <th className="py-3 px-3">Student Name</th>
-                    <th className="py-3 px-3">Score Percentage</th>
-                    <th className="py-3 px-3 text-right">Actions</th>
+                    <th className="py-3 px-3 text-right">Score Percentage</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-xs">
                   {getSortedLeaderboard().length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="text-center py-10 text-slate-500 italic">No lab evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
+                      <td colSpan="4" className="text-center py-10 text-slate-500 italic">No lab evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
                     </tr>
                   ) : (
                     getSortedLeaderboard().map((entry, idx) => {
                       const studentObj = entry.student || {};
                       const studentName = studentObj.name || 'Unknown Student';
                       const studentRoll = studentObj.rollNo || 'N/A';
-                      const studentUserId = studentObj._id;
                       const doc = entry.marksDoc || entry;
 
                       let currentScore = entry.overallPercentage || entry.percentage || calculateStudentPercentages(doc).overall;
@@ -1140,22 +1178,8 @@ const LabroomDetail = () => {
                           </td>
                           <td className="py-3.5 px-3 font-mono text-cyan-400 font-bold">{studentRoll}</td>
                           <td className="py-3.5 px-3 text-white font-medium">{studentName}</td>
-                          <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400">
+                          <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400 text-right">
                             {Number(currentScore || 0).toFixed(2)}%
-                          </td>
-                          <td className="py-3.5 px-3 text-right">
-                            <button
-                              onClick={() => {
-                                if (studentUserId) {
-                                  navigate(`/labrooms/${labroomId}/sheet/general/all`, { state: { targetStudentId: studentUserId } });
-                                } else {
-                                  showToast('Student identifier profile missing.', 'error');
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer"
-                            >
-                              View Profile
-                            </button>
                           </td>
                         </tr>
                       );
@@ -1406,54 +1430,140 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 3. Add Student Modal */}
+      {/* 3. Excel Upload Sync Modal */}
+      {isExcelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
+          <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase">📊 Sync Lab Marks via Excel/CSV</h3>
+              <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+            
+            {syncReport ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-950/60 border border-emerald-500/40 rounded-2xl space-y-2">
+                  <p className="text-emerald-300 font-bold text-xs">Sync Complete Successfully!</p>
+                  <p className="text-xs text-slate-300">Total Rows Processed: <strong className="font-mono text-white">{syncReport.totalProcessed || 0}</strong></p>
+                  <p className="text-xs text-slate-300">Successfully Updated: <strong className="font-mono text-emerald-400">{syncReport.updatedCount || 0}</strong></p>
+                  {syncReport.errors?.length > 0 && (
+                    <p className="text-xs text-amber-300">Warnings/Skipped: {syncReport.errors.length}</p>
+                  )}
+                </div>
+                <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Done</button>
+              </div>
+            ) : (
+              <form onSubmit={handleExcelSyncSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
+                  <select value={excelCategory} onChange={(e) => setExcelCategory(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono">
+                    {sessionalActivitiesList.map(act => (
+                      <option key={act.category} value={act.category}>{act.category}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Evaluation Title</label>
+                  <input type="text" required placeholder="e.g. Lab Task 1 or Viva 1" value={excelTitle} onChange={(e) => setExcelTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
+                  <input type="number" required min="1" value={excelTotalMarks} onChange={(e) => setExcelTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Upload CSV / Excel File</label>
+                  <input type="file" required accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" onChange={(e) => setExcelFile(e.target.files[0])} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-500 file:text-black hover:file:bg-blue-400 cursor-pointer" />
+                  <p className="text-[10px] text-slate-500 mt-1">File must include columns for Roll Number / Reg ID and Marks Obtained.</p>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setIsExcelModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
+                  <button type="submit" disabled={syncingExcel} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                    {syncingExcel ? 'Syncing...' : 'Upload & Sync'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Add Student Modal (Advanced Auto-Detect & Bulk Controllers) */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white uppercase">Enroll Student</h3>
+              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (Auto-Detect / Bulk)</h3>
               <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
+            
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => setAddModeType('single')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'single' ? 'bg-blue-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Single</button>
-              <button type="button" onClick={() => setAddModeType('bulkRange')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'bulkRange' ? 'bg-blue-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Range</button>
-              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-blue-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Batch</button>
+              <button type="button" onClick={() => setAddModeType('single')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'single' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Auto-Detect</button>
+              <button type="button" onClick={() => setAddModeType('bulkRange')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'bulkRange' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Range</button>
+              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Batch CSV</button>
             </div>
+
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
               {addModeType === 'single' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Number</label>
-                  <input type="text" required placeholder="e.g. 47" value={studentRollInput} onChange={(e) => setStudentRollInput(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" />
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase text-slate-400">Roll Number or Official Email</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. BITF26A047 or bitf26a047@pucit.edu.pk" 
+                    value={studentRollInput} 
+                    onChange={(e) => setStudentRollInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-blue-400" 
+                  />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    The backend will automatically detect whether this user exists, link them, or provision a placeholder record.
+                  </p>
                 </div>
               )}
+
               {addModeType === 'bulkRange' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Start Roll #</label>
-                    <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Roll #</label>
+                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Roll #</label>
+                      <input type="number" required placeholder="40" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">End Roll #</label>
-                    <input type="number" required placeholder="50" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Will automatically prefix using lab section setup (<span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>).
+                  </p>
                 </div>
               )}
+
               {addModeType === 'addDrop' && (
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma/Newline)</label>
-                  <textarea rows="4" required placeholder="BITF26A001, BITF26A002" value={addDropInput} onChange={(e) => setAddDropInput(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma or Newline Separated)</label>
+                  <textarea 
+                    rows="4" 
+                    required 
+                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
+                    value={addDropInput} 
+                    onChange={(e) => setAddDropInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-blue-400" 
+                  />
                 </div>
               )}
-              <button type="submit" disabled={addingStudent} className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
-                {addingStudent ? 'Enrolling...' : 'Enroll Students'}
-              </button>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setIsAddStudentModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
+                <button type="submit" disabled={addingStudent} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                  {addingStudent ? 'Processing...' : 'Enroll Students'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* 4. Add TA Modal */}
+      {/* 5. Add TA Modal */}
       {isTaModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
@@ -1483,7 +1593,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 5. Assign Teacher Modal */}
+      {/* 6. Assign Instructor Modal */}
       {isAssignTeacherModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-purple-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
@@ -1513,7 +1623,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 6. Settings Modal */}
+      {/* 7. Settings Modal */}
       {isSettingsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
@@ -1564,7 +1674,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 7. Anonymous Feedback / Complaints Modal */}
+      {/* 8. Anonymous Feedback / Complaints Modal */}
       {isComplaintModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl">
@@ -1582,7 +1692,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 8. View Complaints Modal (Staff/Admin) */}
+      {/* 9. View Complaints Modal (Staff/Admin) */}
       {isViewComplaintsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
@@ -1609,7 +1719,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 9. Focused Photo-Only Modal */}
+      {/* 10. Focused Photo-Only Modal */}
       {selectedActivityItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/50 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">

@@ -6,7 +6,7 @@ const Labroom = require("../models/labSchema");
 const Mark = require("../models/markSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
-const sendStyledEmail = require("../utils/emailService"); // Centralized email utility with IPv4 & dark layout fix
+const sendStyledEmail = require("../utils/emailService");
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -15,15 +15,10 @@ let systemMaintenance = {
   retryAfter: "15 minutes"
 };
 
-// RegEx to validate official PUCIT roll number structures (e.g., BITF26A001)
-const ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
-
-// Helper: Extracts entry year from a Roll Number (e.g., "BITF26A001" -> 2026)
-const getRollYear = (rollNo) => {
-  if (!rollNo) return null;
-  const match = rollNo.match(/[FS](\d{2})[A-Z]/i);
-  return match ? parseInt(`20${match[1]}`, 10) : null;
-};
+// RegEx to validate official PUCIT roll number structures or temporary fresher prefixes
+const FULL_ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
+const TEMP_PREFIX_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]?$/i;
+const REG_NO_REGEX = /^\d{6,7}$/;
 
 // Helper: Generates signed JWT authentication token
 const signToken = (id, role) => {
@@ -35,16 +30,24 @@ const signToken = (id, role) => {
 // Helper: SHA-256 OTP hashing for secure database storage
 const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
 
-// FIXED SECURE SYNC: Only enrolls student if their exact roll number is explicitly pre-approved/added by staff (No labs)
+// FIXED SECURE SYNC: Enrolls student if their exact roll number or temporary prefix matches approved lists
 const syncStudentEnrollment = async (user) => {
-  if (user.role !== "STUDENT" || !user.rollNo) return;
+  if (user.role !== "STUDENT") return;
 
-  const userRoll = user.rollNo.toUpperCase();
+  const userRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
+  const userReg = user.registrationNo ? user.registrationNo.toUpperCase() : "";
 
-  const matchingClassrooms = await Classroom.find({
-    isActive: true,
-    approvedRollNumbers: userRoll,
-  });
+  if (!userRoll && !userReg) return;
+
+  const queryConditions = [
+    { isActive: true, approvedRollNumbers: { $in: [userRoll, userReg].filter(Boolean) } }
+  ];
+
+  if (TEMP_PREFIX_REGEX.test(userRoll)) {
+    queryConditions.push({ isActive: true, sectionPrefix: userRoll });
+  }
+
+  const matchingClassrooms = await Classroom.find({ $or: queryConditions });
 
   if (matchingClassrooms.length === 0) return;
 
@@ -78,7 +81,12 @@ const syncStudentEnrollment = async (user) => {
 // =============================================================================
 exports.checkMaintenanceMode = (req, res, next) => {
   if (systemMaintenance.isUnderMaintenance) {
-    if (req.path.includes('/maintenance') || req.path.includes('/auth/login') || req.path.includes('/auth/me')) {
+    if (
+      req.path.includes('/maintenance') ||
+      req.path.includes('/auth/login') ||
+      req.path.includes('/auth/me') ||
+      (req.user && req.user.role === 'ADMIN')
+    ) {
       return next();
     }
     return res.status(503).json({
@@ -131,6 +139,7 @@ exports.getMe = catchAsync(async (req, res, next) => {
         name: user.name,
         email: user.email,
         rollNo: user.rollNo,
+        registrationNo: user.registrationNo,
         role: user.role,
         personalNotificationEmail: user.personalNotificationEmail,
         isUniversityEmailVerified: user.isUniversityEmailVerified,
@@ -141,50 +150,55 @@ exports.getMe = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. INITIATE REGISTRATION
+// 2. INITIATE REGISTRATION (Supports Freshers with Reg No & Temporary Prefix)
 // =============================================================================
 exports.initiateRegistration = catchAsync(async (req, res, next) => {
-  const { name, password, rollNo, personalNotificationEmail, email } = req.body;
+  const { name, password, rollNo, registrationNo, personalNotificationEmail, email } = req.body;
 
   if (!password || !name) {
     return next(new AppError("Name and Password are required!", 400));
   }
 
   let formattedRollNo = rollNo ? rollNo.trim().toUpperCase() : "";
+  let formattedRegNo = registrationNo ? registrationNo.trim() : "";
   let cleanEmail = email ? email.trim().toLowerCase() : "";
   const cleanPersonalEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
 
   let assignedRole = "STUDENT";
 
-  if (!formattedRollNo && cleanEmail) {
+  if (!formattedRollNo && cleanEmail && !cleanEmail.endsWith('@pucit.edu.pk')) {
     assignedRole = "PENDING_TEACHER";
     formattedRollNo = cleanEmail.split('@')[0].toUpperCase();
+  } else if (!formattedRollNo && formattedRegNo) {
+    formattedRollNo = `FRESHER_${formattedRegNo}`;
   }
 
-  if (assignedRole === "STUDENT" && !ROLL_NO_REGEX.test(formattedRollNo)) {
-    return next(new AppError("A valid Roll Number is required for student registration!", 400));
+  if (assignedRole === "STUDENT" && !FULL_ROLL_NO_REGEX.test(formattedRollNo) && !TEMP_PREFIX_REGEX.test(formattedRollNo)) {
+    return next(new AppError("A valid Roll Number or Temporary Prefix is required for student registration!", 400));
   }
 
-  const officialEmail = cleanEmail || `${formattedRollNo.toLowerCase()}@pucit.edu.pk`;
+  if (formattedRegNo && !REG_NO_REGEX.test(formattedRegNo)) {
+    return next(new AppError("Registration number must be a valid 6 or 7 digit unique number!", 400));
+  }
 
-  const existingRollHolder = await User.findOne({
-    rollNo: formattedRollNo,
-    isEmailVerified: true,
-  });
-  if (existingRollHolder) {
-    return next(
-      new AppError(
-        "This Roll Number is already linked to an active account. Contact admin to release it.",
-        400,
-      ),
-    );
+  const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
+
+  if (formattedRegNo) {
+    const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true });
+    if (existingRegHolder) {
+      return next(new AppError("This Registration / Form Number is already linked to an active account.", 400));
+    }
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hashedOtp = hashOtp(otp);
   const otpExpiry = Date.now() + 10 * 60 * 1000;
 
-  const destinationEmail = cleanPersonalEmail || officialEmail;
+  const destinationEmail = cleanPersonalEmail || (cleanEmail.endsWith('@pucit.edu.pk') ? cleanEmail : null) || cleanPersonalEmail;
+
+  if (!destinationEmail) {
+    return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
+  }
 
   try {
     await sendStyledEmail({
@@ -194,24 +208,21 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
       bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
       otpCode: otp,
       details: [
-        { label: "Assigned Roll No", value: formattedRollNo },
-        { label: "Official Email", value: officialEmail }
+        { label: "Assigned Roll / Prefix", value: formattedRollNo },
+        { label: "Registration / Form No", value: formattedRegNo || "N/A" },
+        { label: "Notification Email", value: destinationEmail }
       ],
     });
   } catch (err) {
-    return next(
-      new AppError(
-        "Failed to send verification email. Check SMTP settings.",
-        500,
-      ),
-    );
+    return next(new AppError("Failed to send verification email. Check SMTP settings.", 500));
   }
 
-  let user = await User.findOne({ email: officialEmail });
+  let user = await User.findOne({ $or: [{ email: officialEmail }, ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : [])] });
 
   if (user) {
     user.name = name;
     user.rollNo = formattedRollNo;
+    if (formattedRegNo) user.registrationNo = formattedRegNo;
     user.password = password;
     user.role = assignedRole;
     user.personalNotificationEmail = cleanPersonalEmail;
@@ -226,6 +237,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
       name,
       email: officialEmail,
       rollNo: formattedRollNo,
+      registrationNo: formattedRegNo || undefined,
       password,
       role: assignedRole,
       personalNotificationEmail: cleanPersonalEmail,
@@ -280,15 +292,9 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const userRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
 
   if (user.role === "TA" && userRoll) {
-    const taClassrooms = await Classroom.find({
-      isActive: true,
-      taRollNumbers: userRoll,
-    });
+    const taClassrooms = await Classroom.find({ isActive: true, taRollNumbers: userRoll });
     for (const classroom of taClassrooms) {
-      await Classroom.updateOne(
-        { _id: classroom._id },
-        { $addToSet: { tas: user._id } },
-      );
+      await Classroom.updateOne({ _id: classroom._id }, { $addToSet: { tas: user._id } });
     }
   }
 
@@ -314,9 +320,7 @@ exports.login = catchAsync(async (req, res, next) => {
   const { loginIdentifier, password } = req.body;
 
   if (!loginIdentifier || !password) {
-    return next(
-      new AppError("Please provide Roll Number/Email and Password!", 400),
-    );
+    return next(new AppError("Please provide Roll Number/Email/Registration Number and Password!", 400));
   }
 
   const identifier = loginIdentifier.trim();
@@ -324,31 +328,22 @@ exports.login = catchAsync(async (req, res, next) => {
   const user = await User.findOne({
     $or: [
       { rollNo: identifier.toUpperCase() },
+      { registrationNo: identifier },
       { email: identifier.toLowerCase() },
       { personalNotificationEmail: identifier.toLowerCase() }
     ],
   }).select("+password");
 
   if (!user || !(await user.correctPassword(password, user.password))) {
-    return next(new AppError("Incorrect Roll Number/Email or Password!", 401));
+    return next(new AppError("Incorrect credentials provided!", 401));
   }
 
   if (user.requiresEmail && !user.isEmailVerified) {
-    return next(
-      new AppError(
-        "Your email address is not verified! Please complete OTP verification.",
-        403,
-      ),
-    );
+    return next(new AppError("Your email address is not verified! Please complete OTP verification.", 403));
   }
 
   if (user.role === "PENDING_TEACHER") {
-    return next(
-      new AppError(
-        "Your teacher account is pending Admin approval. Contact administrator.",
-        403,
-      ),
-    );
+    return next(new AppError("Your teacher account is pending Admin approval. Contact administrator.", 403));
   }
 
   if (user.role === "STUDENT") {
@@ -363,37 +358,25 @@ exports.login = catchAsync(async (req, res, next) => {
   let dashboardData = {};
 
   if (user.role === "STUDENT") {
-    const classrooms = await Classroom.find({
-      students: user._id,
-      isActive: true,
-    })
+    const classrooms = await Classroom.find({ students: user._id, isActive: true })
       .populate("teacher", "name email")
       .populate("tas", "name rollNo email");
 
     const classroomIds = classrooms.map((c) => c._id);
-    const marks = await Mark.find({
-      student: user._id,
-      classroom: { $in: classroomIds },
-    });
+    const marks = await Mark.find({ student: user._id, classroom: { $in: classroomIds } });
 
     dashboardData = { classrooms, marks };
   } else if (["TA", "TEACHER"].includes(user.role)) {
     const roleKey = user.role === "TA" ? "tas" : "teacher";
-    const classrooms = await Classroom.find({
-      [roleKey]: user._id,
-      isActive: true,
-    })
+    const classrooms = await Classroom.find({ [roleKey]: user._id, isActive: true })
       .populate("teacher", "name email")
       .populate("tas", "name rollNo email")
-      .populate("students", "name rollNo email requiresEmail");
+      .populate("students", "name rollNo registrationNo email requiresEmail");
 
-    const labrooms = await Labroom.find({
-      [roleKey]: user._id,
-      isActive: true,
-    })
+    const labrooms = await Labroom.find({ [roleKey]: user._id, isActive: true })
       .populate("teacher", "name email")
       .populate("tas", "name rollNo email")
-      .populate("students", "name rollNo email requiresEmail");
+      .populate("students", "name rollNo registrationNo email requiresEmail");
 
     const classroomIds = classrooms.map((c) => c._id);
     const marks = await Mark.find({ classroom: { $in: classroomIds } });
@@ -403,16 +386,14 @@ exports.login = catchAsync(async (req, res, next) => {
     const activeClassrooms = await Classroom.find({ isActive: true })
       .populate("teacher", "name email")
       .populate("tas", "name rollNo")
-      .populate("students", "name rollNo");
+      .populate("students", "name rollNo registrationNo");
 
     const activeLabrooms = await Labroom.find({ isActive: true })
       .populate("teacher", "name email")
       .populate("tas", "name rollNo")
-      .populate("students", "name rollNo");
+      .populate("students", "name rollNo registrationNo");
 
-    const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select(
-      "-password",
-    );
+    const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
     const allUsers = await User.find().select("-password");
 
     dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
@@ -426,6 +407,7 @@ exports.login = catchAsync(async (req, res, next) => {
       name: user.name,
       email: user.email,
       rollNo: user.rollNo,
+      registrationNo: user.registrationNo,
       role: user.role,
       personalNotificationEmail: user.personalNotificationEmail,
       isUniversityEmailVerified: user.isUniversityEmailVerified,
@@ -442,7 +424,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const { email } = req.body;
 
   if (!email) {
-    return next(new AppError("Please enter your email or roll number!", 400));
+    return next(new AppError("Please enter your email, roll number, or registration number!", 400));
   }
 
   const identifier = email.trim().toLowerCase();
@@ -451,15 +433,14 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
+      { registrationNo: email.trim() },
       { personalNotificationEmail: identifier }
     ],
     isEmailVerified: true,
   });
 
   if (!user) {
-    return next(
-      new AppError("No verified account found with this identifier.", 404),
-    );
+    return next(new AppError("No verified account found with this identifier.", 404));
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -472,12 +453,10 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
       title: "Password Reset Request",
       bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
       otpCode: otp,
-      details: [{ label: "Account Target", value: user.rollNo || user.email }],
+      details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
     });
   } catch (err) {
-    return next(
-      new AppError("Error sending reset email. Try again later!", 500),
-    );
+    return next(new AppError("Error sending reset email. Try again later!", 500));
   }
 
   user.otpCode = hashOtp(otp);
@@ -497,15 +476,11 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
   const { email, otp, newPassword } = req.body;
 
   if (!email || !otp || !newPassword) {
-    return next(
-      new AppError("Identifier, OTP code, and new password are required!", 400),
-    );
+    return next(new AppError("Identifier, OTP code, and new password are required!", 400));
   }
 
   if (newPassword.length < 6) {
-    return next(
-      new AppError("New password must be at least 6 characters long!", 400),
-    );
+    return next(new AppError("New password must be at least 6 characters long!", 400));
   }
 
   const identifier = email.trim().toLowerCase();
@@ -514,6 +489,7 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
+      { registrationNo: email.trim() },
       { personalNotificationEmail: identifier }
     ],
     isEmailVerified: true,
@@ -543,15 +519,11 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
   const { currentPassword, newPassword } = req.body;
 
   if (!currentPassword || !newPassword) {
-    return next(
-      new AppError("Please provide both current and new passwords!", 400),
-    );
+    return next(new AppError("Please provide both current and new passwords!", 400));
   }
 
   if (newPassword.length < 6) {
-    return next(
-      new AppError("New password must be at least 6 characters long!", 400),
-    );
+    return next(new AppError("New password must be at least 6 characters long!", 400));
   }
 
   const user = await User.findById(req.user._id).select("+password");
@@ -569,10 +541,10 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 8. UPDATE USER PROFILE
+// 8. UPDATE USER PROFILE (Allows upgrading temporary roll number to official roll number)
 // =============================================================================
 exports.updateProfile = catchAsync(async (req, res, next) => {
-  const { name, password, personalNotificationEmail } = req.body;
+  const { name, password, personalNotificationEmail, rollNo, registrationNo } = req.body;
 
   const user = await User.findById(req.user._id);
   if (!user) return next(new AppError("User not found.", 404));
@@ -581,12 +553,30 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
   if (password && password.trim().length >= 6) {
     user.password = password.trim();
   }
+
+  if (rollNo && (TEMP_PREFIX_REGEX.test(user.rollNo) || user.rollNo.startsWith('FRESHER_'))) {
+    const newRoll = rollNo.trim().toUpperCase();
+    if (FULL_ROLL_NO_REGEX.test(newRoll)) {
+      user.rollNo = newRoll;
+      if (!user.isUniversityEmailVerified) {
+        user.email = `${newRoll.toLowerCase()}@pucit.edu.pk`;
+      }
+    }
+  }
+
+  if (registrationNo && REG_NO_REGEX.test(registrationNo)) {
+    user.registrationNo = registrationNo.trim();
+  }
   
   if (personalNotificationEmail !== undefined && !user.isUniversityEmailVerified) {
     user.personalNotificationEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
   }
 
   await user.save();
+
+  if (user.role === 'STUDENT') {
+    await syncStudentEnrollment(user);
+  }
 
   res.status(200).json({
     status: "success",
@@ -599,6 +589,7 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
         personalNotificationEmail: user.personalNotificationEmail,
         role: user.role,
         rollNo: user.rollNo,
+        registrationNo: user.registrationNo,
         isUniversityEmailVerified: user.isUniversityEmailVerified,
       },
     },
@@ -614,8 +605,8 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
 
   const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
 
-  if (!targetEmail.endsWith('@pucit.edu.pk')) {
-    return next(new AppError("Must be a valid official @pucit.edu.pk email address.", 400));
+  if (!targetEmail.endsWith('@pucit.edu.pk') || !FULL_ROLL_NO_REGEX.test(user.rollNo)) {
+    return next(new AppError("A valid official roll number and @pucit.edu.pk email address are required.", 400));
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -630,9 +621,7 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
       details: [{ label: "Official Email", value: targetEmail }],
     });
   } catch (err) {
-    return next(
-      new AppError("Could not send activation OTP to official inbox. Try again later!", 500),
-    );
+    return next(new AppError("Could not send activation OTP to official inbox. Try again later!", 500));
   }
 
   user.otpCode = hashOtp(otp);
@@ -695,9 +684,7 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
   }
 
   if (newPassword.length < 6) {
-    return next(
-      new AppError("Password must be at least 6 characters long!", 400),
-    );
+    return next(new AppError("Password must be at least 6 characters long!", 400));
   }
 
   const student = await User.findById(studentId);
@@ -710,7 +697,7 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: "success",
-    message: `Password for ${student.name} (${student.rollNo}) updated successfully!`,
+    message: `Password for ${student.name} (${student.rollNo || student.registrationNo}) updated successfully!`,
   });
 });
 
@@ -718,9 +705,7 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
 // 12. ADMIN: GET PENDING TEACHERS
 // =============================================================================
 exports.getPendingTeachers = catchAsync(async (req, res, next) => {
-  const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select(
-    "-password",
-  );
+  const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
   res.status(200).json({
     status: "success",
     results: pendingTeachers.length,
@@ -743,7 +728,7 @@ exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
   user.role = "TEACHER";
   await user.save();
 
-  if (user.email) {
+  if (user.email && !user.email.includes('@temp.pucit.edu.pk')) {
     await sendStyledEmail({
       to: user.email,
       subject: "Teacher Account Approved",
@@ -778,7 +763,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
   const teacherEmail = user.email;
   const teacherName = user.name;
 
-  if (teacherEmail) {
+  if (teacherEmail && !teacherEmail.includes('@temp.pucit.edu.pk')) {
     try {
       await sendStyledEmail({
         to: teacherEmail,
@@ -786,14 +771,8 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
         title: "Registration Request Update",
         bodyText: `Hello <strong>${teacherName}</strong>,<br><br>We regret to inform you that your teacher account registration request for the PUCIT Portal has been <span style="color: #e11d48; font-weight: 600;">declined</span> at this time.<br><br>If you believe this is an error or need further assistance with your credentials, please feel free to contact the administrator, <strong>Shehzada Ather (IT F25 - Old Campus)</strong>.<br><br>Your registration profile has been reset. You may re-register on the portal with updated credentials whenever you are ready.`,
         details: [
-          {
-            label: "Status",
-            value: '<span style="color: #e11d48; font-weight: 600;">Declined / Reset</span>',
-          },
-          {
-            label: "Support Contact",
-            value: "Shehzada Ather, IT F25 (Old Campus)",
-          },
+          { label: "Status", value: '<span style="color: #e11d48; font-weight: 600;">Declined / Reset</span>' },
+          { label: "Support Contact", value: "Shehzada Ather, IT F25 (Old Campus)" },
         ],
       });
     } catch (mailErr) {
@@ -805,8 +784,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: "success",
-    message:
-      "Teacher registration request rejected, email notification sent, and database record cleared for re-registration.",
+    message: "Teacher registration request rejected, email notification sent, and database record cleared for re-registration.",
   });
 });
 
@@ -845,7 +823,7 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT (FIXED)
+// 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT
 // =============================================================================
 exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
   const users = await User.find().select("-password").sort({ createdAt: -1 });

@@ -5,6 +5,7 @@ import API from '../api/axios';
 
 const Register = () => {
   const [rollNo, setRollNo] = useState('');
+  const [registrationNo, setRegistrationNo] = useState(''); // Specific field for freshers without a digit suffix
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [personalNotificationEmail, setPersonalNotificationEmail] = useState('');
@@ -15,7 +16,7 @@ const Register = () => {
   
   const [isEmailDisabled, setIsEmailDisabled] = useState(false);
   const [isRollNoDisabled, setIsRollNoDisabled] = useState(false);
-  const [isFresher, setIsFresher] = useState(false);
+  const [isFresherWithoutRoll, setIsFresherWithoutRoll] = useState(false); // Triggers regNo & personal email inputs
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -26,33 +27,38 @@ const Register = () => {
 
   const fresherBatchCode = (import.meta.env.VITE_FRESHER_BATCH || 'f26').trim().toLowerCase();
 
-  // Smart dual-role field toggling & instruction sync
+  // Smart dual-role and fresher prefix detection logic
   useEffect(() => {
     if (isErrorState) return;
 
-    if (rollNo.trim().length > 0) {
+    const trimmedRoll = rollNo.trim().toLowerCase();
+
+    if (trimmedRoll.length > 0) {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(true);
 
-      const cleanRollNo = rollNo.trim().toLowerCase();
-      
-      if (cleanRollNo.includes(fresherBatchCode)) {
-        setEmail(''); 
-        setIsFresher(true);
-        setHelperText(`Fresher batch (${fresherBatchCode.toUpperCase()}) detected. Provide personal email for instant alerts.`);
+      // Check if it's a fresher section prefix without a trailing student number index (e.g., "BITF26A" instead of "BITF26A001")
+      // A standard roll number usually ends with digits (e.g., 001, 45). If it just ends with a letter like A, B, M, or the batch code itself.
+      const hasNumberSuffix = /\d{2,3}$/.test(trimmedRoll);
+      const isPrefixOnly = trimmedRoll.includes(fresherBatchCode) && !hasNumberSuffix;
+
+      if (isPrefixOnly) {
+        setEmail('');
+        setIsFresherWithoutRoll(true);
+        setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
       } else {
-        setEmail(`${cleanRollNo}@pucit.edu.pk`);
-        setIsFresher(false);
-        setHelperText(`Senior student profile linked to: ${cleanRollNo}@pucit.edu.pk`);
+        setEmail(`${trimmedRoll}@pucit.edu.pk`);
+        setIsFresherWithoutRoll(false);
+        setHelperText(`Senior student profile linked to: ${trimmedRoll.toUpperCase()}@pucit.edu.pk`);
       }
     } else if (email.trim().length > 0 && !isEmailDisabled) {
       setIsRollNoDisabled(true);
-      setIsFresher(false);
+      setIsFresherWithoutRoll(false);
       setHelperText('Faculty profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
-      setIsFresher(false);
+      setIsFresherWithoutRoll(false);
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
   }, [rollNo, email, fresherBatchCode, isErrorState]);
@@ -60,14 +66,14 @@ const Register = () => {
   // Real-time form validation
   useEffect(() => {
     const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
-    const fresherEmailCheck = !isFresher || personalNotificationEmail.trim().length > 0;
+    const fresherCheck = !isFresherWithoutRoll || (registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0);
     
-    if (hasIdentifier && fresherEmailCheck && name.trim() && password.length >= 6 && password === confirmPassword) {
+    if (hasIdentifier && fresherCheck && name.trim() && password.length >= 6 && password === confirmPassword) {
       setIsFormValid(true);
     } else {
       setIsFormValid(false);
     }
-  }, [rollNo, name, email, personalNotificationEmail, password, confirmPassword, isFresher]);
+  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherWithoutRoll]);
 
   const handleRegister = async (e) => {
     if (e) {
@@ -76,7 +82,6 @@ const Register = () => {
     }
     if (!isFormValid || loading) return;
 
-    // Reset UI before request
     setLoading(true);
     setIsErrorState(false);
     setHelperText('Communicating with security gateway...');
@@ -89,7 +94,10 @@ const Register = () => {
         password,
         rollNo: identifierRoll,
         ...(email.trim() && { email: email.trim().toLowerCase() }),
-        ...(isFresher && personalNotificationEmail.trim() && { personalNotificationEmail: personalNotificationEmail.trim().toLowerCase() })
+        ...(isFresherWithoutRoll && {
+          registrationNo: registrationNo.trim().toUpperCase(),
+          personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
+        })
       };
 
       const res = await API.post('/auth/signup/initiate', payload);
@@ -156,7 +164,7 @@ const Register = () => {
         <form onSubmit={handleRegister} className="space-y-4">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Roll Number {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed for teacher)</span>}
+              Roll Number / Section Prefix {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed for teacher)</span>}
             </label>
             <input 
               type="text" 
@@ -175,7 +183,7 @@ const Register = () => {
                   ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
                   : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
               }`} 
-              placeholder="BITF26A001" 
+              placeholder="BITF26A or BITF26A001" 
             />
           </div>
 
@@ -219,29 +227,47 @@ const Register = () => {
             />
           </div>
 
-          {/* Conditional Personal Fallback Email Field for Freshies */}
-          {isFresher && (
-            <div className="bg-orange-950/20 border border-orange-500/20 p-3.5 rounded-2xl space-y-1.5 animate-fadeIn">
-              <label className="block text-xs font-bold uppercase tracking-wider text-orange-400">
-                Personal Notification Email <span className="text-rose-400">*</span>
-              </label>
-              <p className="text-[11px] text-slate-400 leading-snug">
-                Since your official PUCIT email isn't active yet, enter your personal Gmail/Outlook to receive instant quizzes and assignment alerts.
-              </p>
-              <input 
-                type="email" 
-                value={personalNotificationEmail} 
-                onChange={(e) => {
-                  setPersonalNotificationEmail(e.target.value);
-                  if (isErrorState) setIsErrorState(false);
-                }} 
-                required
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck="false"
-                className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all" 
-                placeholder="your.personal@gmail.com" 
-              />
+          {/* Conditional Freshers Registration Number & Personal Email Fields */}
+          {isFresherWithoutRoll && (
+            <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
+                  University Registration Number <span className="text-rose-400">*</span>
+                </label>
+                <input 
+                  type="text" 
+                  value={registrationNo} 
+                  onChange={(e) => {
+                    setRegistrationNo(e.target.value.toUpperCase());
+                    if (isErrorState) setIsErrorState(false);
+                  }} 
+                  required
+                  autoCapitalize="characters"
+                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all uppercase" 
+                  placeholder="e.g., 2026-NTS-001" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
+                  Personal Notification Email <span className="text-rose-400">*</span>
+                </label>
+                <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                  Since your official university email isn't active yet, enter your personal email to receive classroom and lab announcements.
+                </p>
+                <input 
+                  type="email" 
+                  value={personalNotificationEmail} 
+                  onChange={(e) => {
+                    setPersonalNotificationEmail(e.target.value);
+                    if (isErrorState) setIsErrorState(false);
+                  }} 
+                  required
+                  autoCapitalize="none"
+                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase" 
+                  placeholder="your.personal@gmail.com" 
+                />
+              </div>
             </div>
           )}
 
@@ -323,7 +349,3 @@ const Register = () => {
 };
 
 export default Register;
-
-
-
-

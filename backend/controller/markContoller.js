@@ -259,7 +259,6 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       finals: { totalMarks: 0, obtainedMarks: 0 } 
     };
 
-    // 1. Quizzes Percentage
     let qObt = 0, qTot = 0;
     if (Array.isArray(doc.quizzes)) {
       doc.quizzes.forEach(q => {
@@ -270,7 +269,6 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     const quizPercentage = qTot > 0 ? (qObt / qTot) * 100 : 0;
     if (qTot > 0) { sumQuiz += quizPercentage; quizCount++; }
 
-    // 2. Assignments Percentage
     let aObt = 0, aTot = 0;
     if (Array.isArray(doc.assignments)) {
       doc.assignments.forEach(a => {
@@ -281,7 +279,6 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     const assignmentPercentage = aTot > 0 ? (aObt / aTot) * 100 : 0;
     if (aTot > 0) { sumAssign += assignmentPercentage; assignCount++; }
 
-    // 3. Sessional Percentage (Combined Quizzes and Assignments percentage)
     const hasQuizzes = qTot > 0;
     const hasAssignments = aTot > 0;
     let sessionalPercentage = 0;
@@ -297,21 +294,18 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       sessionalCount++; 
     }
 
-    // 4. Mids Percentage
     let midsPercentage = 0;
     if (doc.mids && doc.mids.totalMarks > 0) {
       midsPercentage = doc.mids.isAbsent ? 0 : ((Number(doc.mids.obtainedMarks) || 0) / doc.mids.totalMarks) * 100;
       sumMids += midsPercentage; midsCount++;
     }
 
-    // 5. Finals Percentage
     let finalsPercentage = 0;
     if (doc.finals && doc.finals.totalMarks > 0) {
       finalsPercentage = doc.finals.isAbsent ? 0 : ((Number(doc.finals.obtainedMarks) || 0) / doc.finals.totalMarks) * 100;
       sumFinals += finalsPercentage; finalsCount++;
     }
 
-    // 6. Overall Weighted Percentage
     const sW = Number(gradingScheme.sessionalWeight) || 25;
     const mW = Number(gradingScheme.midsWeight) || 35;
     const fW = Number(gradingScheme.finalsWeight) || 40;
@@ -408,7 +402,7 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// SAVE SINGLE EVALUATION SHEET FROM POPUP EDITOR
+// SAVE SINGLE EVALUATION SHEET FROM POPUP EDITOR (Targeted Student Emails Only)
 // =============================================================================
 exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -442,10 +436,20 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
     await classroom.save();
   }
 
+  const updatedStudentIds = [];
+
   if (Array.isArray(marks)) {
     for (const m of marks) {
       const studentId = m.studentId || m._id;
       if (!studentId) continue;
+
+      const rawVal = m.obtainedMarks !== undefined ? String(m.obtainedMarks).trim() : '';
+      const isAbsent = Boolean(m.isAbsent) || rawVal.toUpperCase() === 'A';
+      
+      // Only process and notify students who actually have an entered score or absence flag
+      if (!isAbsent && (rawVal === '' || rawVal === null || isNaN(Number(rawVal)))) {
+        continue;
+      }
 
       let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId });
       if (!markDoc) {
@@ -457,8 +461,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
         });
       }
 
-      const isAbsent = Boolean(m.isAbsent);
-      const obtained = isAbsent ? 0 : Math.max(0, Number(m.obtainedMarks) || 0);
+      const obtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
       const fileData = parseCloudinaryFile(m);
 
       if (['mids', 'finals'].includes(targetCategory)) {
@@ -487,12 +490,41 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       }
 
       await markDoc.save();
+      updatedStudentIds.push(studentId);
     }
+  }
+
+  // Dispatch email notifications STRICTLY to the newly graded/updated students
+  if (updatedStudentIds.length > 0) {
+    const newlyGradedStudents = await User.find({ _id: { $in: updatedStudentIds } }).select('name email personalNotificationEmail').lean();
+    
+    await Promise.all(
+      newlyGradedStudents.map(async (student) => {
+        const studentEmail = student.personalNotificationEmail || student.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          try {
+            const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
+            await sendStyledEmail({
+              to: studentEmail,
+              subject: `Marks Uploaded: ${cleanTitle} (${targetCategory.toUpperCase()})`,
+              title: `${cleanTitle} (${targetCategory.toUpperCase()})`,
+              bodyText: `Your grade for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been recorded/updated.`,
+              details: [
+                { label: 'Evaluation', value: cleanTitle },
+                { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
+              ]
+            });
+          } catch (err) {
+            console.warn('Failed to send evaluation popup email:', err.message);
+          }
+        }
+      })
+    );
   }
 
   res.status(200).json({
     status: 'success',
-    message: 'Marksheet updated and saved successfully!'
+    message: `Marksheet updated and saved successfully! Notified ${updatedStudentIds.length} student(s).`
   });
 });
 
@@ -633,7 +665,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     const studentUser = studentMap.get(studentIdStr);
     if (studentUser) {
       const targetStudentEmail = studentUser.personalNotificationEmail || studentUser.email;
-      if (targetStudentEmail) {
+      if (targetStudentEmail && !targetStudentEmail.includes('@temp.pucit.edu.pk')) {
         const percentage = parsedTotal > 0 ? ((parsedObtained / parsedTotal) * 100).toFixed(2) : '0.00';
         const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
         emailDispatchList.push({
@@ -677,7 +709,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// UPDATE SINGLE ITEM MARK FOR A STUDENT (Exported under both aliases)
+// UPDATE SINGLE ITEM MARK FOR A STUDENT (Spam-Free Notification Fix)
 // =============================================================================
 exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   const { classroomId, studentId, category } = req.body;
@@ -697,6 +729,14 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   if (!VALID_CATEGORIES.includes(resolvedCategory)) {
     return next(new AppError('Invalid category specified!', 400));
   }
+
+  const [classroom, student] = await Promise.all([
+    Classroom.findById(classroomId).lean(),
+    User.findById(studentId).select('name email personalNotificationEmail').lean()
+  ]);
+
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+  if (!student) return next(new AppError('Student not found!', 404));
 
   let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId });
   if (!markDoc) {
@@ -772,23 +812,23 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
 
   await markDoc.save();
 
-  const student = await User.findById(studentId).lean();
-  const classroom = await Classroom.findById(classroomId).lean();
+  // Single notification targeted strictly to this specific student (Prevents bulk email spam)
+  const studentEmail = student.personalNotificationEmail || student.email;
   const displayTitle = itemTitle || resolvedCategory;
-
-  if (student) {
-    const targetStudentEmail = student.personalNotificationEmail || student.email;
-    if (targetStudentEmail) {
+  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+    try {
       const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
       await sendStyledEmail({
-        to: targetStudentEmail,
+        to: studentEmail,
         subject: `Grade Updated: ${displayTitle}`,
         title: `Grade Update: ${displayTitle}`,
         bodyText: `Your score for <strong>${displayTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been updated by <strong>${req.user.name}</strong>.`,
         details: [
           { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
         ]
-      }).catch(err => console.warn('Failed to send update email:', err.message));
+      });
+    } catch (err) {
+      console.warn('Failed to send update email:', err.message);
     }
   }
 

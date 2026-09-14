@@ -11,10 +11,11 @@ import ClassroomDetail from "./pages/ClassroomDetail";
 import MarksSheet from "./pages/MarksSheet";
 import LabroomDetail from "./pages/LabroomDetail";
 import LabMarksSheet from "./pages/LabMarksSheet";
+import Maintenance from "./pages/Maintenance";
 
-// Protected Route Component to block unauthenticated users
+// Protected Route Component to block unauthenticated users and enforce Maintenance Mode (Admin only bypass)
 const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, maintenance } = useAuth();
 
   if (loading) {
     return (
@@ -31,6 +32,12 @@ const ProtectedRoute = ({ children }) => {
         </div>
       </div>
     );
+  }
+
+  // Enforce Maintenance Mode Lock: ONLY ADMIN can bypass. Teachers and students are locked out.
+  const isAdmin = user && user.role === 'ADMIN';
+  if (maintenance?.isUnderMaintenance && !isAdmin) {
+    return <Maintenance maintenanceData={maintenance} />;
   }
 
   if (!user) {
@@ -51,6 +58,7 @@ function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-recovery-otp" element={<VerifyRecoveryOtp />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/maintenance" element={<Maintenance />} />
 
         {/* Protected Portal Dashboard & Classroom Routes */}
         <Route

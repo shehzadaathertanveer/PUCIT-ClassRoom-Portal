@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import API from '../api/axios';
 
 const VerifyRecoveryOtp = () => {
   const location = useLocation();
@@ -10,21 +11,52 @@ const VerifyRecoveryOtp = () => {
   const [isErrorState, setIsErrorState] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleVerifyOtp = (e) => {
+  const handleVerifyOtp = async (e) => {
     e.preventDefault();
     setIsErrorState(false);
 
-    if (otp.trim().length !== 6) {
+    const trimmedOtp = otp.trim();
+
+    if (trimmedOtp.length !== 6) {
       setHelperText('Please enter a valid 6-digit OTP code.');
       setIsErrorState(true);
       return;
     }
 
+    if (!email) {
+      setHelperText('Session email missing. Please restart the forgot password process.');
+      setIsErrorState(true);
+      return;
+    }
+
     setIsSubmitting(true);
-    // Securely routes to your /reset-password page passing email and otp via router state
-    setTimeout(() => {
-      navigate('/reset-password', { state: { email, otp: otp.trim() } });
-    }, 300);
+    setHelperText('Verifying code with security gateway...');
+
+    try {
+      // Real backend verification request
+      await API.post('/auth/verify-recovery-otp', {
+        email: email.trim().toLowerCase(),
+        otp: trimmedOtp
+      }, { timeout: 10000 });
+
+      // If successful, navigate to reset-password passing email and validated otp
+      navigate('/reset-password', { state: { email: email.trim().toLowerCase(), otp: trimmedOtp } });
+    } catch (err) {
+      let errorMsg = 'Invalid code or network error. Please try again.';
+      
+      if (err?.response?.data?.message) {
+        errorMsg = err.response.data.message;
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        errorMsg = 'Server response timed out. Please check your connection.';
+      } else if (err?.message) {
+        errorMsg = err.message;
+      }
+
+      setHelperText(errorMsg);
+      setIsErrorState(true);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

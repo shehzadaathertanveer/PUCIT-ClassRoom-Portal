@@ -334,7 +334,6 @@ const ClassroomDetail = () => {
     }
   };
 
-  // Official PUCIT Grading Scale Helper
   const getPucitGrade = (percentage) => {
     const p = Number(percentage) || 0;
     if (p >= 85) return 'A+';
@@ -347,7 +346,6 @@ const ClassroomDetail = () => {
     return 'F';
   };
 
-  // Download Comprehensive Excel / CSV Report Sorted by Roll Number
   const handleDownloadExcelReport = () => {
     try {
       const rankings = classAnalytics?.rankings || [];
@@ -356,11 +354,9 @@ const ClassroomDetail = () => {
         return;
       }
 
-      // Collect all quizzes, assignments, mids, finals titles dynamically
       const quizItems = classroom?.quizzes || [];
       const assignmentItems = classroom?.assignments || [];
 
-      // Build CSV Headers (Using exact title without category prefixes)
       let headers = ['Roll Number', 'Student Name'];
       quizItems.forEach(q => headers.push(`${q.title} (${q.totalMarks})`));
       assignmentItems.forEach(a => headers.push(`${a.title} (${a.totalMarks})`));
@@ -368,7 +364,6 @@ const ClassroomDetail = () => {
 
       let csvRows = [headers.join(',')];
 
-      // Sort students strictly by Roll Number ascending
       const sortedRankings = [...rankings].sort((a, b) => {
         const rollA = (a.student?.rollNo || '').toString().toLowerCase();
         const rollB = (b.student?.rollNo || '').toString().toLowerCase();
@@ -383,26 +378,22 @@ const ClassroomDetail = () => {
           `"${student.name || 'Unknown'}"`
         ];
 
-        // Quizzes scores
         quizItems.forEach(q => {
           const match = (marksDoc.quizzes || []).find(item => item.title?.trim().toLowerCase() === q.title?.trim().toLowerCase());
           row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
         });
 
-        // Assignment scores
         assignmentItems.forEach(a => {
           const match = (marksDoc.assignments || []).find(item => item.title?.trim().toLowerCase() === a.title?.trim().toLowerCase());
           row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
         });
 
-        // Mids & Finals
         const midsMatch = marksDoc.mids || r.mids;
         row.push(midsMatch?.isAbsent ? 'Absent' : (midsMatch?.obtainedMarks ?? ''));
 
         const finalsMatch = marksDoc.finals || r.finals;
         row.push(finalsMatch?.isAbsent ? 'Absent' : (finalsMatch?.obtainedMarks ?? ''));
 
-        // Percentages & Official PUCIT Grade
         const overallPct = Number(r.overallPercentage || 0);
         row.push(`${Number(r.sessionalPercentage || 0).toFixed(2)}%`);
         row.push(`${overallPct.toFixed(2)}%`);
@@ -967,7 +958,7 @@ const ClassroomDetail = () => {
           </div>
         </section>
 
-        {/* NAVIGATION TABS WITH ACTIVITY COUNTS & LEADERBOARD ICON FOR STAFF */}
+        {/* NAVIGATION TABS */}
         <div className="flex items-center bg-[#130910]/80 border border-orange-500/20 rounded-2xl p-2 gap-1 overflow-x-auto">
           <button onClick={() => setActiveTab('overview')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${activeTab === 'overview' ? 'bg-orange-400 text-black' : 'text-slate-400'}`}>📊 Overview</button>
           
@@ -1185,21 +1176,19 @@ const ClassroomDetail = () => {
                     <th className="py-3 px-3">Rank</th>
                     <th className="py-3 px-3">Roll Number</th>
                     <th className="py-3 px-3">Student Name</th>
-                    <th className="py-3 px-3">Score Percentage</th>
-                    <th className="py-3 px-3 text-right">Actions</th>
+                    <th className="py-3 px-3 text-right">Score Percentage</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-xs">
                   {getSortedLeaderboard().length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="text-center py-10 text-slate-500 italic">No evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
+                      <td colSpan="4" className="text-center py-10 text-slate-500 italic">No evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
                     </tr>
                   ) : (
                     getSortedLeaderboard().map((entry, idx) => {
                       const studentObj = entry.student || {};
                       const studentName = studentObj.name || 'Unknown Student';
                       const studentRoll = studentObj.rollNo || 'N/A';
-                      const studentUserId = studentObj._id;
 
                       let currentScore = entry.overallPercentage || 0;
                       if (leaderboardFilter === 'sessionals') currentScore = entry.sessionalPercentage || 0;
@@ -1215,22 +1204,8 @@ const ClassroomDetail = () => {
                           </td>
                           <td className="py-3.5 px-3 font-mono text-orange-400 font-bold">{studentRoll}</td>
                           <td className="py-3.5 px-3 text-white font-medium">{studentName}</td>
-                          <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400">
+                          <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400 text-right">
                             {Number(currentScore || 0).toFixed(2)}%
-                          </td>
-                          <td className="py-3.5 px-3 text-right">
-                            <button
-                              onClick={() => {
-                                if (studentUserId) {
-                                  navigate(`/classroom/${classroomId}/sheet/general/all`, { state: { targetStudentId: studentUserId } });
-                                } else {
-                                  showToast('Student identifier profile missing.', 'error');
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer"
-                            >
-                              View Profile
-                            </button>
                           </td>
                         </tr>
                       );
@@ -1332,7 +1307,6 @@ const ClassroomDetail = () => {
                           )}
                         </div>
 
-                        {/* Card Action Controls & Compact Non-Bulky Photo Button */}
                         <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800">
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
                             <div className="w-full flex items-center justify-between">
@@ -1537,48 +1511,79 @@ const ClassroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Add Student Modal */}
+      {/* 4. Add Student Modal (Fully Wired with Auto-Detect & Bulk Controllers) */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-white uppercase">Enroll Student</h3>
+              <h3 className="text-base font-extrabold text-white uppercase">Enroll Students (Auto-Detect / Bulk)</h3>
               <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
+
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
+            
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => setAddModeType('single')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'single' ? 'bg-orange-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Single</button>
-              <button type="button" onClick={() => setAddModeType('bulkRange')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'bulkRange' ? 'bg-orange-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Range</button>
-              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-orange-500 text-black' : 'bg-slate-800 text-slate-300'}`}>Batch</button>
+              <button type="button" onClick={() => setAddModeType('single')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'single' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Auto-Detect</button>
+              <button type="button" onClick={() => setAddModeType('bulkRange')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'bulkRange' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Range</button>
+              <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>Batch CSV</button>
             </div>
+
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
               {addModeType === 'single' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Number</label>
-                  <input type="text" required placeholder="e.g. 47" value={studentRollInput} onChange={(e) => setStudentRollInput(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" />
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase text-slate-400">Roll Number or Official Email</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. BITF26A047 or bitf26a047@pucit.edu.pk" 
+                    value={studentRollInput} 
+                    onChange={(e) => setStudentRollInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-orange-400" 
+                  />
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    The backend will automatically detect whether this user exists, link them, or provision a placeholder record.
+                  </p>
                 </div>
               )}
+
               {addModeType === 'bulkRange' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Start Roll #</label>
-                    <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Roll #</label>
+                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Roll #</label>
+                      <input type="number" required placeholder="50" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">End Roll #</label>
-                    <input type="number" required placeholder="50" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Will automatically auto-prefix using class section setup (<span className="font-mono text-orange-400">{classroom?.sectionPrefix}</span>).
+                  </p>
                 </div>
               )}
+
               {addModeType === 'addDrop' && (
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma/Newline)</label>
-                  <textarea rows="4" required placeholder="BITF26A001, BITF26A002" value={addDropInput} onChange={(e) => setAddDropInput(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Numbers (Comma or Newline Separated)</label>
+                  <textarea 
+                    rows="4" 
+                    required 
+                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
+                    value={addDropInput} 
+                    onChange={(e) => setAddDropInput(e.target.value)} 
+                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-orange-400" 
+                  />
                 </div>
               )}
-              <button type="submit" disabled={addingStudent} className="w-full py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
-                {addingStudent ? 'Enrolling...' : 'Enroll Students'}
-              </button>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setIsAddStudentModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
+                <button type="submit" disabled={addingStudent} className="w-1/2 py-3 bg-orange-500 hover:bg-orange-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                  {addingStudent ? 'Processing...' : 'Enroll Students'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

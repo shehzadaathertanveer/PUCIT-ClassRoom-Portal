@@ -71,6 +71,12 @@ const Dashboard = () => {
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
 
+  // Roll Number & Official Email Missing Check States
+  const [isRollNoModalOpen, setIsRollNoModalOpen] = useState(false);
+  const [missingRollNoInput, setMissingRollNoInput] = useState('');
+  const [rollNoUpdating, setRollNoUpdating] = useState(false);
+  const [rollNoMessage, setRollNoMessage] = useState('');
+
   // PUCIT Email Linking States (For Students)
   const [pucitEmailInput, setPucitEmailInput] = useState('');
   const [emailOtpInput, setEmailOtpInput] = useState('');
@@ -80,9 +86,6 @@ const Dashboard = () => {
 
   const navigate = useNavigate();
 
-  // =========================================================================
-  // FETCH DASHBOARD DATA (Classrooms + Labrooms combined safely)
-  // =========================================================================
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
@@ -343,6 +346,30 @@ const Dashboard = () => {
     }
   };
 
+  const handleUpdateMissingRollNo = async (e) => {
+    e.preventDefault();
+    setRollNoUpdating(true);
+    setRollNoMessage('');
+
+    try {
+      const res = await API.patch('/auth/update-profile', {
+        rollNo: missingRollNoInput.trim().toUpperCase()
+      });
+      setRollNoMessage('Roll number updated successfully!');
+      if (res.data?.data?.user) {
+        updateUser(res.data.data.user);
+      }
+      setTimeout(() => {
+        setIsRollNoModalOpen(false);
+        window.location.reload();
+      }, 1000);
+    } catch (err) {
+      setRollNoMessage(err.response?.data?.message || 'Failed to update roll number.');
+    } finally {
+      setRollNoUpdating(false);
+    }
+  };
+
   const handleInitiateEmailLink = async (e) => {
     e.preventDefault();
     setEmailLoading(true);
@@ -437,6 +464,9 @@ const Dashboard = () => {
     (isStudent && !isFresher)
   );
 
+  const needsRollNo = isStudent && (!user?.rollNo || user?.rollNo.trim() === '');
+  const needsEmailLink = isStudent && !isPucitVerified;
+
   const classroomsOnly = classroomsList.filter(c => c.courseType !== 'LAB');
   const labroomsOnly = classroomsList.filter(c => c.courseType === 'LAB');
 
@@ -459,13 +489,33 @@ const Dashboard = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-orange-500/15 sm:bg-orange-500/20 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-rose-500/10 sm:bg-rose-500/15 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
 
-      {isStudent && !isPucitVerified && (
+      {/* MISSING ROLL NUMBER BANNER FOR STUDENTS */}
+      {needsRollNo && (
+        <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-rose-950/80 border border-rose-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
+          <div className="flex items-center gap-3 text-center sm:text-left">
+            <span className="text-xl">🎓</span>
+            <div>
+              <p className="text-xs font-bold text-rose-200 uppercase tracking-wide">Roll Number Required</p>
+              <p className="text-[11px] text-slate-300">Please register your university roll number (e.g. <span className="font-mono text-rose-300">BITF26A001</span>) to view enrolled courses.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsRollNoModalOpen(true)}
+            className="w-full sm:w-auto px-4 py-2 bg-rose-500 hover:bg-rose-400 text-black font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer whitespace-nowrap shadow-md text-center"
+          >
+            Register Roll No →
+          </button>
+        </div>
+      )}
+
+      {/* OFFICIAL EMAIL VERIFICATION BANNER FOR FRESHERS / STUDENTS */}
+      {needsEmailLink && (
         <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-amber-950/80 border border-amber-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 text-center sm:text-left">
             <span className="text-xl">⚠️</span>
             <div>
-              <p className="text-xs font-bold text-amber-200 uppercase tracking-wide">PUCIT Email Not Verified</p>
-              <p className="text-[11px] text-slate-300">Link your official <span className="font-mono text-orange-300">@pucit.edu.pk</span> email address to unlock complete portal features.</p>
+              <p className="text-xs font-bold text-amber-200 uppercase tracking-wide">Official PUCIT Email Not Linked</p>
+              <p className="text-[11px] text-slate-300">Link and verify your official <span className="font-mono text-orange-300">@pucit.edu.pk</span> email address to unlock complete portal features.</p>
             </div>
           </div>
           <button
@@ -1007,6 +1057,56 @@ const Dashboard = () => {
                 )
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MISSING ROLL NUMBER MODAL */}
+      {isRollNoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-3 sm:px-4">
+          <div className="w-full max-w-md bg-[#130910] border border-rose-500/40 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-extrabold text-rose-300 uppercase tracking-wide">
+                Register Your Roll Number
+              </h3>
+              <button onClick={() => setIsRollNoModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer p-1">✕</button>
+            </div>
+
+            {rollNoMessage && (
+              <div className="p-3 bg-slate-900 border border-slate-700 text-slate-200 rounded-xl text-xs font-mono">
+                {rollNoMessage}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateMissingRollNo} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Number / Registration ID</label>
+                <input 
+                  type="text"
+                  required
+                  value={missingRollNoInput}
+                  onChange={(e) => setMissingRollNoInput(e.target.value)}
+                  placeholder="e.g. BITF26A001"
+                  className="w-full px-4 py-3 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm font-mono uppercase focus:ring-2 focus:ring-rose-400"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => setIsRollNoModalOpen(false)}
+                  className="w-1/2 py-2.5 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  disabled={rollNoUpdating}
+                  className="w-1/2 py-2.5 bg-rose-500 hover:bg-rose-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {rollNoUpdating ? 'Saving...' : 'Save Roll Number'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

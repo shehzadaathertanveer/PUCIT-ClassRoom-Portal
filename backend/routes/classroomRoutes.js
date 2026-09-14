@@ -33,6 +33,10 @@ router.patch('/assign-teacher', restrictTo('ADMIN'), classroomController.assignT
 // Classroom Settings Update (Name, Prefix, Capacity, Placeholder Teacher Name, Weights)
 router.patch('/:classroomId/settings', restrictToClassStaff, classroomController.updateClassroomSettings);
 
+// Auto-Detect Available Students (Matching Section Prefix / Freshers)
+router.get('/:classroomId/available-students', restrictToClassStaff, classroomController.getAvailableStudentsByPrefix);
+router.post('/:classroomId/bulk-approve-students', restrictToClassStaff, classroomController.bulkApproveAvailableStudents);
+
 // Anonymous Complaints & Feedback Box
 router.post('/:classroomId/complaints', classroomController.submitComplaint); 
 router.get('/:classroomId/complaints', restrictToClassStaff, classroomController.getClassroomComplaints); 

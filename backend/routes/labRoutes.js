@@ -1,6 +1,6 @@
 const express = require('express');
 const labController = require('../controller/labcontroller'); 
-const labMarkController = require('../controller/labMarkController'); // <-- Added import
+const labMarkController = require('../controller/labMarkController');
 const authController = require('../controller/authController'); 
 const { protect, restrictTo, restrictToLabStaff } = require('../middleware/authMiddleware');
 
@@ -56,13 +56,30 @@ router
   );
 
 // =============================================================================
+// AUTO-DETECT & BULK APPROVE AVAILABLE FRESHERS/STUDENTS
+// =============================================================================
+router
+  .route('/:labroomId/available-students')
+  .get(
+    restrictToLabStaff,
+    labController.getAvailableLabStudentsByPrefix
+  );
+
+router
+  .route('/:labroomId/bulk-approve-students')
+  .post(
+    restrictToLabStaff,
+    labController.bulkApproveAvailableLabStudents
+  );
+
+// =============================================================================
 // EXCEL EXPORT ROUTE
 // =============================================================================
 router
   .route('/:labroomId/export-excel')
   .get(
     restrictToLabStaff,
-    labMarkController.downloadLabExcelExport // <-- Uses labMarkController correctly
+    labMarkController.downloadLabExcelExport
   );
 
 // =============================================================================

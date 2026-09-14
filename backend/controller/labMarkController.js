@@ -3,7 +3,7 @@ const Labroom = require('../models/labSchema');
 const User = require('../models/userSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
-const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
+const sendStyledEmail = require('../utils/emailService');
 
 const VALID_STANDARD_CATEGORIES = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
@@ -34,7 +34,7 @@ exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
 
   const labroom = await Labroom.findById(labroomId)
-    .populate('students', 'name rollNo email personalNotificationEmail')
+    .populate('students', 'name rollNo registrationNo email personalNotificationEmail')
     .lean();
 
   if (!labroom) {
@@ -47,15 +47,16 @@ exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
 
   (labroom.students || []).forEach((student) => {
     const roll = student.rollNo ? student.rollNo.toUpperCase() : '';
-    if (prefix && roll.startsWith(prefix)) {
+    const reg = student.registrationNo ? student.registrationNo.toUpperCase() : '';
+    if ((prefix && roll.startsWith(prefix)) || (prefix && reg.startsWith(prefix))) {
       regular.push(student);
     } else {
       addDrop.push(student);
     }
   });
 
-  regular.sort((a, b) => getRollDigits(a.rollNo) - getRollDigits(b.rollNo));
-  addDrop.sort((a, b) => (a.rollNo || '').localeCompare(b.rollNo || ''));
+  regular.sort((a, b) => getRollDigits(a.rollNo || a.registrationNo) - getRollDigits(b.rollNo || b.registrationNo));
+  addDrop.sort((a, b) => (a.rollNo || a.registrationNo || '').localeCompare(b.rollNo || b.registrationNo || ''));
 
   const sortedStudents = [...regular, ...addDrop];
   const studentIds = sortedStudents.map((s) => s._id);
@@ -99,7 +100,7 @@ exports.getUnassignedLabStudents = catchAsync(async (req, res, next) => {
   }
 
   const labroom = await Labroom.findById(labroomId)
-    .populate('students', 'name rollNo email personalNotificationEmail')
+    .populate('students', 'name rollNo registrationNo email personalNotificationEmail')
     .lean();
 
   if (!labroom) return next(new AppError('Labroom not found!', 404));
@@ -232,7 +233,7 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   const userRole = req.user.role;
 
   const labroom = await Labroom.findById(labroomId)
-    .populate('students', '_id rollNo name')
+    .populate('students', '_id rollNo registrationNo name')
     .populate('teacher', '_id')
     .populate('tas', '_id')
     .lean();
@@ -243,10 +244,9 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   const isTa = labroom.tas && labroom.tas.some(ta => ta._id.toString() === userId.toString());
   const isStaffOrAdmin = userRole === 'ADMIN' || userRole === 'TEACHER' || isInstructor || isTa;
 
-  // IF STUDENT: Return only their personal mark document without triggering staff restrictions
   if (!isStaffOrAdmin) {
     let studentMark = await LabMark.findOne({ labroom: labroomId, student: userId })
-      .populate('student', 'name rollNo email personalNotificationEmail')
+      .populate('student', 'name rollNo registrationNo email personalNotificationEmail')
       .lean();
 
     if (!studentMark) {
@@ -266,8 +266,7 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
     });
   }
 
-  // IF STAFF / TA / ADMIN: Return full class rankings and analytics
-  const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', 'name rollNo').lean();
+  const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', 'name rollNo registrationNo').lean();
   const activeStudentIds = new Set((labroom.students || []).map(s => s._id.toString()));
   const validDocs = markDocs.filter(doc => doc.student && activeStudentIds.has(doc.student._id.toString()));
 
@@ -349,12 +348,12 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
 
   const labroom = await Labroom.findById(labroomId)
-    .populate('students', '_id rollNo name')
+    .populate('students', '_id rollNo registrationNo name')
     .lean();
 
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', '_id rollNo name').lean();
+  const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', '_id rollNo registrationNo name').lean();
   const markDocMap = new Map(markDocs.map(m => [m.student?._id?.toString(), m]));
 
   const sActivities = labroom.sessionalActivities && labroom.sessionalActivities.length > 0
@@ -375,7 +374,7 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   });
 
   let csvRows = [];
-  let headerRow = ['Roll Number', 'Student Name'];
+  let headerRow = ['Roll / Reg No', 'Student Name'];
   headerActivityCols.forEach(col => {
     headerRow.push(`"${col.category}: ${col.title} (${col.max}M)"`);
   });
@@ -386,14 +385,17 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   csvRows.push(headerRow.join(','));
 
   const sortedStudents = [...(labroom.students || [])].sort((a, b) => {
-    const rollA = (a.rollNo || '').localeCompare(b.rollNo || '');
-    return rollA !== 0 ? rollA : (a.name || '').localeCompare(b.name || '');
+    const identA = a.rollNo || a.registrationNo || '';
+    const identB = b.rollNo || b.registrationNo || '';
+    const comp = identA.localeCompare(identB);
+    return comp !== 0 ? comp : (a.name || '').localeCompare(b.name || '');
   });
 
   sortedStudents.forEach(st => {
     const doc = markDocMap.get(st._id.toString()) || {};
+    const identifier = st.rollNo || st.registrationNo || 'N/A';
     let rowData = [
-      `"${st.rollNo || 'N/A'}"`,
+      `"${identifier}"`,
       `"${st.name || 'Unknown'}"`
     ];
 
@@ -425,7 +427,6 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
     });
 
     const overallPct = totalPossAll > 0 ? ((totalObtAll / totalPossAll) * 100).toFixed(2) : '0.00';
-    
     const pVal = Number(overallPct);
     let grade = 'F';
     if (pVal >= 85) grade = 'A+';
@@ -447,7 +448,7 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. BATCH SUBMIT LAB MARKS
+// 2. BATCH SUBMIT LAB MARKS (Targeted Notifications for Newly Graded Students Only)
 // =============================================================================
 exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   const { labroomId, category, title, totalMarks, marksData } = req.body;
@@ -499,10 +500,21 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   }
   await labroom.save();
 
+  // Filter only entries that have an actual grade or absence flag provided (Ignores empty inputs for remaining students)
   const validEntries = marksData.map(item => ({
     studentId: item.studentId || item.student || item._id,
     obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score)
-  })).filter(item => item.studentId && item.obtainedMarks !== undefined && item.obtainedMarks !== null);
+  })).filter(item => {
+    if (!item.studentId) return false;
+    const rawVal = item.obtainedMarks;
+    if (rawVal === undefined || rawVal === null) return false;
+    const str = String(rawVal).trim();
+    return str !== '' || str.toUpperCase() === 'A';
+  });
+
+  if (validEntries.length === 0) {
+    return next(new AppError('No valid student marks were provided for submission.', 400));
+  }
 
   const studentIds = validEntries.map(e => e.studentId);
   const students = await User.find({ _id: { $in: studentIds } }).lean();
@@ -512,6 +524,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   const docMap = new Map(existingDocs.map(d => [d.student.toString(), d]));
   const docsToSave = [];
   const emailList = [];
+  const successfullyGradedStudentIds = [];
 
   for (const entry of validEntries) {
     const studentIdStr = entry.studentId.toString();
@@ -565,11 +578,12 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     }
 
     docsToSave.push(markDoc);
+    successfullyGradedStudentIds.push(studentIdStr);
 
     const studentUser = studentMap.get(studentIdStr);
     if (studentUser) {
       const email = studentUser.personalNotificationEmail || studentUser.email;
-      if (email) {
+      if (email && !email.includes('@temp.pucit.edu.pk')) {
         emailList.push({
           email,
           title: `${cleanTitle} (${cleanCategory})`,
@@ -588,6 +602,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   await Promise.all(docsToSave.map(d => d.save()));
 
+  // Send emails STRICTLY to the newly graded/submitted students
   await Promise.all(
     emailList.map(async (m) => {
       try {
@@ -606,12 +621,12 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: 'success',
-    message: `Successfully recorded grades for ${docsToSave.length} student(s)!`,
+    message: `Successfully recorded grades for ${successfullyGradedStudentIds.length} student(s)!`,
   });
 });
 
 // =============================================================================
-// 3. UPDATE SINGLE STUDENT ITEM MARK
+// 3. UPDATE SINGLE STUDENT ITEM MARK (Spam-Free Notification Fix)
 // =============================================================================
 exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   const { labroomId, studentId, category, itemTitle, obtainedMarks, totalMarks } = req.body;
@@ -619,6 +634,14 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   if (!labroomId || !studentId || !category || !itemTitle) {
     return next(new AppError('Labroom ID, Student ID, category, and item title are required!', 400));
   }
+
+  const [labroom, student] = await Promise.all([
+    Labroom.findById(labroomId),
+    User.findById(studentId).select('name email personalNotificationEmail')
+  ]);
+
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+  if (!student) return next(new AppError('Student not found!', 404));
 
   let markDoc = await LabMark.findOne({ labroom: labroomId, student: studentId });
   if (!markDoc) {
@@ -670,6 +693,28 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
 
   await markDoc.save();
 
+  // Single notification targeted strictly to this specific student (Prevents bulk email spam)
+  const studentEmail = student.personalNotificationEmail || student.email;
+  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+    try {
+      await sendStyledEmail({
+        to: studentEmail,
+        subject: `Lab Mark Updated: ${cleanTitle}`,
+        title: `Grade Update: ${cleanTitle}`,
+        bodyText: isAbsent 
+          ? `You were marked absent for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong>.`
+          : `Your lab grade for <strong>${cleanTitle}</strong> has been updated.`,
+        details: [
+          { label: 'Lab Course', value: labroom.labName },
+          { label: 'Updated Score', value: isAbsent ? `Absent (0 / ${currentTotal})` : `${currentObtained} / ${currentTotal}` },
+          { label: 'Updated By', value: req.user.name }
+        ]
+      });
+    } catch (err) {
+      console.warn('Single student email dispatch failed:', err.message);
+    }
+  }
+
   res.status(200).json({
     status: 'success',
     message: 'Lab mark updated successfully!',
@@ -684,7 +729,7 @@ exports.getStudentLabMarks = catchAsync(async (req, res, next) => {
   const { labroomId, studentId } = req.params;
 
   let markDoc = await LabMark.findOne({ labroom: labroomId, student: studentId })
-    .populate('student', 'name rollNo email personalNotificationEmail')
+    .populate('student', 'name rollNo registrationNo email personalNotificationEmail')
     .populate('labroom', 'labName sectionPrefix');
 
   if (!markDoc) {
@@ -694,7 +739,7 @@ exports.getStudentLabMarks = catchAsync(async (req, res, next) => {
       labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: []
     });
     markDoc = await LabMark.findById(markDoc._id)
-      .populate('student', 'name rollNo email personalNotificationEmail')
+      .populate('student', 'name rollNo registrationNo email personalNotificationEmail')
       .populate('labroom', 'labName sectionPrefix');
   }
 

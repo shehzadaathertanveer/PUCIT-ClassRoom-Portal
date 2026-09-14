@@ -10,6 +10,7 @@ const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
+  if (clean.includes('lab')) return 'labMarks';
   if (clean.includes('mid')) return 'mids';
   if (clean.includes('final')) return 'finals';
   return clean.endsWith('s') ? clean : clean + 's';
@@ -225,7 +226,7 @@ exports.setClassroomRoster = catchAsync(async (req, res, next) => {
       );
 
       const studentEmail = student.personalNotificationEmail || student.email;
-      if (studentEmail) {
+      if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
         await sendStyledEmail({
           to: studentEmail,
           subject: `Enrolled in ${classroom.className}`,
@@ -277,7 +278,7 @@ exports.getAllClassrooms = catchAsync(async (req, res, next) => {
   const classrooms = await Classroom.find(filter)
     .populate('teacher', 'name email personalNotificationEmail')
     .populate('tas', 'name rollNo email personalNotificationEmail')
-    .populate('students', 'name rollNo email personalNotificationEmail')
+    .populate('students', 'name rollNo registrationNo email personalNotificationEmail')
     .populate('createdBy', 'name email role');
 
   res.status(200).json({
@@ -294,7 +295,7 @@ exports.getClassroomById = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findOne({ _id: req.params.classroomId, isActive: true })
     .populate('teacher', 'name email personalNotificationEmail')
     .populate('tas', 'name rollNo email personalNotificationEmail')
-    .populate('students', 'name rollNo email personalNotificationEmail')
+    .populate('students', 'name rollNo registrationNo email personalNotificationEmail')
     .populate('createdBy', 'name email role');
 
   if (!classroom) {
@@ -335,7 +336,7 @@ exports.assignTeacherToClassroom = catchAsync(async (req, res, next) => {
   }
 
   const teacherEmail = teacher.personalNotificationEmail || teacher.email;
-  if (teacherEmail) {
+  if (teacherEmail && !teacherEmail.includes('@temp.pucit.edu.pk')) {
     await sendStyledEmail({
       to: teacherEmail,
       subject: `Assigned as Instructor for ${classroom.className}`,
@@ -387,12 +388,12 @@ exports.addStudentToClassroom = catchAsync(async (req, res, next) => {
 
   const studentMark = await Mark.findOneAndUpdate(
     { classroom: targetClassId, student: studentId },
-    { $setOnInsert: { classroom: targetClassId, student: studentId, quizzes: [], assignments: [] } },
+    { $setOnInsert: { classroom: targetClassId, student: studentId, quizzes: [], assignments: [], labMarks: [] } },
     { upsert: true, returnDocument: 'after' }
   );
 
   const studentEmail = student.personalNotificationEmail || student.email;
-  if (studentEmail) {
+  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     await sendStyledEmail({
       to: studentEmail,
       subject: `Enrolled in ${classroom.className}`,
@@ -407,7 +408,7 @@ exports.addStudentToClassroom = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: 'success',
-    message: `Student ${student.name} (${student.rollNo}) enrolled successfully!`,
+    message: `Student ${student.name} (${student.rollNo || student.registrationNo}) enrolled successfully!`,
     data: { classroom, studentMark },
   });
 });
@@ -517,9 +518,9 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
     targetRollNo = `${classroom.sectionPrefix}${paddedDigits}`;
   }
 
-  const student = await User.findOne({ role: 'STUDENT', rollNo: targetRollNo });
+  const student = await User.findOne({ role: 'STUDENT', $or: [{ rollNo: targetRollNo }, { registrationNo: rollInput.trim() }] });
   if (!student) {
-    return next(new AppError(`No registered student found with Roll Number: ${targetRollNo}`, 404));
+    return next(new AppError(`No registered student found with identifier: ${rollInput}`, 404));
   }
 
   if (classroom.students.length >= classroom.maxCapacity) {
@@ -532,16 +533,16 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   classroom.students.push(student._id);
   await classroom.save();
-  await classroom.populate('students', 'name rollNo email personalNotificationEmail');
+  await classroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
 
   await Mark.findOneAndUpdate(
     { classroom: targetClassId, student: student._id },
-    { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [] } },
+    { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
     { upsert: true, returnDocument: 'after' }
   );
 
   const studentEmail = student.personalNotificationEmail || student.email;
-  if (studentEmail) {
+  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     await sendStyledEmail({
       to: studentEmail,
       subject: `Enrolled in ${classroom.className}`,
@@ -556,7 +557,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: 'success',
-    message: `Student ${student.name} (${targetRollNo}) added successfully!`,
+    message: `Student ${student.name} added successfully!`,
     data: { classroom },
   });
 });
@@ -600,7 +601,7 @@ exports.getClassroomComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. CREATE & DELETE GRADED ITEM (Quizzes & Assignments)
+// 12. CREATE & DELETE GRADED ITEM
 // =============================================================================
 exports.createGradedItem = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -678,13 +679,13 @@ exports.deleteGradedItem = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 13. TA & TEACHER LOOKUP / ASSIGNMENT HELPERS
+// 13. TA & TEACHER LOOKUP HELPERS
 // =============================================================================
 exports.lookupTA = catchAsync(async (req, res, next) => {
   const { rollNo } = req.body;
   if (!rollNo) return next(new AppError('Roll number is required!', 400));
 
-  const user = await User.findOne({ rollNo: rollNo.trim().toUpperCase() });
+  const user = await User.findOne({ $or: [{ rollNo: rollNo.trim().toUpperCase() }, { registrationNo: rollNo.trim() }] });
   if (!user) {
     return res.status(404).json({ status: 'fail', data: { status: 'not_found', message: 'User account not found.' } });
   }
@@ -710,7 +711,7 @@ exports.addTA = catchAsync(async (req, res, next) => {
     await classroom.save();
 
     const taEmail = taUser.personalNotificationEmail || taUser.email;
-    if (taEmail) {
+    if (taEmail && !taEmail.includes('@temp.pucit.edu.pk')) {
       await sendStyledEmail({
         to: taEmail,
         subject: `Assigned as TA for ${classroom.className}`,
@@ -733,7 +734,7 @@ exports.lookupTeacher = catchAsync(async (req, res, next) => {
   const cleanInput = rollNo.trim();
   const query = cleanInput.includes('@') 
     ? { email: cleanInput.toLowerCase(), role: { $in: ['TEACHER', 'ADMIN'] } }
-    : { rollNo: cleanInput.toUpperCase(), role: { $in: ['TEACHER', 'ADMIN'] } };
+    : { $or: [{ rollNo: cleanInput.toUpperCase() }, { registrationNo: cleanInput }], role: { $in: ['TEACHER', 'ADMIN'] } };
 
   const user = await User.findOne(query);
   if (!user) {
@@ -781,7 +782,7 @@ exports.postNotice = catchAsync(async (req, res, next) => {
   if (classroom.students && classroom.students.length > 0) {
     const noticePromises = classroom.students.map(async (student) => {
       const studentEmail = student.personalNotificationEmail || student.email;
-      if (studentEmail) {
+      if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
         await sendStyledEmail({
           to: studentEmail,
           subject: `New Notice: ${classroom.className} - ${newNotice.title}`,
@@ -806,7 +807,7 @@ exports.postNotice = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 15. SETTINGS & BULK STUDENT ENROLLMENT HELPERS
+// 15. SETTINGS & BULK ENROLLMENT HELPERS
 // =============================================================================
 exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -832,7 +833,7 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   )
     .populate('teacher', 'name email personalNotificationEmail')
     .populate('tas', 'name rollNo email personalNotificationEmail')
-    .populate('students', 'name rollNo email personalNotificationEmail')
+    .populate('students', 'name rollNo registrationNo email personalNotificationEmail')
     .populate('createdBy', 'name email role');
 
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
@@ -883,13 +884,13 @@ exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
   }
 
   await classroom.save();
-  await classroom.populate('students', 'name rollNo email personalNotificationEmail');
+  await classroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
 
   if (newStudents.length > 0) {
     const markPromises = newStudents.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: targetClassId, student: student._id },
-        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [] } },
+        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -898,7 +899,7 @@ exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
     await Promise.all(
       newStudents.map(async (student) => {
         const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail) {
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
           await sendStyledEmail({
             to: studentEmail,
             subject: `Enrolled in ${classroom.className}`,
@@ -933,7 +934,7 @@ exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
 
   const cleanRolls = rollNumbers.map((r) => r.trim().toUpperCase());
-  const matchingStudents = await User.find({ role: 'STUDENT', rollNo: { $in: cleanRolls } });
+  const matchingStudents = await User.find({ role: 'STUDENT', $or: [{ rollNo: { $in: cleanRolls } }, { registrationNo: { $in: cleanRolls } }] });
 
   const enrolledSet = new Set(classroom.students.map((id) => id.toString()));
   const newStudents = [];
@@ -949,13 +950,13 @@ exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
   }
 
   await classroom.save();
-  await classroom.populate('students', 'name rollNo email personalNotificationEmail');
+  await classroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
 
   if (newStudents.length > 0) {
     const markPromises = newStudents.map((student) => {
       return Mark.findOneAndUpdate(
         { classroom: targetClassId, student: student._id },
-        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [] } },
+        { $setOnInsert: { classroom: targetClassId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -964,7 +965,7 @@ exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
     await Promise.all(
       newStudents.map(async (student) => {
         const studentEmail = student.personalNotificationEmail || student.email;
-        if (studentEmail) {
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
           await sendStyledEmail({
             to: studentEmail,
             subject: `Enrolled in ${classroom.className}`,
@@ -984,5 +985,309 @@ exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
     status: 'success',
     message: `Successfully added ${newStudents.length} add/drop senior students!`,
     data: { classroom, addedCount: newStudents.length },
+  });
+});
+
+// =============================================================================
+// 16. GET MARKS FOR A SPECIFIC CLASSROOM
+// =============================================================================
+exports.getClassroomMarks = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  let filter = { classroom: classroomId };
+
+  if (req.user.role === 'STUDENT') {
+    filter.student = req.user._id;
+  } else {
+    const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+    if (!isStaff) {
+      return next(new AppError('Unauthorized to view marks for this classroom.', 403));
+    }
+  }
+
+  const marks = await Mark.find(filter)
+    .populate('student', 'name rollNo registrationNo email personalNotificationEmail');
+
+  res.status(200).json({
+    status: 'success',
+    results: marks.length,
+    data: { marks },
+  });
+});
+
+// =============================================================================
+// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS (Targeted Notification Fix)
+// =============================================================================
+exports.updateStudentMarks = catchAsync(async (req, res, next) => {
+  const { classroomId, studentId } = req.params;
+  const { category, type, title, obtainedMarks, totalMarks, isAbsent, remarks } = req.body;
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to update student marks.', 403));
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const student = await User.findOne({ _id: studentId, role: 'STUDENT' });
+  if (!student) return next(new AppError('Student record not found!', 404));
+
+  const targetKey = getNormalizedTargetKey(category || type);
+
+  let markRecord = await Mark.findOne({ classroom: classroomId, student: studentId });
+  if (!markRecord) {
+    markRecord = await Mark.create({
+      classroom: classroomId,
+      student: studentId,
+      quizzes: [],
+      assignments: [],
+      labMarks: [],
+    });
+  }
+
+  if (['mids', 'finals'].includes(targetKey)) {
+    markRecord[targetKey] = {
+      totalMarks: Number(totalMarks) || markRecord[targetKey]?.totalMarks || 0,
+      obtainedMarks: isAbsent ? 0 : Number(obtainedMarks) || 0,
+      isAbsent: Boolean(isAbsent),
+    };
+  } else if (['quizzes', 'assignments', 'labMarks'].includes(targetKey)) {
+    if (!title) return next(new AppError('Item title is required for quizzes, assignments, or lab marks.', 400));
+    
+    const cleanTitle = title.trim();
+    const itemIndex = markRecord[targetKey].findIndex(
+      (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
+    );
+
+    const itemData = {
+      title: cleanTitle,
+      totalMarks: Number(totalMarks),
+      obtainedMarks: isAbsent ? 0 : Number(obtainedMarks),
+      isAbsent: Boolean(isAbsent),
+    };
+
+    if (itemIndex > -1) {
+      markRecord[targetKey][itemIndex] = { ...markRecord[targetKey][itemIndex], ...itemData };
+    } else {
+      markRecord[targetKey].push(itemData);
+    }
+  } else {
+    return next(new AppError('Invalid evaluation category specified.', 400));
+  }
+
+  await markRecord.save();
+
+  // 🎯 TARGETED NOTIFICATION: Email ONLY the specific student whose marks were touched
+  const studentEmail = student.personalNotificationEmail || student.email;
+  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+    try {
+      await sendStyledEmail({
+        to: studentEmail,
+        subject: `Marks Updated: ${classroom.className}`,
+        title: `Marks Update Notification`,
+        bodyText: `Your marks for <strong>${classroom.className}</strong> have been updated by <strong>${req.user.name}</strong>.`,
+        details: [
+          { label: 'Course', value: classroom.className },
+          { label: 'Category', value: targetKey.toUpperCase() },
+          { label: 'Activity', value: title || targetKey.toUpperCase() },
+          { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtainedMarks} / ${totalMarks}` },
+          { label: 'Current Grade', value: markRecord.letterGrade || 'In Progress' }
+        ]
+      });
+    } catch (mailErr) {
+      console.warn('Failed to send targeted mark update email:', mailErr.message);
+    }
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Marks updated successfully for ${student.name}!`,
+    data: { markRecord },
+  });
+});
+
+// =============================================================================
+// 18. WHOLE-CLASS BATCH RESULTS UPLOAD
+// =============================================================================
+exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { category, type, title, totalMarks, studentScores } = req.body; 
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to upload whole-class marks.', 403));
+
+  const classroom = await Classroom.findById(classroomId).populate('students', 'name email personalNotificationEmail rollNo');
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  if (!Array.isArray(studentScores) || studentScores.length === 0) {
+    return next(new AppError('studentScores array is required for whole-class updates!', 400));
+  }
+
+  const targetKey = getNormalizedTargetKey(category || type);
+  const parsedTotal = Number(totalMarks);
+
+  if (['mids', 'finals'].includes(targetKey)) {
+    for (const scoreEntry of studentScores) {
+      const isAbsent = Boolean(scoreEntry.isAbsent);
+      const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
+
+      await Mark.findOneAndUpdate(
+        { classroom: classroomId, student: scoreEntry.studentId },
+        {
+          $set: {
+            [targetKey]: {
+              totalMarks: parsedTotal,
+              obtainedMarks: obtained,
+              isAbsent: isAbsent,
+            }
+          }
+        },
+        { upsert: true }
+      );
+    }
+  } else if (['quizzes', 'assignments', 'labMarks'].includes(targetKey)) {
+    if (!title) return next(new AppError('Title is required for whole-class quiz/assignment/lab mark entries.', 400));
+    
+    for (const scoreEntry of studentScores) {
+      let markRec = await Mark.findOne({ classroom: classroomId, student: scoreEntry.studentId });
+      if (!markRec) {
+        markRec = await Mark.create({ classroom: classroomId, student: scoreEntry.studentId, quizzes: [], assignments: [], labMarks: [] });
+      }
+
+      const isAbsent = Boolean(scoreEntry.isAbsent);
+      const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
+      const cleanTitle = title.trim();
+
+      const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
+
+      if (idx > -1) {
+        markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...itemPayload };
+      } else {
+        markRec[targetKey].push(itemPayload);
+      }
+      await markRec.save();
+    }
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Whole-class marks successfully uploaded for ${studentScores.length} students!`,
+  });
+});
+
+// =============================================================================
+// 19. GET AUTO-DETECTABLE AVAILABLE STUDENTS (Matching Section Prefix)
+// =============================================================================
+exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const prefix = classroom.sectionPrefix.toUpperCase();
+
+  const matchingStudents = await User.find({
+    role: 'STUDENT',
+    $or: [
+      { rollNo: { $regex: `^${prefix}`, $options: 'i' } },
+      { rollNo: { $regex: `^FRESHER_`, $options: 'i' } }
+    ]
+  }).select('name rollNo registrationNo email personalNotificationEmail');
+
+  const enrolledStudentIds = new Set(classroom.students.map(id => id.toString()));
+
+  const availableStudents = matchingStudents.map(student => ({
+    _id: student._id,
+    name: student.name,
+    rollNo: student.rollNo,
+    registrationNo: student.registrationNo || 'N/A',
+    email: student.email,
+    personalNotificationEmail: student.personalNotificationEmail,
+    isAlreadyEnrolled: enrolledStudentIds.has(student._id.toString())
+  }));
+
+  res.status(200).json({
+    status: 'success',
+    results: availableStudents.length,
+    data: {
+      sectionPrefix: prefix,
+      students: availableStudents
+    }
+  });
+});
+
+// =============================================================================
+// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS
+// =============================================================================
+exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { studentIds } = req.body;
+
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return next(new AppError('An array of studentIds is required!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('teacher', 'name email personalNotificationEmail');
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const studentsToAdd = await User.find({
+    _id: { $in: studentIds },
+    role: 'STUDENT'
+  });
+
+  const enrolledSet = new Set(classroom.students.map(id => id.toString()));
+  const successfullyAdded = [];
+
+  for (const student of studentsToAdd) {
+    const studentIdStr = student._id.toString();
+    if (classroom.students.length >= classroom.maxCapacity) break;
+
+    if (!enrolledSet.has(studentIdStr)) {
+      classroom.students.push(student._id);
+      enrolledSet.add(studentIdStr);
+      successfullyAdded.push(student);
+    }
+  }
+
+  await classroom.save();
+  await classroom.populate('students', 'name rollNo registrationNo email personalNotificationEmail');
+
+  if (successfullyAdded.length > 0) {
+    const markPromises = successfullyAdded.map((student) => {
+      return Mark.findOneAndUpdate(
+        { classroom: classroomId, student: student._id },
+        { $setOnInsert: { classroom: classroomId, student: student._id, quizzes: [], assignments: [], labMarks: [] } },
+        { upsert: true, returnDocument: 'after' }
+      );
+    });
+    await Promise.all(markPromises);
+
+    await Promise.all(
+      successfullyAdded.map(async (student) => {
+        const studentEmail = student.personalNotificationEmail || student.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          await sendStyledEmail({
+            to: studentEmail,
+            subject: `Enrolled in ${classroom.className}`,
+            title: `Course Enrollment: ${classroom.className}`,
+            bodyText: `You have been officially approved and enrolled in <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
+            details: [
+              { label: 'Credit Hours', value: classroom.creditHours },
+              { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName }
+            ]
+          });
+        }
+      })
+    );
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Successfully approved and added ${successfullyAdded.length} students!`,
+    data: { classroom, addedCount: successfullyAdded.length }
   });
 });

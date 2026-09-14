@@ -1,15 +1,16 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
+const FULL_ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
+const TEMP_PREFIX_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]?$/i; // Supports temporary fresher prefixes like BITF26A or BITF26
 
-const isValidRollNo = (rollNo) => ROLL_NO_REGEX.test(rollNo);
+const isValidRollNo = (rollNo) => FULL_ROLL_NO_REGEX.test(rollNo) || TEMP_PREFIX_REGEX.test(rollNo);
 
 const isValidPucitEmail = (email, role, rollNo) => {
   if (!email || role === 'ADMIN') return true;
   if (!email.endsWith('@pucit.edu.pk')) return false;
 
-  if (role === 'STUDENT' && rollNo) {
+  if (role === 'STUDENT' && rollNo && FULL_ROLL_NO_REGEX.test(rollNo)) {
     return email.toLowerCase() === `${rollNo.toLowerCase()}@pucit.edu.pk`;
   }
   return true;
@@ -20,6 +21,11 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: [true, 'Name is required'],
+      trim: true,
+    },
+    // Unique 6-7 digit form/registration number for freshers before official roll number is issued
+    registrationNo: {
+      type: String,
       trim: true,
     },
     rollNo: {
@@ -35,7 +41,7 @@ const userSchema = new mongoose.Schema(
           if (['TEACHER', 'PENDING_TEACHER', 'ADMIN'].includes(currentRole)) return true;
           return isValidRollNo(val);
         },
-        message: 'Invalid Roll Number format! Example: BITF26A001',
+        message: 'Invalid Roll Number format or Prefix! Example: BITF26A001 or temporary prefix BITF26A',
       },
     },
     email: {
@@ -43,7 +49,7 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
       required: function () {
-        return this.role === 'ADMIN' || this.requiresEmail || this.rollNo;
+        return this.role === 'ADMIN' || this.requiresEmail || (this.rollNo && FULL_ROLL_NO_REGEX.test(this.rollNo));
       },
       validate: {
         validator: function (val) {
@@ -109,6 +115,7 @@ const userSchema = new mongoose.Schema(
 
 // Performance & Constraint Indexes
 userSchema.index({ rollNo: 1 }, { unique: true, sparse: true });
+userSchema.index({ registrationNo: 1 }, { unique: true, sparse: true });
 userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ personalNotificationEmail: 1 }, { sparse: true });
 
@@ -116,7 +123,7 @@ userSchema.index({ personalNotificationEmail: 1 }, { sparse: true });
 userSchema.pre('save', async function () {
   if (this.email && this.email.endsWith('@pucit.edu.pk') && this.role !== 'ADMIN') {
     const emailPrefix = this.email.split('@')[0];
-    const isStudent = isValidRollNo(emailPrefix) || isValidRollNo(this.rollNo);
+    const isStudent = FULL_ROLL_NO_REGEX.test(emailPrefix) || FULL_ROLL_NO_REGEX.test(this.rollNo);
 
     if (!isStudent && !['TEACHER', 'TA'].includes(this.role)) {
       this.role = 'PENDING_TEACHER';
@@ -124,8 +131,8 @@ userSchema.pre('save', async function () {
     }
   }
 
-  // Automatically assign pre-generated official PUCIT email format from roll number
-  if (!this.email && this.rollNo) {
+  // Automatically assign official PUCIT email format only if a full official roll number is present
+  if (!this.email && this.rollNo && FULL_ROLL_NO_REGEX.test(this.rollNo)) {
     this.email = `${this.rollNo.toLowerCase()}@pucit.edu.pk`;
   }
 
