@@ -69,7 +69,6 @@ const MarksSheet = () => {
       setLoading(true);
       setError('');
 
-      // CORRECTED: Pointing to /classroommarks/bulk-sheet/:classroomId
       const res = await API.get(`/classroommarks/bulk-sheet/${classroomId}`);
       const data = res.data.data;
       const currentClass = data.classroom || data.labroom;
@@ -105,7 +104,6 @@ const MarksSheet = () => {
 
       if (activeTitle && activeTitle !== 'general') {
         try {
-          // CORRECTED: Pointing to /classroommarks/unassigned/:classroomId
           const unassignedRes = await API.get(`/classroommarks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
           const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
           setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
@@ -229,12 +227,16 @@ const MarksSheet = () => {
 
       const marksData = Object.entries(markInputs)
         .filter(([_, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
-        .map(([studentId, data]) => ({
-          studentId,
-          obtainedMarks: data.obtainedMarks,
-          isAbsent: data.isAbsent,
-          file: data.file?.url ? data.file : null
-        }));
+        .map(([studentId, data]) => {
+          const rawVal = String(data.obtainedMarks).trim();
+          const isAbs = data.isAbsent || rawVal.toUpperCase() === 'A';
+          return {
+            studentId,
+            obtainedMarks: isAbs ? 0 : Number(rawVal),
+            isAbsent: isAbs,
+            file: data.file?.url ? data.file : null
+          };
+        });
 
       if (marksData.length === 0) {
         showToast('No marks entered to submit.');
@@ -242,7 +244,6 @@ const MarksSheet = () => {
         return;
       }
 
-      // CORRECTED: Pointing to /classroommarks/batch-submit
       await API.post('/classroommarks/batch-submit', {
         classroomId,
         category,
@@ -268,7 +269,6 @@ const MarksSheet = () => {
 
     setDeleting(true);
     try {
-      // CORRECTED: Pointing to /classroommarks/delete-evaluation
       await API.delete('/classroommarks/delete-evaluation', {
         data: {
           classroomId,
