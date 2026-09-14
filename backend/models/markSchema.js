@@ -48,6 +48,20 @@ const individualMarkSchema = new mongoose.Schema({
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: true });
 
+const customActivityItemSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  totalMarks: { type: Number, required: true, min: 1 },
+  obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
+  isAbsent: { type: Boolean, default: false },
+  percentage: { type: Number, default: 0 },
+  file: { type: cloudinaryFileSchema, default: () => ({}) },
+}, { _id: true });
+
+const customCategorySchema = new mongoose.Schema({
+  categoryName: { type: String, required: true, trim: true },
+  items: [customActivityItemSchema],
+}, { _id: true });
+
 const singleMarkSchema = new mongoose.Schema({
   title: { type: String, default: 'Exam', trim: true },
   totalMarks: { type: Number, default: 0, min: 0 },
@@ -83,6 +97,9 @@ const markSchema = new mongoose.Schema(
     vivas: [individualMarkSchema],
     specialMarks: [individualMarkSchema],
 
+    // Dynamic Custom Sessional Categories
+    customActivities: [customCategorySchema],
+
     // Strictly Single-Entry Exams & Milestones
     mids: { type: singleMarkSchema, default: () => ({}) },
     finals: { type: singleMarkSchema, default: () => ({}) },
@@ -110,7 +127,7 @@ const getCategoryTargetKey = (catName = '') => {
   if (clean.includes('particip')) return 'classParticipation';
   if (clean.includes('viva')) return 'vivas';
   if (clean.includes('special')) return 'specialMarks';
-  return 'quizzes';
+  return clean;
 };
 
 markSchema.pre("save", async function () {
@@ -121,35 +138,60 @@ markSchema.pre("save", async function () {
     console.warn("Could not fetch classroom in markSchema pre-save:", err.message);
   }
 
-  const sessionalActivities = classroom?.sessionalActivities || [
-    { category: 'Quizzes', allocatedMarks: 10 },
-    { category: 'Assignments', allocatedMarks: 15 }
+  const standardKeys = [
+    'quizzes', 'assignments', 'presentations', 'projects', 
+    'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'
   ];
 
-  let totalAllocatedWeight = 0;
-  let weightedEarnedSum = 0;
   let catPercentagesMap = {};
+  let totalSessionalEarnedWeighted = 0;
+  let totalSessionalWeight = 0;
 
-  // Process all sessional category arrays
-  sessionalActivities.forEach((act) => {
-    const targetKey = getCategoryTargetKey(act.category);
-    const allocatedWeight = Number(act.allocatedMarks || 0);
-    totalAllocatedWeight += allocatedWeight;
+  const sessionalConfig = classroom?.sessionalActivities || [];
+  const weightMap = {};
+  sessionalConfig.forEach(act => {
+    const key = getCategoryTargetKey(act.category);
+    weightMap[key] = Number(act.allocatedMarks || 0);
+  });
 
-    if (this[targetKey] && Array.isArray(this[targetKey])) {
-      this[targetKey].forEach((item) => {
+  // Process all standard sessional categories present on document
+  standardKeys.forEach((key) => {
+    if (this[key] && Array.isArray(this[key]) && this[key].length > 0) {
+      this[key].forEach((item) => {
         if (item.isAbsent) item.obtainedMarks = 0;
         item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
       });
 
-      const totals = getArrayTotals(this[targetKey]);
+      const totals = getArrayTotals(this[key]);
       const catPct = getPercentage(totals.obtained, totals.total);
-      catPercentagesMap[targetKey] = catPct;
-      weightedEarnedSum += (catPct * allocatedWeight);
-    } else {
-      catPercentagesMap[targetKey] = 0;
+      catPercentagesMap[key] = catPct;
+
+      const weight = weightMap[key] !== undefined ? weightMap[key] : (100 / standardKeys.length);
+      totalSessionalEarnedWeighted += (catPct * weight);
+      totalSessionalWeight += weight;
     }
   });
+
+  // Process custom sessional categories
+  if (Array.isArray(this.customActivities)) {
+    this.customActivities.forEach((customCat) => {
+      const catName = customCat.categoryName || 'custom';
+      const catKey = catName.trim().toLowerCase();
+      if (Array.isArray(customCat.items) && customCat.items.length > 0) {
+        customCat.items.forEach((item) => {
+          if (item.isAbsent) item.obtainedMarks = 0;
+          item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
+        });
+        const totals = getArrayTotals(customCat.items);
+        const catPct = getPercentage(totals.obtained, totals.total);
+        catPercentagesMap[catKey] = catPct;
+
+        const weight = weightMap[catKey] !== undefined ? weightMap[catKey] : 10;
+        totalSessionalEarnedWeighted += (catPct * weight);
+        totalSessionalWeight += weight;
+      }
+    });
+  }
 
   // Process Mids
   if (this.mids) {
@@ -176,8 +218,8 @@ markSchema.pre("save", async function () {
   let activeWeightSum = 0;
   let weightedScoreSum = 0;
 
-  const calculatedSessionalPct = totalAllocatedWeight > 0 ? (weightedEarnedSum / totalAllocatedWeight) * 100 : 0;
-  if (totalAllocatedWeight > 0) {
+  const calculatedSessionalPct = totalSessionalWeight > 0 ? (totalSessionalEarnedWeighted / totalSessionalWeight) * 100 : 0;
+  if (totalSessionalWeight > 0) {
     weightedScoreSum += calculatedSessionalPct * sessionalWeight;
     activeWeightSum += sessionalWeight;
   }
