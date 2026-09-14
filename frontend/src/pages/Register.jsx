@@ -5,7 +5,7 @@ import API from '../api/axios';
 
 const Register = () => {
   const [rollNo, setRollNo] = useState('');
-  const [registrationNo, setRegistrationNo] = useState(''); // Specific field for freshers
+  const [registrationNo, setRegistrationNo] = useState(''); 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [personalNotificationEmail, setPersonalNotificationEmail] = useState('');
@@ -16,7 +16,11 @@ const Register = () => {
   
   const [isEmailDisabled, setIsEmailDisabled] = useState(false);
   const [isRollNoDisabled, setIsRollNoDisabled] = useState(false);
-  const [isFresherWithoutEmail, setIsFresherWithoutEmail] = useState(false); // Triggers regNo & personal email inputs for ANY F26 student
+  
+  // Differentiate fresher states accurately
+  const [isFresherPrefixOnly, setIsFresherPrefixOnly] = useState(false); // Triggers BOTH RegNo & Personal Email (e.g. BITF26A)
+  const [isFresherWithRoll, setIsFresherWithRoll] = useState(false);       // Triggers ONLY Personal Email (e.g. BITF26A004)
+
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,7 +31,7 @@ const Register = () => {
 
   const fresherBatchCode = (import.meta.env.VITE_FRESHER_BATCH || 'f26').trim().toLowerCase();
 
-  // Smart dual-role and fresher detection logic (catches both BITF26A and BITF26A004)
+  // Smart dual-role and precise fresher detection logic
   useEffect(() => {
     if (isErrorState) return;
 
@@ -37,26 +41,41 @@ const Register = () => {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(true);
 
-      // Check if it belongs to the fresher batch (e.g., contains 'f26')
       const isFresherBatch = trimmedRoll.includes(fresherBatchCode);
 
       if (isFresherBatch) {
+        // Check if it ends with digits (e.g. 004 in BITF26A004)
+        const hasNumberSuffix = /\d{2,3}$/.test(trimmedRoll);
+
         setEmail('');
-        setIsFresherWithoutEmail(true);
-        setHelperText(`Fresher batch detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+        if (!hasNumberSuffix) {
+          // Case 1: Prefix only (e.g. BITF26A) -> Needs Reg No AND Personal Email
+          setIsFresherPrefixOnly(true);
+          setIsFresherWithRoll(false);
+          setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+        } else {
+          // Case 2: Full roll number with index (e.g. BITF26A004) -> Needs ONLY Personal Email
+          setIsFresherPrefixOnly(false);
+          setIsFresherWithRoll(true);
+          setHelperText(`Fresher roll number detected (${trimmedRoll.toUpperCase()}). Please enter your Personal Notification Email.`);
+        }
       } else {
+        // Senior student profile
         setEmail(`${trimmedRoll}@pucit.edu.pk`);
-        setIsFresherWithoutEmail(false);
+        setIsFresherPrefixOnly(false);
+        setIsFresherWithRoll(false);
         setHelperText(`Senior student profile linked to: ${trimmedRoll.toUpperCase()}@pucit.edu.pk`);
       }
     } else if (email.trim().length > 0 && !isEmailDisabled) {
       setIsRollNoDisabled(true);
-      setIsFresherWithoutEmail(false);
+      setIsFresherPrefixOnly(false);
+      setIsFresherWithRoll(false);
       setHelperText('Faculty profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
-      setIsFresherWithoutEmail(false);
+      setIsFresherPrefixOnly(false);
+      setIsFresherWithRoll(false);
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
   }, [rollNo, email, fresherBatchCode, isErrorState]);
@@ -64,7 +83,14 @@ const Register = () => {
   // Real-time form validation including password matching
   useEffect(() => {
     const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
-    const fresherCheck = !isFresherWithoutEmail || (registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0);
+    
+    let fresherCheck = true;
+    if (isFresherPrefixOnly) {
+      fresherCheck = registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0;
+    } else if (isFresherWithRoll) {
+      fresherCheck = personalNotificationEmail.trim().length > 0;
+    }
+
     const passwordsMatch = password.length > 0 && password === confirmPassword;
     
     if (hasIdentifier && fresherCheck && name.trim() && password.length >= 6 && passwordsMatch) {
@@ -72,7 +98,7 @@ const Register = () => {
     } else {
       setIsFormValid(false);
     }
-  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherWithoutEmail]);
+  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherPrefixOnly, isFresherWithRoll]);
 
   const handleRegister = async (e) => {
     if (e) {
@@ -99,8 +125,11 @@ const Register = () => {
         password,
         rollNo: identifierRoll,
         ...(email.trim() && { email: email.trim().toLowerCase() }),
-        ...(isFresherWithoutEmail && {
+        ...(isFresherPrefixOnly && {
           registrationNo: registrationNo.trim().toUpperCase(),
+          personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
+        }),
+        ...(isFresherWithRoll && {
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         })
       };
@@ -210,7 +239,7 @@ const Register = () => {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Email Address {isEmailDisabled && !isFresherWithoutEmail && <span className="text-orange-300 font-normal lowercase">(auto-configured)</span>}
+              Email Address {isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll && <span className="text-orange-300 font-normal lowercase">(auto-configured)</span>}
             </label>
             <input 
               type="email" 
@@ -219,12 +248,12 @@ const Register = () => {
                 if (!isEmailDisabled) setEmail(e.target.value);
                 if (isErrorState) setIsErrorState(false);
               }} 
-              disabled={isEmailDisabled && !isFresherWithoutEmail}
+              disabled={isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck="false"
               className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
-                isEmailDisabled && !isFresherWithoutEmail 
+                isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll 
                   ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
                   : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
               }`} 
@@ -232,8 +261,8 @@ const Register = () => {
             />
           </div>
 
-          {/* Conditional Freshers Registration Number & Personal Email Fields for all F26 profiles */}
-          {isFresherWithoutEmail && (
+          {/* Conditional Freshers Registration Number & Personal Email Fields (Triggered only when section prefix only is typed, e.g. BITF26A) */}
+          {isFresherPrefixOnly && (
             <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
@@ -253,6 +282,32 @@ const Register = () => {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
+                  Personal Notification Email <span className="text-rose-400">*</span>
+                </label>
+                <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                  Since your official university email isn't active yet, enter your personal email to receive classroom and lab announcements.
+                </p>
+                <input 
+                  type="email" 
+                  value={personalNotificationEmail} 
+                  onChange={(e) => {
+                    setPersonalNotificationEmail(e.target.value);
+                    if (isErrorState) setIsErrorState(false);
+                  }} 
+                  required
+                  autoCapitalize="none"
+                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase" 
+                  placeholder="your.personal@gmail.com" 
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Conditional Freshers Personal Email ONLY Box (Triggered when full roll number is typed, e.g. BITF26A004) */}
+          {isFresherWithRoll && (
+            <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
                   Personal Notification Email <span className="text-rose-400">*</span>
