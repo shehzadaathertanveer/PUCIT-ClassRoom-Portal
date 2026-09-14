@@ -514,7 +514,7 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. BATCH SUBMIT LAB MARKS (Targeted Notifications for Newly Graded Students Only)
+// 2. BATCH SUBMIT LAB MARKS (Targeted Notifications & File Attachments)
 // =============================================================================
 exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   const { labroomId, category, title, totalMarks, marksData } = req.body;
@@ -568,7 +568,8 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   const validEntries = marksData.map(item => ({
     studentId: item.studentId || item.student || item._id,
-    obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score)
+    obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score),
+    file: item.file || {}
   })).filter(item => {
     if (!item.studentId) return false;
     const rawVal = item.obtainedMarks;
@@ -596,6 +597,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const rawVal = String(entry.obtainedMarks).trim();
     const isAbsent = rawVal.toUpperCase() === 'A';
     const parsedObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+    const fileData = entry.file || {};
 
     let markDoc = docMap.get(studentIdStr);
     if (!markDoc) {
@@ -619,8 +621,9 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
         markDoc[standardKey][idx].totalMarks = parsedTotal;
         markDoc[standardKey][idx].obtainedMarks = parsedObtained;
         markDoc[standardKey][idx].isAbsent = isAbsent;
+        if (fileData.url) markDoc[standardKey][idx].file = fileData;
       } else {
-        markDoc[standardKey].push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent });
+        markDoc[standardKey].push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent, file: fileData });
       }
     } else {
       if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
@@ -628,7 +631,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       if (!catObj) {
         markDoc.customActivities.push({
           categoryName: cleanCategory,
-          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent }]
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent, file: fileData }]
         });
       } else {
         const itemIdx = catObj.items.findIndex(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
@@ -636,8 +639,9 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
           catObj.items[itemIdx].totalMarks = parsedTotal;
           catObj.items[itemIdx].obtainedMarks = parsedObtained;
           catObj.items[itemIdx].isAbsent = isAbsent;
+          if (fileData.url) catObj.items[itemIdx].file = fileData;
         } else {
-          catObj.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent });
+          catObj.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent, file: fileData });
         }
       }
     }
@@ -690,10 +694,10 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 3. UPDATE SINGLE STUDENT ITEM MARK (Spam-Free Notification Fix)
+// 3. UPDATE SINGLE STUDENT ITEM MARK (With File Attachment Support)
 // =============================================================================
 exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
-  const { labroomId, studentId, category, itemTitle, obtainedMarks, totalMarks } = req.body;
+  const { labroomId, studentId, category, itemTitle, obtainedMarks, totalMarks, file } = req.body;
 
   if (!labroomId || !studentId || !category || !itemTitle) {
     return next(new AppError('Labroom ID, Student ID, category, and item title are required!', 400));
@@ -724,6 +728,7 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   const rawVal = String(obtainedMarks).trim();
   const isAbsent = rawVal.toUpperCase() === 'A';
   const currentObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+  const fileData = file || {};
 
   if (VALID_STANDARD_CATEGORIES.includes(standardKey)) {
     if (!Array.isArray(markDoc[standardKey])) markDoc[standardKey] = [];
@@ -732,8 +737,9 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
       markDoc[standardKey][idx].totalMarks = currentTotal;
       markDoc[standardKey][idx].obtainedMarks = currentObtained;
       markDoc[standardKey][idx].isAbsent = isAbsent;
+      if (fileData.url) markDoc[standardKey][idx].file = fileData;
     } else {
-      markDoc[standardKey].push({ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent });
+      markDoc[standardKey].push({ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent, file: fileData });
     }
   } else {
     if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
@@ -741,7 +747,7 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     if (!catObj) {
       markDoc.customActivities.push({
         categoryName: cleanCategory,
-        items: [{ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent }]
+        items: [{ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent, file: fileData }]
       });
     } else {
       const itemIdx = catObj.items.findIndex(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
@@ -749,8 +755,9 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
         catObj.items[itemIdx].totalMarks = currentTotal;
         catObj.items[itemIdx].obtainedMarks = currentObtained;
         catObj.items[itemIdx].isAbsent = isAbsent;
+        if (fileData.url) catObj.items[itemIdx].file = fileData;
       } else {
-        catObj.items.push({ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent });
+        catObj.items.push({ title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent, file: fileData });
       }
     }
   }

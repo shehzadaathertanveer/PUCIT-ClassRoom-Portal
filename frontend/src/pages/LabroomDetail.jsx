@@ -646,7 +646,7 @@ const LabroomDetail = () => {
 
   const activeStudents = (labroom.students || []).filter(s => s && (s._id || s.name));
   const totalStudentsCount = activeStudents.length;
-  const reversedNotices = [...(labroom.notices || [])].reverse();
+  const reversedNotices = [...(labroom?.notices || [])].reverse();
   const latestNotice = reversedNotices[0];
 
   const sessionalActivitiesList = (labroom.sessionalActivities && labroom.sessionalActivities.length > 0)
@@ -948,7 +948,7 @@ const LabroomDetail = () => {
               <span>📢</span>
               <h2 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Notice Board</h2>
             </div>
-            {labroom.notices?.length > 0 && (
+            {labroom?.notices?.length > 0 && (
               <button onClick={() => setShowAllNotices(!showAllNotices)} className="text-xs font-bold underline cursor-pointer text-blue-400">
                 {showAllNotices ? 'Show Latest Only' : `View All (${labroom.notices.length})`}
               </button>
@@ -976,12 +976,12 @@ const LabroomDetail = () => {
               <p className="text-slate-500 text-xs italic text-center py-4">No announcements posted yet.</p>
             ) : showAllNotices ? (
               reversedNotices.map((n, idx) => (
-                <div key={idx} className="bg-[#080507]/60 border border-slate-800 rounded-2xl p-4 space-y-2">
-                  <h4 className="text-white font-bold text-xs sm:text-sm">{n.title}</h4>
-                  <p className="text-slate-300 text-xs leading-relaxed">{n.content}</p>
-                  {n.attachment && n.attachment.url && (
+                <div key={n._id || idx} className="bg-[#080507]/60 border border-slate-800 rounded-2xl p-4 space-y-2">
+                  <h4 className="text-white font-bold text-xs sm:text-sm">{n?.title}</h4>
+                  <p className="text-slate-300 text-xs leading-relaxed">{n?.content}</p>
+                  {n?.attachment && n.attachment.url && (
                     <div className="pt-2">
-                      {n.attachment.fileType === 'image' ? (
+                      {n.attachment.fileType === 'image' || n.attachment.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
                         <a href={n.attachment.url} target="_blank" rel="noopener noreferrer">
                           <img src={n.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
                         </a>
@@ -996,11 +996,11 @@ const LabroomDetail = () => {
               ))
             ) : (
               <div className="bg-[#080507]/60 border border-slate-800 rounded-2xl p-4 space-y-2">
-                <h4 className="text-white font-bold text-sm sm:text-base">{latestNotice.title}</h4>
-                <p className="text-slate-300 text-xs leading-relaxed">{latestNotice.content}</p>
-                {latestNotice.attachment && latestNotice.attachment.url && (
+                <h4 className="text-white font-bold text-sm sm:text-base">{latestNotice?.title}</h4>
+                <p className="text-slate-300 text-xs leading-relaxed">{latestNotice?.content}</p>
+                {latestNotice?.attachment && latestNotice.attachment.url && (
                   <div className="pt-2">
-                    {latestNotice.attachment.fileType === 'image' ? (
+                    {latestNotice.attachment.fileType === 'image' || latestNotice.attachment.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
                       <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer">
                         <img src={latestNotice.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
                       </a>
@@ -1111,7 +1111,7 @@ const LabroomDetail = () => {
             </div>
 
             {/* LAB PROFILE BOX */}
-            <div className="relative bg-gradient-to-br from-[#130910] via-[#0b1016] to-[#070b10] backdrop-blur-2xl border border-blue-500/30 rounded-3xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden">
+            <div className="relative bg-gradient-to-br from-[#130910] via-[#0b1016] to-[#070b10] backdrop-blur-2xl border border-blue-500/35 rounded-3xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
               
               <div className="space-y-4 relative z-10">
@@ -1344,7 +1344,7 @@ const LabroomDetail = () => {
                                   onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
                                   className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                 >
-                                  <span>📎</span> View Attachment
+                                  <span>📎</span> View Your Attempt
                                 </button>
                               )}
                             </div>

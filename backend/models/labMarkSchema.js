@@ -1,11 +1,22 @@
 const mongoose = require('mongoose');
 
+const cloudinaryFileSchema = new mongoose.Schema(
+  {
+    url: { type: String, default: "" },
+    public_id: { type: String, default: "" },
+    fileType: { type: String, default: "" },
+    fileName: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const LabItemScoreSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   obtainedMarks: { type: Number, default: 0, min: 0 },
   totalMarks: { type: Number, required: true, min: 1 },
   isAbsent: { type: Boolean, default: false },
-  remarks: { type: String, trim: true, default: '' }
+  remarks: { type: String, trim: true, default: '' },
+  file: { type: cloudinaryFileSchema, default: () => ({}) } // 👈 Persists file attachments in lab grading sheets
 }, { _id: false });
 
 const CustomCategoryScoreSchema = new mongoose.Schema({

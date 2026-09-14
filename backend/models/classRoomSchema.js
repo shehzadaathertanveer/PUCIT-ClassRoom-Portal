@@ -95,7 +95,7 @@ const classroomSchema = new mongoose.Schema(
       createdAt: { type: Date, default: Date.now }
     }],
 
-    // GRADED ITEMS TRACKING
+    // GRADED ITEMS TRACKING (Preset & Dynamic Custom Categories)
     quizzes: [{
       title: { type: String, required: true, trim: true },
       totalMarks: { type: Number, required: true, min: 1 },
@@ -117,7 +117,10 @@ const classroomSchema = new mongoose.Schema(
       ref: 'User' 
     },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    strict: false // 👈 CRITICAL: Allows dynamic custom activity arrays & fields without stripping them
+  }
 );
 
 // Performance Indexes for Roster Lookups and Auto-Enrollment Sync

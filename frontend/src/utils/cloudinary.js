@@ -20,9 +20,16 @@ export const uploadToCloudinary = async (file) => {
       `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`,
       formData,
     );
+
+    const resourceType = res.data.resource_type; // 'image', 'raw', 'video'
+    const format = res.data.format || file.name.split('.').pop();
+    
+    // Explicitly check if it's a true renderable image type
+    const isImage = resourceType === 'image' && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(format.toLowerCase());
+
     return {
       url: res.data.secure_url,
-      fileType: res.data.resource_type, // 'image', 'raw', 'video', etc.
+      fileType: isImage ? 'image' : 'raw', // Force non-images (PDFs, docs, zips) to 'raw'
       fileName: file.name,
     };
   } catch (err) {

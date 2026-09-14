@@ -1060,8 +1060,8 @@ const ClassroomDetail = () => {
                           <img src={n.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
                         </a>
                       ) : (
-                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono underline text-orange-300">
-                          📄 Download {n.attachment.fileName || 'Attachment'}
+                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
+                          <span>📄</span> Download {n.attachment.fileName || 'Document / PDF'}
                         </a>
                       )}
                     </div>
@@ -1079,8 +1079,8 @@ const ClassroomDetail = () => {
                         <img src={latestNotice.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
                       </a>
                     ) : (
-                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono underline text-orange-300">
-                        📄 Download {latestNotice.attachment.fileName || 'Attachment'}
+                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
+                        <span>📄</span> Download {latestNotice.attachment.fileName || 'Document / PDF'}
                       </a>
                     )}
                   </div>
@@ -1916,7 +1916,7 @@ const ClassroomDetail = () => {
                 </div>
               </div>
 
-              {/* Dynamic Sessional Activities Manager with Dropdown & Custom Option */}
+              {/* Dynamic Sessional Activities Manager with Case-Insensitive Dropdown Matching */}
               <div className="pt-3 border-t border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-orange-400 uppercase">Sessional Activities & Mark Allocations</p>
@@ -1932,12 +1932,13 @@ const ClassroomDetail = () => {
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                   {editSessionalActivities.map((act, index) => {
                     const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs', 'Lab Tasks', 'Vivas', 'Lab Tests'];
-                    const isCustom = !presetOptions.includes(act.category);
+                    const matchedPreset = presetOptions.find(opt => opt.toLowerCase() === act.category.trim().toLowerCase());
+                    const isCustom = !matchedPreset;
 
                     return (
                       <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
                         <select
-                          value={isCustom ? 'Custom...' : act.category}
+                          value={isCustom ? 'Custom...' : matchedPreset}
                           onChange={(e) => {
                             const val = e.target.value;
                             const updated = [...editSessionalActivities];

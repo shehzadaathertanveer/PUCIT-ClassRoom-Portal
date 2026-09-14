@@ -76,6 +76,7 @@ if (typeof labMarkRoutes !== "function") {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/classrooms", classroomRoutes);
 app.use("/api/v1/marks", marksRoutes);
+app.use("/api/v1/classroommarks", marksRoutes);
 app.use("/api/v1/labrooms", labRoutes);
 app.use("/api/v1/labmarks", labMarkRoutes);
 
