@@ -15,6 +15,11 @@ const Dashboard = () => {
   const [userRoleFilter, setUserRoleFilter] = useState('ALL'); // 'ALL' | 'STUDENT' | 'TEACHER' | 'TA' | 'ADMIN'
   const [detailedAnalyticsData, setDetailedAnalyticsData] = useState({ users: [], teachers: [] });
 
+  // Delete User Confirmation State
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [isDeleteUserModalOpen, setIsDeleteUserModalOpen] = useState(false);
+  const [deletingUser, setDeletingUser] = useState(false);
+
   // Navbar Quick-Pills Detail Modal State
   const [isNavDetailModalOpen, setIsNavDetailModalOpen] = useState(false);
   const [navModalConfig, setNavModalConfig] = useState({ title: '', items: [], type: 'classroom' });
@@ -436,6 +441,31 @@ const Dashboard = () => {
     }
   };
 
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    setDeletingUser(true);
+    try {
+      await API.delete(`/auth/admin/users/${userToDelete._id}`).catch(() => {
+        API.delete(`/admin/users/${userToDelete._id}`);
+      });
+
+      // Update local state
+      setDetailedAnalyticsData(prev => ({
+        ...prev,
+        users: prev.users.filter(u => u._id !== userToDelete._id)
+      }));
+      setAnalytics(prev => prev ? ({ ...prev, totalUsers: Math.max(0, (prev.totalUsers || 1) - 1) }) : null);
+
+      setIsDeleteUserModalOpen(false);
+      setUserToDelete(null);
+      alert('User account deleted successfully.');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete user account.');
+    } finally {
+      setDeletingUser(false);
+    }
+  };
+
   const getParticipantRole = (cls) => {
     if (user?.role === 'ADMIN') return { label: 'Administrator', color: 'bg-purple-500/10 border-purple-500/30 text-purple-400' };
     if (cls.teacher?._id === user?._id || cls.teacher === user?._id) return { label: 'Instructor', color: 'bg-orange-500/10 border-orange-500/30 text-orange-400' };
@@ -486,7 +516,6 @@ const Dashboard = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-orange-500/15 sm:bg-orange-500/20 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-rose-500/10 sm:bg-rose-500/15 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
 
-      {/* MISSING ROLL NUMBER BANNER FOR STUDENTS WITHOUT FULL ROLL */}
       {needsRollNo && (
         <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-rose-950/80 border border-rose-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 text-center sm:text-left">
@@ -505,7 +534,6 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* OFFICIAL EMAIL VERIFICATION BANNER FOR FRESHERS / STUDENTS WITH ROLL BUT NO VERIFIED EMAIL */}
       {!needsRollNo && needsEmailLink && (
         <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-amber-950/80 border border-amber-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 text-center sm:text-left">
@@ -524,7 +552,7 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* HEADER WITH RESPONSIVE NAVBAR QUICK STATS PILLS */}
+      {/* HEADER */}
       <header className="relative z-10 w-full max-w-6xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-orange-500/30 rounded-3xl sm:rounded-2xl px-4 sm:px-6 py-5 shadow-[0_0_30px_rgba(249,115,22,0.08)]">
         <div className="text-center lg:text-left space-y-1 w-full lg:w-auto">
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-rose-300 to-pink-400">
@@ -535,7 +563,6 @@ const Dashboard = () => {
           </p>
         </div>
 
-        {/* RESPONSIVE QUICK PILLS STATS BAR */}
         {!isAdmin && (
           <div className="flex flex-col items-center lg:items-start gap-1 w-full lg:w-auto my-1 lg:my-0">
             <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase px-1">Quick Overview</span>
@@ -593,7 +620,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* RESPONSIVE ACTION BUTTONS */}
         <div className="flex flex-wrap items-center justify-center gap-2 w-full lg:w-auto">
           <button
             onClick={() => { setProfileData({ name: user?.name || '', password: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
@@ -967,9 +993,20 @@ const Dashboard = () => {
                         <h4 className="text-white font-bold text-sm">{u.name}</h4>
                         <p className="text-xs text-slate-400">{u.email} • <span className="font-mono text-orange-400">{u.rollNo || 'No RollNo'}</span></p>
                       </div>
-                      <span className="text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 self-start sm:self-auto">
-                        {u.role}
-                      </span>
+                      <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                        <span className="text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300">
+                          {u.role}
+                        </span>
+                        {u._id !== user?._id && (
+                          <button 
+                            onClick={() => { setUserToDelete(u); setIsDeleteUserModalOpen(true); }}
+                            className="p-2 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-300 rounded-xl text-xs cursor-pointer transition-all"
+                            title="Delete User Account"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )
@@ -1058,6 +1095,48 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* DOUBLE CONFIRMATION DELETE USER MODAL */}
+      {isDeleteUserModalOpen && userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md px-3 sm:px-4">
+          <div className="w-full max-w-md bg-[#130910] border border-red-500/50 rounded-3xl p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-extrabold text-red-400 uppercase tracking-wide">
+                ⚠️ Confirm User Deletion
+              </h3>
+              <button onClick={() => setIsDeleteUserModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer p-1">✕</button>
+            </div>
+            
+            <div className="space-y-2 text-xs text-slate-300">
+              <p>Are you sure you want to permanently delete this user account?</p>
+              <div className="bg-[#080507] p-3 rounded-xl border border-red-500/30 space-y-1 font-mono">
+                <p className="text-white font-bold">{userToDelete.name}</p>
+                <p className="text-slate-400 text-[11px]">{userToDelete.email}</p>
+                <p className="text-orange-400 text-[10px] uppercase">Role: {userToDelete.role}</p>
+              </div>
+              <p className="text-red-300 text-[11px] italic">This action cannot be undone.</p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button 
+                type="button"
+                onClick={() => setIsDeleteUserModalOpen(false)}
+                className="w-1/2 py-2.5 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                disabled={deletingUser}
+                onClick={handleConfirmDeleteUser}
+                className="w-1/2 py-2.5 bg-red-600 hover:bg-red-500 text-white font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                {deletingUser ? 'Deleting...' : 'Delete User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CLAIM OFFICIAL ROLL NUMBER MODAL */}
       {isRollNoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-3 sm:px-4">
@@ -1086,9 +1165,6 @@ const Dashboard = () => {
                   placeholder="e.g. BITF26A001"
                   className="w-full px-4 py-3 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm font-mono uppercase focus:ring-2 focus:ring-rose-400"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Once entered, your portal account will upgrade to full roll number login mode and re-sync your registered classrooms.
-                </p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button 
@@ -1164,9 +1240,6 @@ const Dashboard = () => {
                     value={user?.email || ''}
                     className="w-full px-4 py-3 bg-[#080507]/60 border border-slate-800 rounded-xl text-emerald-400 font-mono text-sm cursor-not-allowed select-none"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Your official university email is verified and active for all portal notifications.
-                  </p>
                 </div>
               ) : (
                 <div>
@@ -1179,9 +1252,6 @@ const Dashboard = () => {
                     value={profileData.personalNotificationEmail}
                     className="w-full px-4 py-3 bg-[#080507]/60 border border-slate-800 rounded-xl text-slate-400 font-mono text-sm cursor-not-allowed select-none"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Temporary fallback email. Verify your official @pucit.edu.pk email below to replace it.
-                  </p>
                 </div>
               )}
 

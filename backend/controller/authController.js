@@ -941,3 +941,57 @@ exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
     },
   });
 });
+
+// =============================================================================
+// 19. ADMIN USER DELETION CONTROL (Prevents self-deletion & notifies user via email)
+// =============================================================================
+exports.adminDeleteUser = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'ADMIN') {
+    return next(new AppError('Only administrators can delete user accounts.', 403));
+  }
+
+  const { userId } = req.params;
+  if (!userId) {
+    return next(new AppError('Target User ID is required!', 400));
+  }
+
+  // Prevent admin from deleting themselves
+  if (userId.toString() === req.user._id.toString()) {
+    return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
+  }
+
+  const targetUser = await User.findById(userId);
+  if (!targetUser) {
+    return next(new AppError('User account not found.', 404));
+  }
+
+  const recipientEmail = targetUser.personalNotificationEmail || (targetUser.email && !targetUser.email.includes('@temp.pucit.edu.pk') ? targetUser.email : null);
+
+  if (recipientEmail) {
+    try {
+      await sendStyledEmail({
+        to: recipientEmail,
+        subject: "Account Termination Notice",
+        title: "Account Removal Notification",
+        bodyText: `Hello <strong>${targetUser.name}</strong>,<br><br>We are writing to inform you that your account on the PUCIT Classroom Portal has been <span style="color: #e11d48; font-weight: 600;">terminated / deleted</span> by the platform administrator.<br><br>If you believe this action was taken in error or require any assistance regarding your data or credentials, please reach out directly to the administrator, <strong>Shehzada Ather (IT F25 - Old Campus)</strong>.`,
+        details: [
+          { label: "Account Name", value: targetUser.name },
+          { label: "Identifier / Roll No", value: targetUser.rollNo || targetUser.email },
+          { label: "Support Contact", value: "Shehzada Ather, IT F25 (Old Campus)" },
+        ],
+      });
+    } catch (mailErr) {
+      console.warn("Failed to dispatch account deletion notice email:", mailErr.message);
+    }
+  }
+
+  await User.findByIdAndDelete(userId);
+
+  // Clean up references in mark records if needed
+  await Mark.deleteMany({ student: userId });
+
+  res.status(200).json({
+    status: 'success',
+    message: `User account ${targetUser.name} (${targetUser.email}) successfully deleted by admin and notification email sent.`,
+  });
+});

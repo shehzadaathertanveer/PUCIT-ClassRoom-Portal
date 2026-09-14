@@ -414,7 +414,7 @@ exports.addStudentToClassroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 7. REMOVE STUDENT FROM CLASSROOM
+// 7. REMOVE STUDENT FROM CLASSROOM (With Formal Dropout Notification Email)
 // =============================================================================
 exports.removeStudentFromClassroom = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
@@ -423,15 +423,40 @@ exports.removeStudentFromClassroom = catchAsync(async (req, res, next) => {
     { _id: classroomId, isActive: true },
     { $pull: { students: studentId } },
     { returnDocument: 'after' }
-  );
+  ).populate('teacher', 'name email personalNotificationEmail');
 
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const targetStudent = await User.findById(studentId).select('name email personalNotificationEmail rollNo registrationNo');
+
+  if (targetStudent) {
+    const studentEmail = targetStudent.personalNotificationEmail || (targetStudent.email && !targetStudent.email.includes('@temp.pucit.edu.pk') ? targetStudent.email : null);
+
+    if (studentEmail) {
+      try {
+        await sendStyledEmail({
+          to: studentEmail,
+          subject: `Enrollment Update: Removed from ${classroom.className}`,
+          title: `Course Dropout / Removal Notice`,
+          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the classroom <strong>${classroom.className} (${classroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).<br><br>If you believe this action was taken in error or require further assistance regarding your course registration, please contact your course TA or Teacher directly.`,
+          details: [
+            { label: 'Course Name', value: classroom.className },
+            { label: 'Section Prefix', value: classroom.sectionPrefix },
+            { label: 'Instructor', value: classroom.teacher?.name || classroom.placeholderTeacherName },
+            { label: 'Action By', value: `${req.user.name} (${req.user.role})` }
+          ],
+        });
+      } catch (mailErr) {
+        console.warn('Failed to dispatch student dropout notification email:', mailErr.message);
+      }
+    }
+  }
 
   await Mark.findOneAndDelete({ classroom: classroomId, student: studentId });
 
   res.status(200).json({
     status: 'success',
-    message: 'Student removed from classroom successfully.',
+    message: 'Student removed from classroom successfully and notification email dispatched.',
     data: { classroom },
   });
 });
@@ -671,16 +696,17 @@ exports.getClassroomComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. CREATE & DELETE GRADED ITEM
+// 12. CREATE & DELETE GRADED ITEM (With Range Verification & Overlap Check)
 // =============================================================================
 exports.createGradedItem = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
-  const { category, type, title, totalMarks } = req.body;
+  const { category, type, title, totalMarks, rangeStart, rangeEnd } = req.body;
 
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to create grading items in this classroom.', 403));
 
-  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .populate('students', 'name rollNo');
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   const targetKey = getNormalizedTargetKey(category || type);
@@ -689,22 +715,93 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
     classroom[targetKey] = [];
   }
 
-  const exists = classroom[targetKey].some(
-    (item) => item.title.trim().toLowerCase() === title.trim().toLowerCase()
+  const cleanTitle = title.trim();
+  const existsGlobally = classroom[targetKey].some(
+    (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
   );
-  if (exists) {
-    return next(new AppError('An evaluation item with this title already exists in this category.', 400));
+
+  let targetStudents = classroom.students;
+  const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
+
+  if (hasRange) {
+    const startIdx = parseInt(rangeStart, 10) - 1;
+    const endIdx = parseInt(rangeEnd, 10);
+    
+    if (isNaN(startIdx) || isNaN(endIdx) || startIdx < 0 || startIdx >= endIdx) {
+      return next(new AppError('Invalid student range specified for marksheet creation.', 400));
+    }
+
+    const sortedStudents = [...classroom.students].sort((a, b) => {
+      const rollA = (a.rollNo || '').toLowerCase();
+      const rollB = (b.rollNo || '').toLowerCase();
+      return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    targetStudents = sortedStudents.slice(startIdx, endIdx);
+    if (targetStudents.length === 0) {
+      return next(new AppError('No students found within the specified range.', 400));
+    }
+
+    const targetStudentIds = targetStudents.map(st => st._id);
+    const existingMarksDocs = await Mark.find({
+      classroom: classroomId,
+      student: { $in: targetStudentIds }
+    });
+
+    for (const doc of existingMarksDocs) {
+      const activityList = doc[targetKey] || [];
+      const hasActivity = activityList.some(item => 
+        item.title.trim().toLowerCase() === cleanTitle.toLowerCase() &&
+        (item.obtainedMarks !== undefined && item.obtainedMarks !== null || item.isAbsent)
+      );
+
+      if (hasActivity) {
+        const studentInfo = targetStudents.find(s => s._id.toString() === doc.student.toString());
+        return next(new AppError(`Overlap Error: Student ${studentInfo ? studentInfo.rollNo : 'in range'} already has a recorded grade for "${cleanTitle}". Please check your selected range or ensure no duplicate grading sheet is created.`, 400));
+      }
+    }
   }
 
-  classroom[targetKey].push({ title: title.trim(), totalMarks: Number(totalMarks) });
-  await classroom.save();
+  if (!existsGlobally) {
+    classroom[targetKey].push({ title: cleanTitle, totalMarks: Number(totalMarks) });
+    await classroom.save();
+  }
 
-  const newItem = classroom[targetKey][classroom[targetKey].length - 1];
+  const itemPayload = {
+    title: cleanTitle,
+    totalMarks: Number(totalMarks),
+    obtainedMarks: 0,
+    isAbsent: false
+  };
+
+  const studentIdsToInitialize = targetStudents.map(st => st._id);
+  for (const studId of studentIdsToInitialize) {
+    let markDoc = await Mark.findOne({ classroom: classroomId, student: studId });
+    if (!markDoc) {
+      markDoc = await Mark.create({
+        classroom: classroomId,
+        student: studId,
+        quizzes: [],
+        assignments: [],
+        labMarks: []
+      });
+    }
+
+    if (!markDoc[targetKey]) markDoc[targetKey] = [];
+    const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+    
+    if (itemIdx === -1) {
+      markDoc[targetKey].push(itemPayload);
+      await markDoc.save();
+    }
+  }
+
+  const newItem = classroom[targetKey].find(i => i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
 
   res.status(201).json({
     status: 'success',
-    message: 'Graded category item created successfully!',
-    data: { item: newItem },
+    message: hasRange ? `Marksheet created successfully for students range (${rangeStart} to ${rangeEnd})!` : 'Graded category item created successfully for whole class!',
+    data: { item: newItem, targetedCount: targetStudents.length },
   });
 });
 
@@ -915,7 +1012,6 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   });
 });
 
-// FEATURE 1: Quick Suffix Roll Numbers Entry (e.g. 3, 53, 23 auto-detected & combined with prefix)
 exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
   const { classroomId, rollSuffixes } = req.body;
   const targetClassId = classroomId || req.params.classroomId;
@@ -987,7 +1083,6 @@ exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
   });
 });
 
-// FEATURE 2: Range-based Auto Enrollment (1 to classLimit)
 exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
   const { classroomId, startRoll, endRoll } = req.body;
   const targetClassId = classroomId || req.params.classroomId;
@@ -1065,7 +1160,6 @@ exports.addBulkStudentsByRange = catchAsync(async (req, res, next) => {
   });
 });
 
-// FEATURE 3 & Add-Drop Seniors List Support
 exports.addDropSeniorsList = catchAsync(async (req, res, next) => {
   const { classroomId, rollNumbers } = req.body;
   const targetClassId = classroomId || req.params.classroomId;
@@ -1163,7 +1257,7 @@ exports.getClassroomMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS
+// 17. UPDATE / UPSERT INDIVIDUAL STUDENT MARKS (With Targeted Single-Student Email)
 // =============================================================================
 exports.updateStudentMarks = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
@@ -1252,7 +1346,7 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. WHOLE-CLASS BATCH RESULTS UPLOAD
+// 18. WHOLE-CLASS BATCH RESULTS UPLOAD (With Targeted Individual Student Emails)
 // =============================================================================
 exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1287,8 +1381,26 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
             }
           }
         },
-        { upsert: true }
+        { upsert: true, returnDocument: 'after' }
       );
+
+      const studentObj = classroom.students.find(s => s._id.toString() === scoreEntry.studentId.toString());
+      if (studentObj) {
+        const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          sendStyledEmail({
+            to: studentEmail,
+            subject: `Marks Updated: ${classroom.className}`,
+            title: `Marks Update Notification`,
+            bodyText: `Your marks for <strong>${classroom.className}</strong> have been updated.`,
+            details: [
+              { label: 'Course', value: classroom.className },
+              { label: 'Evaluation', value: targetKey.toUpperCase() },
+              { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
+            ]
+          }).catch(err => console.warn('Email send warning:', err.message));
+        }
+      }
     }
   } else if (['quizzes', 'assignments', 'labMarks'].includes(targetKey)) {
     if (!title) return next(new AppError('Title is required for whole-class quiz/assignment/lab mark entries.', 400));
@@ -1312,12 +1424,30 @@ exports.updateWholeClassMarks = catchAsync(async (req, res, next) => {
         markRec[targetKey].push(itemPayload);
       }
       await markRec.save();
+
+      const studentObj = classroom.students.find(s => s._id.toString() === scoreEntry.studentId.toString());
+      if (studentObj) {
+        const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
+        if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+          sendStyledEmail({
+            to: studentEmail,
+            subject: `Marks Updated: ${classroom.className} - ${cleanTitle}`,
+            title: `Marks Update: ${cleanTitle}`,
+            bodyText: `Your marks for <strong>${cleanTitle}</strong> in <strong>${classroom.className}</strong> have been updated.`,
+            details: [
+              { label: 'Course', value: classroom.className },
+              { label: 'Activity', value: cleanTitle },
+              { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
+            ]
+          }).catch(err => console.warn('Email send warning:', err.message));
+        }
+      }
     }
   }
 
   res.status(200).json({
     status: 'success',
-    message: `Whole-class marks successfully uploaded for ${studentScores.length} students!`,
+    message: `Whole-class marks successfully uploaded for ${studentScores.length} students with targeted notifications!`,
   });
 });
 
@@ -1363,7 +1493,7 @@ exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS (Feature 4 - Add All or Individual)
+// 20. BULK APPROVE / ADD AUTO-DETECTED STUDENTS (Feature 4)
 // =============================================================================
 exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -1432,5 +1562,39 @@ exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
     status: 'success',
     message: `Successfully approved and added ${successfullyAdded.length} students!`,
     data: { classroom, addedCount: successfullyAdded.length }
+  });
+});
+
+// =============================================================================
+// 21. ADMIN USER DELETION CONTROL (Prevents self-deletion)
+// =============================================================================
+exports.adminDeleteUser = catchAsync(async (req, res, next) => {
+  if (req.user.role !== 'ADMIN') {
+    return next(new AppError('Only administrators can delete user accounts.', 403));
+  }
+
+  const { userId } = req.params;
+  if (!userId) {
+    return next(new AppError('Target User ID is required!', 400));
+  }
+
+  // Prevent admin from deleting themselves
+  if (userId.toString() === req.user._id.toString()) {
+    return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
+  }
+
+  const targetUser = await User.findById(userId);
+  if (!targetUser) {
+    return next(new AppError('User account not found.', 404));
+  }
+
+  await User.findByIdAndDelete(userId);
+
+  // Clean up references in mark records or class rosters if needed
+  await Mark.deleteMany({ student: userId });
+
+  res.status(200).json({
+    status: 'success',
+    message: `User account ${targetUser.name} (${targetUser.email}) successfully deleted by admin.`,
   });
 });

@@ -197,6 +197,18 @@ const LabroomDetail = () => {
     }
   };
 
+  const fetchComplaints = async () => {
+    try {
+      setLoadingComplaints(true);
+      const res = await API.get(`/labrooms/${labroomId}/complaints`);
+      setComplaintsList(res.data?.data?.complaints || res.data?.complaints || []);
+    } catch (err) {
+      console.warn('Failed to fetch complaints');
+    } finally {
+      setLoadingComplaints(false);
+    }
+  };
+
   useEffect(() => {
     if (labroomId && user?._id) fetchLabroomData();
   }, [labroomId, user?._id]);
@@ -351,6 +363,8 @@ const LabroomDetail = () => {
     e.preventDefault();
     setUpdatingSettings(true);
     try {
+      const totalAllocated = editSessionalActivities.reduce((acc, curr) => acc + (Number(curr.allocatedMarks) || 0), 0);
+
       await API.patch(`/labrooms/${labroomId}/settings`, {
         labName: editLabName.trim(),
         sectionPrefix: editSectionPrefix.trim().toUpperCase(),
@@ -361,7 +375,7 @@ const LabroomDetail = () => {
           allocatedMarks: Number(a.allocatedMarks) || 0
         }))
       });
-      showToast('Labroom settings updated successfully!');
+      showToast('Labroom settings & activities updated successfully!');
       setIsSettingsModalOpen(false);
       fetchLabroomData();
     } catch (err) {
@@ -404,7 +418,6 @@ const LabroomDetail = () => {
         showToast(`Successfully enrolled ${rolls.length} students!`);
       } else if (addModeType === 'smartDetect') {
         if (selectedDirectoryRolls.length === 0) throw new Error('Please select at least one student from the directory.');
-        // Map selected rollNos to their User IDs if needed, or send roll numbers
         const selectedIds = classDirectoryStudents
           .filter(st => selectedDirectoryRolls.includes(st.rollNo))
           .map(st => st._id);
@@ -1743,7 +1756,7 @@ const LabroomDetail = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-extrabold text-white uppercase">Lab Settings</h3>
+              <h3 className="text-base font-extrabold text-white uppercase">Lab Settings & Activities</h3>
               <button onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleUpdateLabSettings} className="space-y-4">
@@ -1764,6 +1777,62 @@ const LabroomDetail = () => {
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Placeholder Teacher Name</label>
                 <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+              </div>
+
+              {/* Dynamic Sessional Activities Manager */}
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-blue-400 uppercase">Lab Activities & Mark Weights</p>
+                  <button 
+                    type="button" 
+                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: '', allocatedMarks: 20 }])}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+                  >
+                    + Add Activity
+                  </button>
+                </div>
+                
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {editSessionalActivities.map((act, index) => (
+                    <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
+                      <input 
+                        type="text" 
+                        placeholder="Category Name (e.g. Lab Tasks)" 
+                        value={act.category} 
+                        onChange={(e) => {
+                          const updated = [...editSessionalActivities];
+                          updated[index].category = e.target.value;
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
+                        required
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="Weight" 
+                        value={act.allocatedMarks} 
+                        onChange={(e) => {
+                          const updated = [...editSessionalActivities];
+                          updated[index].allocatedMarks = Number(e.target.value);
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="w-20 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
+                        min="1"
+                        required
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const updated = editSessionalActivities.filter((_, i) => i !== index);
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="pt-3 flex gap-3">

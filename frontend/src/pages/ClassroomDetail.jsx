@@ -204,7 +204,6 @@ const ClassroomDetail = () => {
     }
   };
 
-  // Fetch Pathway 4 Auto-Detect Available Students
   const fetchAvailableAutoStudents = async () => {
     try {
       setLoadingAutoStudents(true);
@@ -495,7 +494,6 @@ const ClassroomDetail = () => {
     }
   };
 
-  // Handler for Feature 3: Lookup Student for Double-Confirmation before Add/Drop
   const handleLookupStudentForAddDrop = async (e) => {
     e.preventDefault();
     if (!addDropInput.trim()) return;
@@ -514,7 +512,6 @@ const ClassroomDetail = () => {
     }
   };
 
-  // Enroller handler supporting all 4 pathways
   const handleAddStudentSubmit = async (e) => {
     e.preventDefault();
     setAddingStudent(true);
@@ -522,25 +519,21 @@ const ClassroomDetail = () => {
 
     try {
       if (addModeType === 'suffix') {
-        // Pathway 1: Quick Suffix Roll Numbers Entry (e.g. 3, 53, 23)
         const suffixes = suffixInput.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
         if (suffixes.length === 0) throw new Error('Please enter at least one roll number suffix.');
         await API.post(`/classrooms/${classroomId}/add-students-by-suffix`, { rollSuffixes: suffixes });
         showToast(`Successfully enrolled ${suffixes.length} students via suffix list!`);
       } else if (addModeType === 'range') {
-        // Pathway 2: Range-based Auto Enrollment (1 to classLimit)
         const start = parseInt(bulkStart, 10);
         const end = parseInt(bulkEnd, 10);
         if (isNaN(start) || isNaN(end) || start > end) throw new Error('Please specify a valid numeric range.');
         await API.post(`/classrooms/add-bulk-range`, { classroomId, startRoll: start, endRoll: end });
         showToast(`Bulk range from ${start} to ${end} enrolled!`);
       } else if (addModeType === 'addDrop') {
-        // Pathway 3: Add/Drop Seniors List with Double-Confirmation
         if (!lookupTargetStudent) throw new Error('Please lookup and verify the student first.');
         await API.post(`/classrooms/add-student-by-roll`, { classroomId, rollInput: lookupTargetStudent.rollNo || addDropInput.trim() });
         showToast(`Student ${lookupTargetStudent.name} enrolled successfully!`);
       } else if (addModeType === 'autoDetect') {
-        // Pathway 4: Smart Prefix Auto-Detect & Bulk Approve
         if (selectedAutoStudentIds.length === 0) throw new Error('Please select at least one student to approve.');
         await API.post(`/classrooms/${classroomId}/bulk-approve-students`, { studentIds: selectedAutoStudentIds });
         showToast(`Successfully approved and added ${selectedAutoStudentIds.length} students!`);
@@ -1570,7 +1563,7 @@ const ClassroomDetail = () => {
         </div>
       )}
 
-      {/* 4. Advanced Add Student Modal (Supports all 4 Enrollment Pathways) */}
+      {/* 4. Advanced Add Student Modal */}
       {isAddStudentModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
@@ -1589,7 +1582,6 @@ const ClassroomDetail = () => {
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
-              {/* Pathway 1: Quick Suffix Roll Numbers Entry */}
               {addModeType === 'suffix' && (
                 <div className="space-y-2">
                   <label className="block text-xs font-bold uppercase text-slate-400">Roll Number Suffixes (Comma or Newline Separated)</label>
@@ -1607,7 +1599,6 @@ const ClassroomDetail = () => {
                 </div>
               )}
 
-              {/* Pathway 2: Range-based Auto Enrollment */}
               {addModeType === 'range' && (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -1626,7 +1617,6 @@ const ClassroomDetail = () => {
                 </div>
               )}
 
-              {/* Pathway 3: Add/Drop Seniors List with Double-Confirmation */}
               {addModeType === 'addDrop' && (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
@@ -1671,7 +1661,6 @@ const ClassroomDetail = () => {
                 </div>
               )}
 
-              {/* Pathway 4: Smart Auto-Detect & Bulk Select */}
               {addModeType === 'autoDetect' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -1842,6 +1831,62 @@ const ClassroomDetail = () => {
                     <span className="text-[10px] text-slate-400 block mb-1">Finals</span>
                     <input type="number" value={editFinalsWeight} onChange={(e) => setEditFinalsWeight(e.target.value)} className="w-full px-2 py-1.5 bg-[#080507] border border-slate-700 rounded-lg text-white text-xs font-mono" />
                   </div>
+                </div>
+              </div>
+
+              {/* Dynamic Sessional Activities Manager */}
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-orange-400 uppercase">Sessional Activities & Mark Allocations</p>
+                  <button 
+                    type="button" 
+                    onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: '', allocatedMarks: 10 }])}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-orange-300 border border-orange-500/30 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+                  >
+                    + Add Activity
+                  </button>
+                </div>
+                
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {editSessionalActivities.map((act, index) => (
+                    <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
+                      <input 
+                        type="text" 
+                        placeholder="Category Name (e.g. Quizzes)" 
+                        value={act.category} 
+                        onChange={(e) => {
+                          const updated = [...editSessionalActivities];
+                          updated[index].category = e.target.value;
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs" 
+                        required
+                      />
+                      <input 
+                        type="number" 
+                        placeholder="Marks" 
+                        value={act.allocatedMarks} 
+                        onChange={(e) => {
+                          const updated = [...editSessionalActivities];
+                          updated[index].allocatedMarks = Number(e.target.value);
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="w-20 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
+                        min="1"
+                        required
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const updated = editSessionalActivities.filter((_, i) => i !== index);
+                          setEditSessionalActivities(updated);
+                        }}
+                        className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
 

@@ -402,7 +402,7 @@ exports.addStudentToLabroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 7. REMOVE STUDENT FROM LABROOM
+// 7. REMOVE STUDENT FROM LABROOM (With Formal Dropout Notification Email)
 // =============================================================================
 exports.removeStudentFromLabroom = catchAsync(async (req, res, next) => {
   const { labroomId, studentId } = req.params;
@@ -411,15 +411,40 @@ exports.removeStudentFromLabroom = catchAsync(async (req, res, next) => {
     labroomId,
     { $pull: { students: studentId } },
     { returnDocument: 'after' }
-  );
+  ).populate('teacher', 'name email personalNotificationEmail');
 
   if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const targetStudent = await User.findById(studentId).select('name email personalNotificationEmail rollNo registrationNo');
+
+  if (targetStudent) {
+    const studentEmail = targetStudent.personalNotificationEmail || (targetStudent.email && !targetStudent.email.includes('@temp.pucit.edu.pk') ? targetStudent.email : null);
+
+    if (studentEmail) {
+      try {
+        await sendStyledEmail({
+          to: studentEmail,
+          subject: `Lab Enrollment Update: Removed from ${labroom.labName}`,
+          title: `Lab Dropout / Removal Notice`,
+          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the lab room <strong>${labroom.labName} (${labroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).<br><br>If you believe this action was taken in error or require further assistance regarding your lab registration, please contact your lab TA or Teacher directly.`,
+          details: [
+            { label: 'Lab Name', value: labroom.labName },
+            { label: 'Section Prefix', value: labroom.sectionPrefix },
+            { label: 'Instructor', value: labroom.teacher?.name || labroom.placeholderTeacherName },
+            { label: 'Action By', value: `${req.user.name} (${req.user.role})` }
+          ],
+        });
+      } catch (mailErr) {
+        console.warn('Failed to dispatch student lab dropout notification email:', mailErr.message);
+      }
+    }
+  }
 
   await LabMark.findOneAndDelete({ labroom: labroomId, student: studentId });
 
   res.status(200).json({
     status: 'success',
-    message: 'Student removed from labroom successfully.',
+    message: 'Student removed from labroom successfully and notification email dispatched.',
     data: { labroom },
   });
 });
@@ -986,24 +1011,25 @@ exports.getLabroomMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 16. WHOLE-CLASS LAB BATCH RESULTS UPLOAD
+// 16. WHOLE-CLASS & RANGE LAB BATCH RESULTS UPLOAD (With Targeted Individual Student Emails)
 // =============================================================================
 exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
   const { category, title, totalMarks, studentScores } = req.body; 
 
   const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
-  if (!isStaff) return next(new AppError('Unauthorized to upload whole-class lab marks.', 403));
+  if (!isStaff) return next(new AppError('Unauthorized to upload lab marks.', 403));
 
-  const labroom = await Labroom.findById(labroomId);
+  const labroom = await Labroom.findById(labroomId).populate('students', 'name email personalNotificationEmail rollNo');
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
   if (!Array.isArray(studentScores) || studentScores.length === 0) {
-    return next(new AppError('studentScores array is required for whole-class lab updates!', 400));
+    return next(new AppError('studentScores array is required for lab updates!', 400));
   }
 
   const targetKey = getNormalizedLabTargetKey(category);
   const parsedTotal = Number(totalMarks);
+  const cleanTitle = title.trim();
 
   for (const scoreEntry of studentScores) {
     let markRec = await LabMark.findOne({ labroom: labroomId, student: scoreEntry.studentId });
@@ -1013,7 +1039,6 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
 
     const isAbsent = Boolean(scoreEntry.isAbsent);
     const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
-    const cleanTitle = title.trim();
 
     const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
     const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
@@ -1024,11 +1049,29 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
       markRec[targetKey].push(itemPayload);
     }
     await markRec.save();
+
+    const studentObj = labroom.students.find(s => s._id.toString() === scoreEntry.studentId.toString());
+    if (studentObj) {
+      const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
+      if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+        sendStyledEmail({
+          to: studentEmail,
+          subject: `Lab Marks Updated: ${labroom.labName} - ${cleanTitle}`,
+          title: `Lab Evaluation: ${cleanTitle}`,
+          bodyText: `Your marks for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong> have been updated.`,
+          details: [
+            { label: 'Lab Course', value: labroom.labName },
+            { label: 'Activity', value: cleanTitle },
+            { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
+          ]
+        }).catch(err => console.warn('Email send warning:', err.message));
+      }
+    }
   }
 
   res.status(200).json({
     status: 'success',
-    message: `Whole-class lab marks successfully uploaded for ${studentScores.length} students!`,
+    message: `Lab marks successfully uploaded/updated for ${studentScores.length} students with targeted notifications!`,
   });
 });
 
@@ -1071,16 +1114,16 @@ exports.getLabComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. CREATE & DELETE GRADED LAB ITEM
+// 18. CREATE & DELETE GRADED LAB ITEM (With Range Verification & Overlap Check)
 // =============================================================================
 exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const { category, title, totalMarks } = req.body;
+  const { category, title, totalMarks, rangeStart, rangeEnd } = req.body;
 
   const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
   if (!isStaff) return next(new AppError('Unauthorized to create lab items.', 403));
 
-  const labroom = await Labroom.findById(labroomId);
+  const labroom = await Labroom.findById(labroomId).populate('students', 'name rollNo');
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
   const cleanCategory = category.trim();
@@ -1090,10 +1133,54 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
 
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
+  let targetStudents = labroom.students;
+  const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
+
+  if (hasRange) {
+    const startIdx = parseInt(rangeStart, 10) - 1;
+    const endIdx = parseInt(rangeEnd, 10);
+    
+    if (isNaN(startIdx) || isNaN(endIdx) || startIdx < 0 || startIdx >= endIdx) {
+      return next(new AppError('Invalid student range specified for lab marksheet creation.', 400));
+    }
+
+    const sortedStudents = [...labroom.students].sort((a, b) => {
+      const rollA = (a.rollNo || '').toLowerCase();
+      const rollB = (b.rollNo || '').toLowerCase();
+      return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    targetStudents = sortedStudents.slice(startIdx, endIdx);
+    if (targetStudents.length === 0) {
+      return next(new AppError('No students found within the specified range.', 400));
+    }
+
+    const targetStudentIds = targetStudents.map(st => st._id);
+    const existingMarksDocs = await LabMark.find({
+      labroom: labroomId,
+      student: { $in: targetStudentIds }
+    });
+
+    for (const doc of existingMarksDocs) {
+      const activityList = doc[targetKey] || [];
+      const hasActivity = activityList.some(item => 
+        item.title.trim().toLowerCase() === trimmedTitle.toLowerCase() &&
+        (item.obtainedMarks !== undefined && item.obtainedMarks !== null || item.isAbsent)
+      );
+
+      if (hasActivity) {
+        const studentInfo = targetStudents.find(s => s._id.toString() === doc.student.toString());
+        return next(new AppError(`Overlap Error: Student ${studentInfo ? studentInfo.rollNo : 'in range'} already has a recorded grade for "${trimmedTitle}". Please verify your selected range.`, 400));
+      }
+    }
+  }
+
   if (standardKeys.includes(targetKey)) {
     const exists = labroom[targetKey].some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
-    if (exists) return next(new AppError('A lab evaluation item with this title already exists in this category.', 400));
-    labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks });
+    if (!exists) {
+      labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks });
+      await labroom.save();
+    }
   } else {
     let customCat = labroom.customActivities.find(c => c.categoryName.toLowerCase() === cleanCategory.toLowerCase());
     if (!customCat) {
@@ -1101,19 +1188,47 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
         categoryName: cleanCategory,
         items: [{ title: trimmedTitle, totalMarks: tMarks }]
       });
+      await labroom.save();
     } else {
       const exists = customCat.items.some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
-      if (exists) return next(new AppError('An item with this title already exists in this custom category.', 400));
-      customCat.items.push({ title: trimmedTitle, totalMarks: tMarks });
+      if (!exists) {
+        customCat.items.push({ title: trimmedTitle, totalMarks: tMarks });
+        await labroom.save();
+      }
     }
   }
 
-  await labroom.save();
+  const itemPayload = { title: trimmedTitle, totalMarks: tMarks, obtainedMarks: 0, isAbsent: false };
+  const studentIdsToInit = targetStudents.map(st => st._id);
+
+  for (const studId of studentIdsToInit) {
+    let markDoc = await LabMark.findOne({ labroom: labroomId, student: studId });
+    if (!markDoc) {
+      markDoc = await LabMark.create({
+        labroom: labroomId,
+        student: studId,
+        labTasks: [],
+        vivas: [],
+        labTests: [],
+        projects: [],
+        quizzes: [],
+        assignments: []
+      });
+    }
+
+    if (!markDoc[targetKey]) markDoc[targetKey] = [];
+    const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
+    
+    if (itemIdx === -1) {
+      markDoc[targetKey].push(itemPayload);
+      await markDoc.save();
+    }
+  }
 
   res.status(201).json({
     status: 'success',
-    message: 'Lab evaluation item created successfully!',
-    data: { labroom },
+    message: hasRange ? `Lab marksheet created successfully for students range (${rangeStart} to ${rangeEnd})!` : 'Lab evaluation item created successfully for whole class!',
+    data: { labroom, targetedCount: targetStudents.length },
   });
 });
 
@@ -1223,7 +1338,7 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 20. UPDATE LABROOM SETTINGS
+// 20. UPDATE LABROOM SETTINGS (Supports dynamic sessional activities & weights)
 // =============================================================================
 exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
