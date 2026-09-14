@@ -69,6 +69,7 @@ const MarksSheet = () => {
       setLoading(true);
       setError('');
 
+      // CORRECTED: Pointing to /classroommarks/bulk-sheet/:classroomId
       const res = await API.get(`/classroommarks/bulk-sheet/${classroomId}`);
       const data = res.data.data;
       const currentClass = data.classroom || data.labroom;
@@ -104,6 +105,7 @@ const MarksSheet = () => {
 
       if (activeTitle && activeTitle !== 'general') {
         try {
+          // CORRECTED: Pointing to /classroommarks/unassigned/:classroomId
           const unassignedRes = await API.get(`/classroommarks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
           const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
           setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
@@ -240,8 +242,9 @@ const MarksSheet = () => {
         return;
       }
 
-      // FIXED API ROUTE MAPPING
-      await API.post(`/classrooms/${classroomId}/batch-marks`, {
+      // CORRECTED: Pointing to /classroommarks/batch-submit
+      await API.post('/classroommarks/batch-submit', {
+        classroomId,
         category,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
@@ -265,6 +268,7 @@ const MarksSheet = () => {
 
     setDeleting(true);
     try {
+      // CORRECTED: Pointing to /classroommarks/delete-evaluation
       await API.delete('/classroommarks/delete-evaluation', {
         data: {
           classroomId,
