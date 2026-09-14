@@ -13,8 +13,10 @@ const getNormalizedTargetKey = (rawType = '') => {
   if (clean.includes('lab')) return 'labMarks';
   if (clean.includes('mid')) return 'mids';
   if (clean.includes('final')) return 'finals';
-  // For custom activities like "Homework", map safely or fallback
-  return clean.endsWith('s') ? clean : clean + 's';
+  
+  // Dynamic normalization for custom activities (e.g., "Homework" -> "homeworks")
+  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
 };
 
 // Helper: Contextual Staff Authorization
@@ -713,11 +715,13 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
   const rawCat = category || type || '';
   const targetKey = getNormalizedTargetKey(rawCat);
 
-  // If standard keys don't match, check if it's a valid custom sessional activity defined in the classroom
-  const isStandardKey = ['quizzes', 'assignments', 'labMarks', 'mids', 'finals'].includes(targetKey);
+  const standardKeys = ['quizzes', 'assignments', 'labMarks', 'mids', 'finals'];
+  const isStandardKey = standardKeys.includes(targetKey);
+  
   if (!isStandardKey && classroom.sessionalActivities) {
     const isValidCustom = classroom.sessionalActivities.some(
-      act => act.category.trim().toLowerCase() === rawCat.trim().toLowerCase()
+      act => act.category.trim().toLowerCase() === rawCat.trim().toLowerCase() ||
+             getNormalizedTargetKey(act.category) === targetKey
     );
     if (!isValidCustom) {
       return next(new AppError(`Invalid evaluation category specified: "${rawCat}".`, 400));

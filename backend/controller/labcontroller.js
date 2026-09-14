@@ -6,7 +6,7 @@ const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 
 // =============================================================================
-// HELPER: Normalize Lab Target Keys Safely
+// HELPER: Normalize Lab Target Keys Safely (Supports Custom Sessional Activities)
 // =============================================================================
 const getNormalizedLabTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
@@ -16,7 +16,16 @@ const getNormalizedLabTargetKey = (rawType = '') => {
   if (clean.includes('project')) return 'projects';
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
-  return clean.endsWith('s') ? clean : clean + 's';
+  
+  // Standard keys check
+  const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
+  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  const potentialKey = sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
+  
+  if (standardKeys.includes(potentialKey)) return potentialKey;
+  
+  // Fallback to customActivities bucket for any user-defined custom categories
+  return 'customActivities';
 };
 
 // =============================================================================
@@ -221,6 +230,7 @@ exports.setLabroomRoster = catchAsync(async (req, res, next) => {
             projects: [],
             quizzes: [],
             assignments: [],
+            customActivities: [],
           },
         },
         { upsert: true, returnDocument: 'after' }
@@ -376,7 +386,7 @@ exports.addStudentToLabroom = catchAsync(async (req, res, next) => {
 
   const studentMark = await LabMark.findOneAndUpdate(
     { labroom: targetLabId, student: studentId },
-    { $setOnInsert: { labroom: targetLabId, student: studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+    { $setOnInsert: { labroom: targetLabId, student: studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -615,7 +625,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 
   await LabMark.findOneAndUpdate(
     { labroom: targetLabId, student: student._id },
-    { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+    { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
     { upsert: true, returnDocument: 'after' }
   );
 
@@ -722,7 +732,7 @@ exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
     const markPromises = successfullyAdded.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: labroomId, student: student._id },
-        { $setOnInsert: { labroom: labroomId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+        { $setOnInsert: { labroom: labroomId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -796,7 +806,7 @@ exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -876,7 +886,7 @@ exports.addBulkLabStudentsByRange = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -948,7 +958,7 @@ exports.addDropLabSeniorsList = catchAsync(async (req, res, next) => {
     const markPromises = newStudents.map((student) => {
       return LabMark.findOneAndUpdate(
         { labroom: targetLabId, student: student._id },
-        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] } },
+        { $setOnInsert: { labroom: targetLabId, student: student._id, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] } },
         { upsert: true, returnDocument: 'after' }
       );
     });
@@ -1027,27 +1037,42 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
     return next(new AppError('studentScores array is required for lab updates!', 400));
   }
 
-  const targetKey = getNormalizedLabTargetKey(category);
+  const cleanCategory = (category || '').trim();
+  const targetKey = getNormalizedLabTargetKey(cleanCategory);
   const parsedTotal = Number(totalMarks);
   const cleanTitle = title.trim();
 
   for (const scoreEntry of studentScores) {
     let markRec = await LabMark.findOne({ labroom: labroomId, student: scoreEntry.studentId });
     if (!markRec) {
-      markRec = await LabMark.create({ labroom: labroomId, student: scoreEntry.studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [] });
+      markRec = await LabMark.create({ labroom: labroomId, student: scoreEntry.studentId, labTasks: [], vivas: [], labTests: [], projects: [], quizzes: [], assignments: [], customActivities: [] });
     }
 
     const isAbsent = Boolean(scoreEntry.isAbsent);
     const obtained = isAbsent ? 0 : Number(scoreEntry.obtainedMarks || 0);
-
-    if (!markRec[targetKey]) markRec[targetKey] = [];
-    const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
     const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
 
-    if (idx > -1) {
-      markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...itemPayload };
+    if (targetKey !== 'customActivities') {
+      if (!markRec[targetKey]) markRec[targetKey] = [];
+      const idx = markRec[targetKey].findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      if (idx > -1) {
+        markRec[targetKey][idx] = { ...markRec[targetKey][idx], ...itemPayload };
+      } else {
+        markRec[targetKey].push(itemPayload);
+      }
     } else {
-      markRec[targetKey].push(itemPayload);
+      if (!Array.isArray(markRec.customActivities)) markRec.customActivities = [];
+      let markCat = markRec.customActivities.find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
+      if (!markCat) {
+        markCat = { categoryName: cleanCategory, items: [] };
+        markRec.customActivities.push(markCat);
+      }
+      const idx = markCat.items.findIndex(item => item.title.trim().toLowerCase() === cleanTitle.toLowerCase());
+      if (idx > -1) {
+        markCat.items[idx] = { ...markCat.items[idx], ...itemPayload };
+      } else {
+        markCat.items.push(itemPayload);
+      }
     }
     await markRec.save();
 
@@ -1115,7 +1140,7 @@ exports.getLabComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. CREATE & DELETE GRADED LAB ITEM (With Range Verification & Overlap Check)
+// 18. CREATE & DELETE GRADED LAB ITEM (With Range Verification & Custom Activities Support)
 // =============================================================================
 exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1134,7 +1159,6 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
 
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
-  // Validate custom categories against labroom sessionalActivities if not standard
   const isStandardKey = standardKeys.includes(targetKey);
   if (!isStandardKey && labroom.sessionalActivities) {
     const isValidCustom = labroom.sessionalActivities.some(
@@ -1174,7 +1198,14 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
     });
 
     for (const doc of existingMarksDocs) {
-      const activityList = doc[targetKey] || [];
+      let activityList = [];
+      if (targetKey !== 'customActivities') {
+        activityList = doc[targetKey] || [];
+      } else {
+        const catDoc = (doc.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
+        activityList = catDoc ? catDoc.items : [];
+      }
+
       const hasActivity = activityList.some(item => 
         item.title.trim().toLowerCase() === trimmedTitle.toLowerCase() &&
         (item.obtainedMarks !== undefined && item.obtainedMarks !== null || item.isAbsent)
@@ -1187,7 +1218,7 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
     }
   }
 
-  if (isStandardKey) {
+  if (targetKey !== 'customActivities') {
     if (!labroom[targetKey]) labroom[targetKey] = [];
     const exists = labroom[targetKey].some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
     if (!exists) {
@@ -1226,16 +1257,30 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
         labTests: [],
         projects: [],
         quizzes: [],
-        assignments: []
+        assignments: [],
+        customActivities: []
       });
     }
 
-    if (!markDoc[targetKey]) markDoc[targetKey] = [];
-    const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
-    
-    if (itemIdx === -1) {
-      markDoc[targetKey].push(itemPayload);
-      await markDoc.save();
+    if (targetKey !== 'customActivities') {
+      if (!markDoc[targetKey]) markDoc[targetKey] = [];
+      const itemIdx = markDoc[targetKey].findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
+      if (itemIdx === -1) {
+        markDoc[targetKey].push(itemPayload);
+        await markDoc.save();
+      }
+    } else {
+      if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
+      let markCat = markDoc.customActivities.find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
+      if (!markCat) {
+        markCat = { categoryName: cleanCategory, items: [] };
+        markDoc.customActivities.push(markCat);
+      }
+      const itemIdx = markCat.items.findIndex(i => i.title.trim().toLowerCase() === trimmedTitle.toLowerCase());
+      if (itemIdx === -1) {
+        markCat.items.push(itemPayload);
+        await markDoc.save();
+      }
     }
   }
 
@@ -1257,7 +1302,8 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
   const cleanTitle = title.trim();
-  const targetKey = getNormalizedLabTargetKey(category);
+  const cleanCategory = (category || '').trim();
+  const targetKey = getNormalizedLabTargetKey(cleanCategory);
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
   if (standardKeys.includes(targetKey)) {
@@ -1276,13 +1322,27 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
     let found = false;
     if (labroom.customActivities) {
       labroom.customActivities.forEach(cat => {
-        const initLen = cat.items.length;
-        cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
-        if (cat.items.length < initLen) found = true;
+        if (!cleanCategory || cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
+          const initLen = cat.items.length;
+          cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
+          if (cat.items.length < initLen) found = true;
+        }
       });
     }
     if (!found) return next(new AppError(`Custom lab item "${cleanTitle}" not found.`, 404));
     await labroom.save();
+
+    const markDocs = await LabMark.find({ labroom: labroomId });
+    for (const doc of markDocs) {
+      if (Array.isArray(doc.customActivities)) {
+        doc.customActivities.forEach(cat => {
+          if (!cleanCategory || cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
+            cat.items = cat.items.filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
+          }
+        });
+        await doc.save();
+      }
+    }
   }
 
   res.status(200).json({

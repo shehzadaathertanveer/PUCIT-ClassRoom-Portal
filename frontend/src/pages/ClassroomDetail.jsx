@@ -58,9 +58,6 @@ const ClassroomDetail = () => {
   const [itemEndRoll, setItemEndRoll] = useState('');
   const [creatingItem, setCreatingItem] = useState(false);
 
-  // State tracking for custom category selection in settings
-  const [customCategoryInputs, setCustomCategoryInputs] = useState({});
-
   // Excel / CSV Sync states for Staff
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [excelCategory, setExcelCategory] = useState('Quizzes');
@@ -136,7 +133,24 @@ const ClassroomDetail = () => {
     if (clean.includes('assign')) return 'assignments';
     if (clean.includes('mid')) return 'mids';
     if (clean.includes('final')) return 'finals';
-    return clean.endsWith('s') ? clean : clean + 's';
+    
+    const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'labtasks', 'vivas', 'labtests', 'projects'];
+    const potentialKey = clean.endsWith('s') ? clean : clean + 's';
+    if (standardKeys.includes(potentialKey)) return potentialKey;
+    
+    return 'customActivities';
+  };
+
+  const getItemsForCategory = (catName = '') => {
+    if (!classroom) return [];
+    const targetKey = getCategoryTargetKey(catName);
+    if (targetKey !== 'customActivities' && classroom[targetKey] && Array.isArray(classroom[targetKey])) {
+      return classroom[targetKey];
+    }
+    const customCat = (classroom.customActivities || []).find(
+      c => c.categoryName?.trim().toLowerCase() === catName?.trim().toLowerCase()
+    );
+    return customCat ? customCat.items || [] : [];
   };
 
   const fetchClassroomData = async () => {
@@ -248,6 +262,7 @@ const ClassroomDetail = () => {
       navigate(`/classroom/${classroomId}/sheet/${targetKey}/${encodeURIComponent(item.title)}`, {
         state: { 
           totalMarks: item.totalMarks, 
+          category: category,
           filterUngraded: filterUngraded, 
           filterUnassigned: filterUngraded 
         }
@@ -317,7 +332,7 @@ const ClassroomDetail = () => {
       const catKey = getCategoryTargetKey(itemCategory);
 
       const payload = {
-        category: catKey,
+        category: itemCategory, // Passing raw category name for custom activities support
         title: trimmedTitle,
         totalMarks: tMarks,
         mode: itemCreationMode
@@ -329,8 +344,8 @@ const ClassroomDetail = () => {
         if (isNaN(start) || isNaN(end) || start > end) {
           throw new Error('Please specify a valid numeric roll suffix range.');
         }
-        payload.startRoll = start;
-        payload.endRoll = end;
+        payload.rangeStart = start;
+        payload.rangeEnd = end;
       }
 
       await API.post(`/classrooms/${classroomId}/items`, payload);
@@ -343,7 +358,7 @@ const ClassroomDetail = () => {
       showToast('Opening grading sheet...');
 
       navigate(`/classroom/${classroomId}/sheet/${catKey}/${encodeURIComponent(trimmedTitle)}`, {
-        state: { totalMarks: tMarks }
+        state: { totalMarks: tMarks, category: itemCategory }
       });
     } catch (err) {
       showToast(err.response?.data?.message || err.message || 'Failed to open student result sheet.', 'error');
@@ -370,7 +385,7 @@ const ClassroomDetail = () => {
     try {
       const formData = new FormData();
       formData.append('file', excelFile);
-      formData.append('category', getCategoryTargetKey(excelCategory));
+      formData.append('category', excelCategory);
       formData.append('title', trimmedTitle);
       formData.append('totalMarks', excelTotalMarks);
 
@@ -701,7 +716,7 @@ const ClassroomDetail = () => {
     ? classroom.sessionalActivities
     : [{ category: 'Quizzes', allocatedMarks: 10 }, { category: 'Assignments', allocatedMarks: 15 }];
 
-  const getItemClassAverage = (targetKey, itemTitle) => {
+  const getItemClassAverage = (targetKey, itemTitle, categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return '0.00';
     
@@ -709,14 +724,23 @@ const ClassroomDetail = () => {
     let totalPossible = 0;
     let count = 0;
 
-    const categoryItems = classroom[targetKey] || [];
+    const categoryItems = getItemsForCategory(categoryName || targetKey);
     const targetItem = categoryItems.find(i => i.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
     const maxMarks = targetItem ? Number(targetItem.totalMarks || 10) : 10;
 
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      let match = null;
+      if (targetKey !== 'customActivities') {
+        const scores = doc[targetKey] || r[targetKey] || [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      } else {
+        const customCat = (doc.customActivities || r.customActivities || []).find(
+          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
+        );
+        const scores = customCat ? customCat.items || [] : [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      }
       
       if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
         totalObtained += Number(match.obtainedMarks);
@@ -729,7 +753,7 @@ const ClassroomDetail = () => {
     return ((totalObtained / totalPossible) * 100).toFixed(2);
   };
 
-  const getItemClassAverageRaw = (targetKey, itemTitle) => {
+  const getItemClassAverageRaw = (targetKey, itemTitle, categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return '0.00';
     
@@ -738,8 +762,17 @@ const ClassroomDetail = () => {
 
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      let match = null;
+      if (targetKey !== 'customActivities') {
+        const scores = doc[targetKey] || r[targetKey] || [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      } else {
+        const customCat = (doc.customActivities || r.customActivities || []).find(
+          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
+        );
+        const scores = customCat ? customCat.items || [] : [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      }
       
       if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
         totalObtained += Number(match.obtainedMarks);
@@ -751,15 +784,24 @@ const ClassroomDetail = () => {
     return (totalObtained / count).toFixed(2);
   };
 
-  const getItemGradedCount = (targetKey, itemTitle) => {
+  const getItemGradedCount = (targetKey, itemTitle, categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return 0;
     let graded = 0;
 
     rankings.forEach(r => {
       const doc = r.marksDoc || r;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      let match = null;
+      if (targetKey !== 'customActivities') {
+        const scores = doc[targetKey] || r[targetKey] || [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      } else {
+        const customCat = (doc.customActivities || r.customActivities || []).find(
+          c => c.categoryName?.trim().toLowerCase() === categoryName?.trim().toLowerCase()
+        );
+        const scores = customCat ? customCat.items || [] : [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
+      }
       
       if (match && ((match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) || match.isAbsent === true)) {
         graded++;
@@ -783,10 +825,12 @@ const ClassroomDetail = () => {
     return { rank: `#${index + 1}`, total: rankings.length };
   };
 
-  const calculateCategoryMarksSummary = (targetKey) => {
+  const calculateCategoryMarksSummary = (catName) => {
     if (!studentMark) return { obtained: 0, total: 0 };
     let obtained = 0;
     let total = 0;
+
+    const targetKey = getCategoryTargetKey(catName);
 
     if (targetKey === 'mids' || targetKey === 'finals') {
       const item = studentMark[targetKey];
@@ -794,14 +838,25 @@ const ClassroomDetail = () => {
         obtained += Number(item.obtainedMarks || 0);
         total += Number(item.totalMarks || 0);
       }
-    } else {
-      const itemsList = studentMark[targetKey] || [];
-      itemsList.forEach(item => {
+    } else if (targetKey !== 'customActivities' && studentMark[targetKey] && Array.isArray(studentMark[targetKey])) {
+      studentMark[targetKey].forEach(item => {
         if (!item.isAbsent) {
           obtained += Number(item.obtainedMarks || 0);
           total += Number(item.totalMarks || 0);
         }
       });
+    } else if (studentMark.customActivities && Array.isArray(studentMark.customActivities)) {
+      const customMatch = studentMark.customActivities.find(
+        c => c.categoryName?.trim().toLowerCase() === catName?.trim().toLowerCase()
+      );
+      if (customMatch && customMatch.items) {
+        customMatch.items.forEach(item => {
+          if (!item.isAbsent) {
+            obtained += Number(item.obtainedMarks || 0);
+            total += Number(item.totalMarks || 0);
+          }
+        });
+      }
     }
     return { obtained, total };
   };
@@ -884,10 +939,10 @@ const ClassroomDetail = () => {
 
     sessionalActivitiesList.forEach(act => {
       const targetKey = getCategoryTargetKey(act.category);
-      const items = classroom[targetKey] || [];
+      const items = getItemsForCategory(act.category);
       totalItemsCount += items.length;
       items.forEach(item => {
-        totalGradedSoFar += getItemGradedCount(targetKey, item.title);
+        totalGradedSoFar += getItemGradedCount(targetKey, item.title, act.category);
       });
     });
 
@@ -1042,8 +1097,7 @@ const ClassroomDetail = () => {
           )}
 
           {sessionalActivitiesList.map((act) => {
-            const targetKey = getCategoryTargetKey(act.category);
-            const count = (classroom[targetKey] || []).length;
+            const count = getItemsForCategory(act.category).length;
             return (
               <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-2 ${activeTab === act.category.toLowerCase() ? 'bg-orange-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
                 <span>📁 {act.category}</span>
@@ -1081,34 +1135,20 @@ const ClassroomDetail = () => {
                   <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
                     <p className="text-xs font-bold uppercase text-slate-300">Your Breakdown Across All Categories</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                      <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1">
-                        <span className="text-[10px] text-slate-400 block uppercase font-bold">Quizzes</span>
-                        <div className="flex items-baseline justify-between">
-                          <span className="font-mono font-black text-orange-400 text-sm">{studentAnalyticsData.quizzes}%</span>
-                          <span className="text-[10px] text-slate-400 font-mono">({calculateCategoryMarksSummary('quizzes').obtained}/{calculateCategoryMarksSummary('quizzes').total})</span>
-                        </div>
-                      </div>
-                      <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1">
-                        <span className="text-[10px] text-slate-400 block uppercase font-bold">Assignments</span>
-                        <div className="flex items-baseline justify-between">
-                          <span className="font-mono font-black text-amber-400 text-sm">{studentAnalyticsData.assignments}%</span>
-                          <span className="text-[10px] text-slate-400 font-mono">({calculateCategoryMarksSummary('assignments').obtained}/{calculateCategoryMarksSummary('assignments').total})</span>
-                        </div>
-                      </div>
-                      <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1">
-                        <span className="text-[10px] text-slate-400 block uppercase font-bold">Mids</span>
-                        <div className="flex items-baseline justify-between">
-                          <span className="font-mono font-black text-rose-400 text-sm">{studentAnalyticsData.mids}%</span>
-                          <span className="text-[10px] text-slate-400 font-mono">({calculateCategoryMarksSummary('mids').obtained}/{calculateCategoryMarksSummary('mids').total})</span>
-                        </div>
-                      </div>
-                      <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1">
-                        <span className="text-[10px] text-slate-400 block uppercase font-bold">Finals</span>
-                        <div className="flex items-baseline justify-between">
-                          <span className="font-mono font-black text-emerald-400 text-sm">{studentAnalyticsData.finals}%</span>
-                          <span className="text-[10px] text-slate-400 font-mono">({calculateCategoryMarksSummary('finals').obtained}/{calculateCategoryMarksSummary('finals').total})</span>
-                        </div>
-                      </div>
+                      {sessionalActivitiesList.map(act => {
+                        const summary = calculateCategoryMarksSummary(act.category);
+                        return (
+                          <div key={act.category} className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1">
+                            <span className="text-[10px] text-slate-400 block uppercase font-bold truncate">{act.category}</span>
+                            <div className="flex items-baseline justify-between">
+                              <span className="font-mono font-black text-orange-400 text-sm">
+                                {summary.total > 0 ? ((summary.obtained / summary.total) * 100).toFixed(2) : '0.00'}%
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">({summary.obtained}/{summary.total})</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1129,24 +1169,10 @@ const ClassroomDetail = () => {
                     </div>
                   </div>
                   <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
-                    <p className="text-xs font-bold uppercase text-slate-300">Deep Category Breakdown (Class Averages)</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                      <div className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
-                        <span className="text-[10px] text-slate-400 block uppercase">Overall Avg</span>
-                        <span className="font-mono font-bold text-amber-400 text-sm">{classAnalytics?.classAverages?.overallPercentage ?? 0}%</span>
-                      </div>
-                      <div className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
-                        <span className="text-[10px] text-slate-400 block uppercase">Quizzes Avg</span>
-                        <span className="font-mono font-bold text-orange-400 text-sm">{classAnalytics?.classAverages?.quizPercentage ?? 0}%</span>
-                      </div>
-                      <div className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
-                        <span className="text-[10px] text-slate-400 block uppercase">Assignments Avg</span>
-                        <span className="font-mono font-bold text-rose-400 text-sm">{classAnalytics?.classAverages?.assignmentPercentage ?? 0}%</span>
-                      </div>
-                      <div className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
-                        <span className="text-[10px] text-slate-400 block uppercase">Mids Avg</span>
-                        <span className="font-mono font-bold text-amber-400 text-sm">{classAnalytics?.classAverages?.midsPercentage ?? 0}%</span>
-                      </div>
+                    <p className="text-xs font-bold uppercase text-slate-300">Deep Class Metrics Overview</p>
+                    <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                      <span className="text-xs text-slate-400 uppercase font-bold">Overall Class Average</span>
+                      <span className="font-mono font-black text-amber-400 text-sm">{classAnalytics?.classAverages?.overallPercentage ?? 0}%</span>
                     </div>
                   </div>
                 </div>
@@ -1295,7 +1321,7 @@ const ClassroomDetail = () => {
           const cat = act.category;
           if (activeTab !== cat.toLowerCase()) return null;
           const targetKey = getCategoryTargetKey(cat);
-          const itemsList = [...(classroom[targetKey] || [])].reverse();
+          const itemsList = [...getItemsForCategory(cat)].reverse();
 
           return (
             <div key={cat} className="bg-[#130910]/90 backdrop-blur-2xl border border-orange-500/20 rounded-3xl p-6 space-y-4 shadow-xl">
@@ -1308,10 +1334,21 @@ const ClassroomDetail = () => {
               ) : (
                 <div className="space-y-4">
                   {itemsList.map((item, idx) => {
-                    const studentItemScore = (studentMark?.[targetKey] || []).find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
-                    const itemAvgPct = getItemClassAverage(targetKey, item.title);
-                    const itemAvgRaw = getItemClassAverageRaw(targetKey, item.title);
-                    const gradedCount = getItemGradedCount(targetKey, item.title);
+                    let studentItemScore = null;
+                    if (studentMark) {
+                      if (targetKey !== 'customActivities' && studentMark[targetKey]) {
+                        studentItemScore = studentMark[targetKey].find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
+                      } else if (studentMark.customActivities) {
+                        const customCat = studentMark.customActivities.find(c => c.categoryName?.trim().toLowerCase() === cat.trim().toLowerCase());
+                        if (customCat && customCat.items) {
+                          studentItemScore = customCat.items.find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
+                        }
+                      }
+                    }
+
+                    const itemAvgPct = getItemClassAverage(targetKey, item.title, cat);
+                    const itemAvgRaw = getItemClassAverageRaw(targetKey, item.title, cat);
+                    const gradedCount = getItemGradedCount(targetKey, item.title, cat);
                     const ungradedCount = Math.max(0, totalStudentsCount - gradedCount);
 
                     const obtained = studentItemScore?.obtainedMarks ?? 0;
@@ -1517,7 +1554,7 @@ const ClassroomDetail = () => {
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Item Title</label>
-                <input type="text" required placeholder="e.g. Quiz 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                <input type="text" required placeholder="e.g. Lab Task 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
@@ -1581,7 +1618,7 @@ const ClassroomDetail = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Evaluation Title</label>
-                  <input type="text" required placeholder="e.g. Quiz 1 or Assignment 2" value={excelTitle} onChange={(e) => setExcelTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                  <input type="text" required placeholder="e.g. Lab Task 1" value={excelTitle} onChange={(e) => setExcelTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
@@ -1890,7 +1927,7 @@ const ClassroomDetail = () => {
                 
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                   {editSessionalActivities.map((act, index) => {
-                    const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs'];
+                    const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs', 'Lab Tasks', 'Vivas', 'Lab Tests'];
                     const isCustom = !presetOptions.includes(act.category);
 
                     return (

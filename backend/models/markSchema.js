@@ -8,7 +8,7 @@ const getPercentage = (obtained = 0, total = 0) => {
 const getArrayTotals = (items = []) => {
   return items.reduce(
     (acc, curr) => {
-      acc.obtained += curr.obtainedMarks || 0;
+      acc.obtained += (curr.isAbsent ? 0 : (curr.obtainedMarks || 0));
       acc.total += curr.totalMarks || 0;
       return acc;
     },
@@ -29,7 +29,6 @@ const getPucitLetterGrade = (percentage, hasFinalsOrMids) => {
   return 'F';
 };
 
-// Sub-schema for Cloudinary File Metadata
 const cloudinaryFileSchema = new mongoose.Schema(
   {
     url: { type: String, default: "" },
@@ -39,6 +38,15 @@ const cloudinaryFileSchema = new mongoose.Schema(
   },
   { _id: false }
 );
+
+const individualMarkSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  totalMarks: { type: Number, required: true, min: 1 },
+  obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
+  isAbsent: { type: Boolean, default: false },
+  percentage: { type: Number, default: 0 },
+  file: { type: cloudinaryFileSchema, default: () => ({}) },
+}, { _id: true });
 
 const markSchema = new mongoose.Schema(
   {
@@ -54,36 +62,7 @@ const markSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    quizzes: [
-      {
-        title: { type: String, required: true, trim: true },
-        totalMarks: { type: Number, required: true, min: 1 },
-        obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
-        isAbsent: { type: Boolean, default: false },
-        percentage: { type: Number, default: 0 },
-        file: { type: cloudinaryFileSchema, default: () => ({}) },
-      },
-    ],
-    assignments: [
-      {
-        title: { type: String, required: true, trim: true },
-        totalMarks: { type: Number, required: true, min: 1 },
-        obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
-        isAbsent: { type: Boolean, default: false },
-        percentage: { type: Number, default: 0 },
-        file: { type: cloudinaryFileSchema, default: () => ({}) },
-      },
-    ],
-    labMarks: [
-      {
-        title: { type: String, required: true, trim: true },
-        totalMarks: { type: Number, required: true, min: 1 },
-        obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
-        isAbsent: { type: Boolean, default: false },
-        percentage: { type: Number, default: 0 },
-        file: { type: cloudinaryFileSchema, default: () => ({}) },
-      },
-    ],
+    // Standard and custom category arrays will be stored dynamically here thanks to strict: false
     mids: {
       totalMarks: { type: Number, default: 0, min: 0 },
       obtainedMarks: { type: Number, default: 0, min: 0 },
@@ -98,34 +77,66 @@ const markSchema = new mongoose.Schema(
       percentage: { type: Number, default: 0 },
       file: { type: cloudinaryFileSchema, default: () => ({}) },
     },
-
-    categoryPercentages: {
-      quizPercentage: { type: Number, default: 0 },
-      assignmentPercentage: { type: Number, default: 0 },
-      sessionalPercentage: { type: Number, default: 0 },
-      labPercentage: { type: Number, default: 0 },
-      midsPercentage: { type: Number, default: 0 },
-      finalsPercentage: { type: Number, default: 0 },
-    },
+    categoryPercentages: { type: Map, of: Number, default: {} },
     studentClassPercentage: { type: Number, default: 0 },
     letterGrade: { type: String, default: 'In Progress (Sessional)' },
   },
-  { timestamps: true }
+  { timestamps: true, strict: false } // strict: false allows dynamic category arrays like labTasks, vivas, custom categories
 );
 
 markSchema.index({ classroom: 1, student: 1 }, { unique: true });
 
-// FIXED: Weighted percentage calculation incorporating Classroom grading scheme weights
+// Helper to normalize category names into schema keys (e.g. "Lab Tasks" -> "labTasks")
+const getCategoryTargetKey = (catName = '') => {
+  const clean = catName.trim().toLowerCase();
+  if (clean.includes('task')) return 'labTasks';
+  if (clean.includes('viva')) return 'vivas';
+  if (clean.includes('test')) return 'labTests';
+  if (clean.includes('project')) return 'projects';
+  if (clean.includes('quiz')) return 'quizzes';
+  if (clean.includes('assign')) return 'assignments';
+  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
+};
+
 markSchema.pre("save", async function () {
-  // Handle Absence logic and individual percentages
-  ["quizzes", "assignments", "labMarks"].forEach((category) => {
-    if (this[category] && this[category].length > 0) {
-      this[category].forEach((item) => {
+  let classroom = null;
+  try {
+    classroom = await Classroom.findById(this.classroom).lean();
+  } catch (err) {
+    console.warn("Could not fetch classroom in markSchema pre-save:", err.message);
+  }
+
+  const sessionalActivities = classroom?.sessionalActivities || [
+    { category: 'Quizzes', allocatedMarks: 10 },
+    { category: 'Assignments', allocatedMarks: 15 },
+    { category: 'Lab Tasks', allocatedMarks: 50 }
+  ];
+
+  let totalAllocatedWeight = 0;
+  let weightedEarnedSum = 0;
+  let catPercentagesMap = {};
+
+  // Process all dynamic category arrays present in classroom definition or document
+  sessionalActivities.forEach((act) => {
+    const targetKey = getCategoryTargetKey(act.category);
+    const allocatedWeight = Number(act.allocatedMarks || 0);
+    totalAllocatedWeight += allocatedWeight;
+
+    if (this[targetKey] && Array.isArray(this[targetKey])) {
+      this[targetKey].forEach((item) => {
         if (item.isAbsent) {
           item.obtainedMarks = 0;
         }
         item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
       });
+
+      const totals = getArrayTotals(this[targetKey]);
+      const catPct = getPercentage(totals.obtained, totals.total);
+      catPercentagesMap[targetKey] = catPct;
+      weightedEarnedSum += (catPct * allocatedWeight);
+    } else {
+      catPercentagesMap[targetKey] = 0;
     }
   });
 
@@ -139,79 +150,39 @@ markSchema.pre("save", async function () {
     this.finals.percentage = getPercentage(this.finals.obtainedMarks, this.finals.totalMarks);
   }
 
-  const quizTotals = getArrayTotals(this.quizzes);
-  const assignTotals = getArrayTotals(this.assignments);
-  const labTotals = getArrayTotals(this.labMarks);
-
-  const quizPct = getPercentage(quizTotals.obtained, quizTotals.total);
-  const assignPct = getPercentage(assignTotals.obtained, assignTotals.total);
-  const labPct = getPercentage(labTotals.obtained, labTotals.total);
-  const midsPct = getPercentage(this.mids?.obtainedMarks, this.mids?.totalMarks);
-  const finalsPct = getPercentage(this.finals?.obtainedMarks, this.finals?.totalMarks);
-
-  // Combine quizzes and assignments for sessional percentage
-  const sessionalObtained = quizTotals.obtained + assignTotals.obtained;
-  const sessionalTotal = quizTotals.total + assignTotals.total;
-  const sessionalPct = getPercentage(sessionalObtained, sessionalTotal);
-
-  this.categoryPercentages = {
-    quizPercentage: quizPct,
-    assignmentPercentage: assignPct,
-    sessionalPercentage: sessionalPct,
-    labPercentage: labPct,
-    midsPercentage: midsPct,
-    finalsPercentage: finalsPct,
-  };
-
-  // Fetch classroom grading weights (defaults: 25% sessional, 35% mids, 40% finals)
-  let sessionalWeight = 25;
-  let midsWeight = 35;
-  let finalsWeight = 40;
-  let courseType = 'CLASSROOM';
-
-  try {
-    const classroom = await Classroom.findById(this.classroom).lean();
-    if (classroom) {
-      courseType = classroom.courseType || 'CLASSROOM';
-      if (classroom.gradingScheme) {
-        sessionalWeight = classroom.gradingScheme.sessionalWeight ?? 25;
-        midsWeight = classroom.gradingScheme.midsWeight ?? 35;
-        finalsWeight = classroom.gradingScheme.finalsWeight ?? 40;
-      }
-    }
-  } catch (err) {
-    console.warn("Could not fetch classroom grading weights in markSchema pre-save:", err.message);
-  }
+  let sessionalWeight = classroom?.gradingScheme?.sessionalWeight ?? 25;
+  let midsWeight = classroom?.gradingScheme?.midsWeight ?? 35;
+  let finalsWeight = classroom?.gradingScheme?.finalsWeight ?? 40;
+  let courseType = classroom?.courseType || 'CLASSROOM';
 
   let finalPercentage = 0;
 
   if (courseType === 'LAB') {
-    // Labs are usually 100% based on lab performance/finals
-    finalPercentage = labPct > 0 ? labPct : getPercentage(labTotals.obtained, labTotals.total);
+    finalPercentage = totalAllocatedWeight > 0 ? Number((weightedEarnedSum / totalAllocatedWeight).toFixed(2)) : 0;
   } else {
-    // Dynamically calculate weighted average based on available components
     let activeWeightSum = 0;
     let weightedScoreSum = 0;
 
-    if (sessionalTotal > 0) {
-      weightedScoreSum += sessionalPct * sessionalWeight;
+    const calculatedSessionalPct = totalAllocatedWeight > 0 ? (weightedEarnedSum / totalAllocatedWeight) * 100 : 0;
+    if (totalAllocatedWeight > 0) {
+      weightedScoreSum += calculatedSessionalPct * sessionalWeight;
       activeWeightSum += sessionalWeight;
     }
     if ((this.mids?.totalMarks || 0) > 0) {
-      weightedScoreSum += midsPct * midsWeight;
+      weightedScoreSum += (this.mids.percentage || 0) * midsWeight;
       activeWeightSum += midsWeight;
     }
     if ((this.finals?.totalMarks || 0) > 0) {
-      weightedScoreSum += finalsPct * finalsWeight;
+      weightedScoreSum += (this.finals.percentage || 0) * finalsWeight;
       activeWeightSum += finalsWeight;
     }
 
     finalPercentage = activeWeightSum > 0 ? Number((weightedScoreSum / activeWeightSum).toFixed(2)) : 0;
   }
 
+  this.categoryPercentages = catPercentagesMap;
   this.studentClassPercentage = finalPercentage;
 
-  // Check if finals or mids have been uploaded before assigning final letter grade
   const hasFinalsOrMids = (this.finals?.totalMarks > 0) || (this.mids?.totalMarks > 0);
   this.letterGrade = getPucitLetterGrade(this.studentClassPercentage, hasFinalsOrMids);
 });

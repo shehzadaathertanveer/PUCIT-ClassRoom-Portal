@@ -5,7 +5,25 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 
-const VALID_CATEGORIES = ['quizzes', 'assignments', 'mids', 'finals'];
+// Helper: Normalize Schema Target Keys Safely (Supports Custom Sessional Activities)
+const getNormalizedTargetKey = (rawType = '') => {
+  const clean = rawType.trim().toLowerCase();
+  if (clean.includes('task')) return 'labTasks';
+  if (clean.includes('viva')) return 'vivas';
+  if (clean.includes('test')) return 'labTests';
+  if (clean.includes('project')) return 'projects';
+  if (clean.includes('quiz') || clean.includes('quizzes')) return 'quizzes';
+  if (clean.includes('assign')) return 'assignments';
+  if (clean.includes('lab')) return 'labMarks';
+  if (clean === 'mids' || clean === 'midterm') return 'mids';
+  if (clean === 'finals' || clean === 'final') return 'finals';
+  
+  // Dynamic normalization for custom activities (e.g., "Homework" -> "homeworks")
+  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
+};
+
+const VALID_CATEGORIES = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects', 'mids', 'finals'];
 
 // Helper: Normalizes singular/plural category inputs from frontend UI variants
 const CATEGORY_MAP = {
@@ -13,8 +31,20 @@ const CATEGORY_MAP = {
   quizzes: 'quizzes',
   assignment: 'assignments',
   assignments: 'assignments',
+  labmark: 'labMarks',
+  labmarks: 'labMarks',
+  labtask: 'labTasks',
+  labtasks: 'labTasks',
+  viva: 'vivas',
+  vivas: 'vivas',
+  labtest: 'labTests',
+  labtests: 'labTests',
+  project: 'projects',
+  projects: 'projects',
   mids: 'mids',
+  midterm: 'mids',
   finals: 'finals',
+  final: 'finals',
 };
 
 // Helper: Extract numbers safely for sorting (e.g., BITF25A012 -> 12)
@@ -88,6 +118,14 @@ exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
         sectionPrefix: classroom.sectionPrefix,
         quizzes: classroom.quizzes,
         assignments: classroom.assignments,
+        labMarks: classroom.labMarks,
+        labTasks: classroom.labTasks,
+        vivas: classroom.vivas,
+        labTests: classroom.labTests,
+        projects: classroom.projects,
+        mids: classroom.mids,
+        finals: classroom.finals,
+        sessionalActivities: classroom.sessionalActivities
       },
       students: sortedStudents,
       existingMarks,
@@ -107,11 +145,7 @@ exports.getUnassignedStudents = catchAsync(async (req, res, next) => {
   }
 
   const cleanCategory = category.trim().toLowerCase();
-  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
-
-  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
-    return next(new AppError('Invalid evaluation category provided!', 400));
-  }
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
     .populate('students', 'name rollNo email personalNotificationEmail')
@@ -173,9 +207,10 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
   const markDocs = await Mark.find({ classroom: classroomId }).lean();
   const gradedCountMap = {};
 
+  const trackingCategories = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects'];
   markDocs.forEach(doc => {
     const studentId = doc.student.toString();
-    ['quizzes', 'assignments'].forEach(cat => {
+    trackingCategories.forEach(cat => {
       if (Array.isArray(doc[cat])) {
         doc[cat].forEach(item => {
           if (item.title && item.totalMarks > 0) {
@@ -191,7 +226,12 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
   const pendingActivities = [];
   const checkListCategories = [
     { key: 'quizzes', items: classroom.quizzes || [] },
-    { key: 'assignments', items: classroom.assignments || [] }
+    { key: 'assignments', items: classroom.assignments || [] },
+    { key: 'labMarks', items: classroom.labMarks || [] },
+    { key: 'labTasks', items: classroom.labTasks || [] },
+    { key: 'vivas', items: classroom.vivas || [] },
+    { key: 'labTests', items: classroom.labTests || [] },
+    { key: 'projects', items: classroom.projects || [] }
   ];
 
   checkListCategories.forEach(catGroup => {
@@ -244,8 +284,8 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     }
   });
 
-  let sumQuiz = 0, sumAssign = 0, sumSessional = 0, sumMids = 0, sumFinals = 0, sumOverall = 0;
-  let quizCount = 0, assignCount = 0, sessionalCount = 0, midsCount = 0, finalsCount = 0, overallCount = 0;
+  let sumSessional = 0, sumMids = 0, sumFinals = 0, sumOverall = 0;
+  let sessionalCount = 0, midsCount = 0, finalsCount = 0, overallCount = 0;
 
   const tiers = { excellent: 0, good: 0, average: 0, needsImprovement: 0 };
   const gradingScheme = classroom.gradingScheme || { sessionalWeight: 25, midsWeight: 35, finalsWeight: 40 };
@@ -255,41 +295,30 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     const doc = markMap.get(studentIdStr) || { 
       quizzes: [], 
       assignments: [], 
+      labMarks: [],
+      labTasks: [],
+      vivas: [],
+      labTests: [],
+      projects: [],
       mids: { totalMarks: 0, obtainedMarks: 0 }, 
       finals: { totalMarks: 0, obtainedMarks: 0 } 
     };
 
-    let qObt = 0, qTot = 0;
-    if (Array.isArray(doc.quizzes)) {
-      doc.quizzes.forEach(q => {
-        if (!q.isAbsent) qObt += (Number(q.obtainedMarks) || 0);
-        qTot += (Number(q.totalMarks) || 0);
-      });
-    }
-    const quizPercentage = qTot > 0 ? (qObt / qTot) * 100 : 0;
-    if (qTot > 0) { sumQuiz += quizPercentage; quizCount++; }
+    let totalObtSessional = 0;
+    let totalTotSessional = 0;
 
-    let aObt = 0, aTot = 0;
-    if (Array.isArray(doc.assignments)) {
-      doc.assignments.forEach(a => {
-        if (!a.isAbsent) aObt += (Number(a.obtainedMarks) || 0);
-        aTot += (Number(a.totalMarks) || 0);
-      });
-    }
-    const assignmentPercentage = aTot > 0 ? (aObt / aTot) * 100 : 0;
-    if (aTot > 0) { sumAssign += assignmentPercentage; assignCount++; }
+    const evaluationCategories = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects'];
+    evaluationCategories.forEach(cat => {
+      if (Array.isArray(doc[cat])) {
+        doc[cat].forEach(item => {
+          if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
+          totalTotSessional += (Number(item.totalMarks) || 0);
+        });
+      }
+    });
 
-    const hasQuizzes = qTot > 0;
-    const hasAssignments = aTot > 0;
-    let sessionalPercentage = 0;
-    if (hasQuizzes && hasAssignments) {
-      sessionalPercentage = (quizPercentage + assignmentPercentage) / 2;
-    } else if (hasQuizzes) {
-      sessionalPercentage = quizPercentage;
-    } else if (hasAssignments) {
-      sessionalPercentage = assignmentPercentage;
-    }
-    if (hasQuizzes || hasAssignments) { 
+    const sessionalPercentage = totalTotSessional > 0 ? (totalObtSessional / totalTotSessional) * 100 : 0;
+    if (totalTotSessional > 0) { 
       sumSessional += sessionalPercentage; 
       sessionalCount++; 
     }
@@ -321,8 +350,6 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     return {
       student: { _id: st._id, name: st.name, rollNo: st.rollNo },
       sessionalPercentage: Number(sessionalPercentage.toFixed(2)),
-      quizPercentage: Number(quizPercentage.toFixed(2)),
-      assignmentPercentage: Number(assignmentPercentage.toFixed(2)),
       midsPercentage: Number(midsPercentage.toFixed(2)),
       finalsPercentage: Number(finalsPercentage.toFixed(2)),
       overallPercentage: Number(overallPercentage.toFixed(2)),
@@ -333,8 +360,6 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
   rankings.sort((a, b) => b.overallPercentage - a.overallPercentage);
 
   const classAverages = {
-    quizPercentage: quizCount > 0 ? Number((sumQuiz / quizCount).toFixed(2)) : 0,
-    assignmentPercentage: assignCount > 0 ? Number((sumAssign / assignCount).toFixed(2)) : 0,
     sessionalPercentage: sessionalCount > 0 ? Number((sumSessional / sessionalCount).toFixed(2)) : 0,
     midsPercentage: midsCount > 0 ? Number((sumMids / midsCount).toFixed(2)) : 0,
     finalsPercentage: finalsCount > 0 ? Number((sumFinals / finalsCount).toFixed(2)) : 0,
@@ -361,7 +386,7 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   }
 
   const cleanCategory = category.trim().toLowerCase();
-  const targetCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+  const targetCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   const studentMarksDocs = await Mark.find({ classroom: classroomId });
   const markMap = {};
@@ -414,11 +439,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   }
 
   const cleanCategory = (category || '').trim().toLowerCase();
-  const targetCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
-
-  if (!VALID_CATEGORIES.includes(targetCategory)) {
-    return next(new AppError('Invalid category specified!', 400));
-  }
+  const targetCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   const parsedTotal = Number(totalMarks) || 10;
   let cleanTitle = (title || '').trim();
@@ -446,7 +467,6 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       const rawVal = m.obtainedMarks !== undefined ? String(m.obtainedMarks).trim() : '';
       const isAbsent = Boolean(m.isAbsent) || rawVal.toUpperCase() === 'A';
       
-      // Only process and notify students who actually have an entered score or absence flag
       if (!isAbsent && (rawVal === '' || rawVal === null || isNaN(Number(rawVal)))) {
         continue;
       }
@@ -458,6 +478,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           student: studentId,
           quizzes: [],
           assignments: [],
+          labMarks: [],
         });
       }
 
@@ -494,7 +515,6 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
     }
   }
 
-  // Dispatch email notifications STRICTLY to the newly graded/updated students
   if (updatedStudentIds.length > 0) {
     const newlyGradedStudents = await User.find({ _id: { $in: updatedStudentIds } }).select('name email personalNotificationEmail').lean();
     
@@ -535,11 +555,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   const { classroomId, category, title, totalMarks, marksData } = req.body;
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
-  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
-
-  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
-    return next(new AppError('Invalid evaluation category provided!', 400));
-  }
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   if (!classroomId || totalMarks === undefined || !Array.isArray(marksData) || marksData.length === 0) {
     return next(new AppError('Classroom ID, Total Marks (>0), and Marks Data array are required!', 400));
@@ -624,6 +640,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         student: studentId,
         quizzes: [],
         assignments: [],
+        labMarks: [],
       });
     }
 
@@ -724,11 +741,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   const isAbsentFlag = Boolean(req.body.isAbsent);
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
-  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
-
-  if (!VALID_CATEGORIES.includes(resolvedCategory)) {
-    return next(new AppError('Invalid category specified!', 400));
-  }
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   const [classroom, student] = await Promise.all([
     Classroom.findById(classroomId).lean(),
@@ -745,6 +758,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       student: studentId,
       quizzes: [],
       assignments: [],
+      labMarks: [],
     });
   }
 
@@ -812,7 +826,6 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
 
   await markDoc.save();
 
-  // Single notification targeted strictly to this specific student (Prevents bulk email spam)
   const studentEmail = student.personalNotificationEmail || student.email;
   const displayTitle = itemTitle || resolvedCategory;
   if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
@@ -848,7 +861,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   const { classroomId, category, itemTitle } = req.body;
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
-  const resolvedCategory = CATEGORY_MAP[cleanCategory] || cleanCategory;
+  const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
 
   if (!classroomId || !resolvedCategory || !itemTitle) {
     return next(new AppError('Classroom ID, Category, and Item Title are required!', 400));
@@ -898,6 +911,7 @@ exports.getStudentMarks = catchAsync(async (req, res, next) => {
       student: studentId,
       quizzes: [],
       assignments: [],
+      labMarks: [],
     });
     
     markDoc = await Mark.findById(markDoc._id)

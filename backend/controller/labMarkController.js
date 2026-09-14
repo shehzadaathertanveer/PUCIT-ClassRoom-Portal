@@ -7,7 +7,7 @@ const sendStyledEmail = require('../utils/emailService');
 
 const VALID_STANDARD_CATEGORIES = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
 
-// Helper: Normalizes input categories to match schema arrays
+// Helper: Normalizes input categories to match schema arrays or custom categories
 const RESOLVE_LAB_CATEGORY = (raw = '') => {
   const clean = raw.trim().toLowerCase();
   if (clean.includes('task')) return 'labTasks';
@@ -17,7 +17,12 @@ const RESOLVE_LAB_CATEGORY = (raw = '') => {
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
   if (clean.includes('lab')) return 'labTasks';
-  return clean.endsWith('s') ? clean : clean + 's';
+  
+  const potentialKey = clean.endsWith('s') ? clean : clean + 's';
+  if (VALID_STANDARD_CATEGORIES.includes(potentialKey)) return potentialKey;
+
+  // Fallback indicator for dynamic custom activities
+  return 'customActivities';
 };
 
 // Helper: Extract numbers safely for sorting roll numbers (e.g., BITF25A012 -> 12)
@@ -218,6 +223,26 @@ exports.getPendingLabActivities = catchAsync(async (req, res, next) => {
     });
   });
 
+  if (Array.isArray(labroom.customActivities)) {
+    labroom.customActivities.forEach(catGroup => {
+      catGroup.items.forEach(item => {
+        const key = `custom:${catGroup.categoryName.trim().toLowerCase()}:${item.title.trim().toLowerCase()}`;
+        const gradedSet = gradedCountMap[key] || new Set();
+        const remainingCount = totalStudentsCount - gradedSet.size;
+
+        if (remainingCount > 0) {
+          pendingActivities.push({
+            category: catGroup.categoryName,
+            title: item.title,
+            totalStudents: totalStudentsCount,
+            gradedCount: gradedSet.size,
+            remainingCount
+          });
+        }
+      });
+    });
+  }
+
   res.status(200).json({
     status: 'success',
     data: { pendingActivities }
@@ -297,13 +322,25 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
       const targetKey = RESOLVE_LAB_CATEGORY(act.category);
       let catObt = 0;
       let catPoss = 0;
-      const items = doc[targetKey] || [];
-      items.forEach(item => {
-        if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
-          catObt += Number(item.obtainedMarks) || 0;
-        }
-        catPoss += Number(item.totalMarks) || 0;
-      });
+
+      if (targetKey !== 'customActivities') {
+        const items = doc[targetKey] || [];
+        items.forEach(item => {
+          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
+            catObt += Number(item.obtainedMarks) || 0;
+          }
+          catPoss += Number(item.totalMarks) || 0;
+        });
+      } else {
+        const customCat = (doc.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === act.category.trim().toLowerCase());
+        const items = customCat ? customCat.items || [] : [];
+        items.forEach(item => {
+          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
+            catObt += Number(item.obtainedMarks) || 0;
+          }
+          catPoss += Number(item.totalMarks) || 0;
+        });
+      }
 
       totalObtained += catObt;
       totalPossible += catPoss;
@@ -367,10 +404,18 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   let headerActivityCols = [];
   sActivities.forEach(act => {
     const targetKey = RESOLVE_LAB_CATEGORY(act.category);
-    const items = labroom[targetKey] || [];
-    items.forEach(item => {
-      headerActivityCols.push({ category: act.category, targetKey, title: item.title, max: item.totalMarks || 10 });
-    });
+    if (targetKey !== 'customActivities') {
+      const items = labroom[targetKey] || [];
+      items.forEach(item => {
+        headerActivityCols.push({ category: act.category, targetKey, title: item.title, max: item.totalMarks || 10, isCustom: false });
+      });
+    } else {
+      const customCat = (labroom.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === act.category.trim().toLowerCase());
+      const items = customCat ? customCat.items || [] : [];
+      items.forEach(item => {
+        headerActivityCols.push({ category: act.category, targetKey: 'customActivities', title: item.title, max: item.totalMarks || 10, isCustom: true });
+      });
+    }
   });
 
   let csvRows = [];
@@ -403,23 +448,44 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
     let totalPossAll = 0;
 
     headerActivityCols.forEach(col => {
-      const scores = doc[col.targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === col.title?.trim().toLowerCase());
+      let match = null;
+      if (!col.isCustom) {
+        const scores = doc[col.targetKey] || [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === col.title?.trim().toLowerCase());
+      } else {
+        const customCat = (doc.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === col.category.trim().toLowerCase());
+        const scores = customCat ? customCat.items || [] : [];
+        match = scores.find(s => s.title?.trim().toLowerCase() === col.title?.trim().toLowerCase());
+      }
+
       const markVal = (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null) ? match.obtainedMarks : 0;
       rowData.push(markVal);
     });
 
     sActivities.forEach(act => {
       const targetKey = RESOLVE_LAB_CATEGORY(act.category);
-      const scores = doc[targetKey] || [];
       let catObt = 0;
       let catPoss = 0;
-      scores.forEach(s => {
-        if (!s.isAbsent && s.obtainedMarks !== undefined && s.obtainedMarks !== null) {
-          catObt += Number(s.obtainedMarks) || 0;
-        }
-        catPoss += Number(s.totalMarks) || 0;
-      });
+
+      if (targetKey !== 'customActivities') {
+        const scores = doc[targetKey] || [];
+        scores.forEach(s => {
+          if (!s.isAbsent && s.obtainedMarks !== undefined && s.obtainedMarks !== null) {
+            catObt += Number(s.obtainedMarks) || 0;
+          }
+          catPoss += Number(s.totalMarks) || 0;
+        });
+      } else {
+        const customCat = (doc.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === act.category.trim().toLowerCase());
+        const scores = customCat ? customCat.items || [] : [];
+        scores.forEach(s => {
+          if (!s.isAbsent && s.obtainedMarks !== undefined && s.obtainedMarks !== null) {
+            catObt += Number(s.obtainedMarks) || 0;
+          }
+          catPoss += Number(s.totalMarks) || 0;
+        });
+      }
+
       totalObtAll += catObt;
       totalPossAll += catPoss;
       const catPct = catPoss > 0 ? ((catObt / catPoss) * 100).toFixed(2) : '0.00';
@@ -500,7 +566,6 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   }
   await labroom.save();
 
-  // Filter only entries that have an actual grade or absence flag provided (Ignores empty inputs for remaining students)
   const validEntries = marksData.map(item => ({
     studentId: item.studentId || item.student || item._id,
     obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score)
@@ -602,7 +667,6 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   await Promise.all(docsToSave.map(d => d.save()));
 
-  // Send emails STRICTLY to the newly graded/submitted students
   await Promise.all(
     emailList.map(async (m) => {
       try {
@@ -693,7 +757,6 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
 
   await markDoc.save();
 
-  // Single notification targeted strictly to this specific student (Prevents bulk email spam)
   const studentEmail = student.personalNotificationEmail || student.email;
   if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     try {
@@ -760,7 +823,8 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   }
 
   const cleanTitle = itemTitle.trim();
-  const standardKey = RESOLVE_LAB_CATEGORY(category);
+  const cleanCategory = category.trim();
+  const standardKey = RESOLVE_LAB_CATEGORY(cleanCategory);
 
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
@@ -776,10 +840,26 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
       { $pull: { [standardKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
     );
   } else {
-    labroom.customActivities.forEach(cat => {
-      cat.items = (cat.items || []).filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
-    });
-    await labroom.save();
+    if (Array.isArray(labroom.customActivities)) {
+      labroom.customActivities.forEach(cat => {
+        if (cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
+          cat.items = (cat.items || []).filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
+        }
+      });
+      await labroom.save();
+    }
+
+    const markDocs = await LabMark.find({ labroom: labroomId });
+    for (const doc of markDocs) {
+      if (Array.isArray(doc.customActivities)) {
+        doc.customActivities.forEach(cat => {
+          if (cat.categoryName.toLowerCase() === cleanCategory.toLowerCase()) {
+            cat.items = (cat.items || []).filter(i => i.title.toLowerCase() !== cleanTitle.toLowerCase());
+          }
+        });
+        await doc.save();
+      }
+    }
   }
 
   res.status(200).json({

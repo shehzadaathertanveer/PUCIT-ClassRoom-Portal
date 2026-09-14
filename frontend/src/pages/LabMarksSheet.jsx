@@ -43,25 +43,45 @@ const LabMarksSheet = () => {
     setTimeout(() => setToastMessage(''), 2500);
   };
 
+  // Helper matching LabroomDetail's robust category mapping for preset & custom subjects
+  const getCategoryTargetKey = (catName = '') => {
+    const clean = catName.trim().toLowerCase();
+    if (clean.includes('task')) return 'labTasks';
+    if (clean.includes('viva')) return 'vivas';
+    if (clean.includes('test')) return 'labTests';
+    if (clean.includes('project')) return 'projects';
+    if (clean.includes('quiz')) return 'quizzes';
+    if (clean.includes('assign')) return 'assignments';
+    
+    // Fallback for custom added subjects/activities safely mapped to camelCase pluralized keys
+    const camelCaseCustom = clean
+      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase());
+    return camelCaseCustom.endsWith('s') ? camelCaseCustom : camelCaseCustom + 's';
+  };
+
   const fetchSheetData = async () => {
     try {
       setLoading(true);
       setError('');
 
+      // Normalize category key in case a display name was passed
+      const targetCategoryKey = getCategoryTargetKey(category);
+
       // 1. Fetch bulk roster sheet from correct matching endpoint (/bulk-sheet/:labroomId)
       const res = await API.get(`/labmarks/bulk-sheet/${labroomId}`);
       const data = res.data.data;
-      setLabroom(data.labroom || data.classroom);
+      const activeLabroom = data.labroom || data.classroom;
+      setLabroom(activeLabroom);
       setStudents(data.students || []);
       setExistingMarks(data.existingMarks || []);
 
       // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
       
-      // 3. Look up evaluation totalMarks if it already exists in labroom definitions
-      const activeLabroom = data.labroom || data.classroom;
-      if (activeLabroom && activeLabroom[category]) {
-        const foundActivity = activeLabroom[category].find(
+      // 3. Look up evaluation totalMarks if it already exists in labroom definitions (checking both clean key and original)
+      if (activeLabroom) {
+        const activitiesList = activeLabroom[targetCategoryKey] || activeLabroom[category] || [];
+        const foundActivity = activitiesList.find(
           act => act.title?.toLowerCase() === activeTitle?.toLowerCase()
         );
         if (foundActivity && foundActivity.totalMarks) {
@@ -70,15 +90,15 @@ const LabMarksSheet = () => {
       }
 
       if (activeTitle && activeTitle !== 'general') {
-        const unassignedRes = await API.get(`/labmarks/unassigned/${labroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
-        const unassignedList = unassignedRes.data?.data?.unassignedStudents || [];
+        const unassignedRes = await API.get(`/labmarks/unassigned/${labroomId}?category=${targetCategoryKey}&title=${encodeURIComponent(activeTitle)}`);
+        const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
         setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
       } else {
         const unassigned = (data.students || []).filter(student => {
           const studentId = student._id.toString();
           const markDoc = (data.existingMarks || []).find(m => m.student.toString() === studentId);
           if (!markDoc) return true;
-          const list = markDoc[category] || [];
+          const list = markDoc[targetCategoryKey] || markDoc[category] || [];
           return list.length === 0;
         });
         setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
@@ -97,7 +117,7 @@ const LabMarksSheet = () => {
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
-          const list = markDoc[category] || [];
+          const list = markDoc[targetCategoryKey] || markDoc[category] || [];
           const item = list.find(e => 
             e._id?.toString() === itemId || 
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
@@ -202,9 +222,11 @@ const LabMarksSheet = () => {
         return;
       }
 
+      const targetCategoryKey = getCategoryTargetKey(category);
+
       await API.post('/labmarks/batch-submit', {
         labroomId,
-        category,
+        category: targetCategoryKey,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
         marksData
@@ -227,10 +249,11 @@ const LabMarksSheet = () => {
 
     setDeleting(true);
     try {
+      const targetCategoryKey = getCategoryTargetKey(category);
       await API.delete('/labmarks/delete-evaluation', {
         data: {
           labroomId,
-          category,
+          category: targetCategoryKey,
           itemTitle: targetTitle
         }
       });
@@ -472,7 +495,6 @@ const LabMarksSheet = () => {
 
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
         <p>© 2026 PUCIT Lab Portal • All Rights Reserved</p>
-        <p className="text-slate-600">Administered by <span className="text-orange-400/80 font-semibold">Shehzada Ather</span></p>
       </footer>
 
     </div>

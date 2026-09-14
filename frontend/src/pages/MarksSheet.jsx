@@ -4,15 +4,15 @@ import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
-const MarksSheet = () => {
-  const { classroomId, category, itemId } = useParams();
+const LabMarksSheet = () => {
+  const { labroomId, category, itemId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [classroom, setClassroom] = useState(null);
+  const [labroom, setLabroom] = useState(null);
   const [students, setStudents] = useState([]);
   const [existingMarks, setExistingMarks] = useState([]);
   
@@ -47,19 +47,20 @@ const MarksSheet = () => {
       setLoading(true);
       setError('');
 
-      // 1. Fetch bulk roster sheet
-      const res = await API.get(`/marks/bulk-sheet/${classroomId}`);
+      // 1. Fetch bulk roster sheet from the correct labmarks endpoint
+      const res = await API.get(`/labmarks/bulk-sheet/${labroomId}`);
       const data = res.data.data;
-      setClassroom(data.classroom);
+      setLabroom(data.labroom || data.classroom);
       setStudents(data.students || []);
       setExistingMarks(data.existingMarks || []);
 
       // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
       
-      // 3. Look up evaluation totalMarks if it already exists in classroom definition schemas
-      if (data.classroom && data.classroom[category]) {
-        const foundActivity = data.classroom[category].find(
+      // 3. Look up evaluation totalMarks if it already exists in labroom definition schemas
+      const currentLab = data.labroom || data.classroom;
+      if (currentLab && currentLab[category]) {
+        const foundActivity = currentLab[category].find(
           act => act.title?.toLowerCase() === activeTitle?.toLowerCase()
         );
         if (foundActivity && foundActivity.totalMarks) {
@@ -68,20 +69,16 @@ const MarksSheet = () => {
       }
 
       if (activeTitle && activeTitle !== 'general') {
-        const unassignedRes = await API.get(`/marks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
-        const unassignedList = unassignedRes.data?.data?.unassignedStudents || [];
+        const unassignedRes = await API.get(`/labmarks/unassigned/${labroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
+        const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
         setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
       } else {
         const unassigned = (data.students || []).filter(student => {
           const studentId = student._id.toString();
           const markDoc = (data.existingMarks || []).find(m => m.student.toString() === studentId);
           if (!markDoc) return true;
-          if (['mids', 'finals'].includes(category)) {
-            return !markDoc[category] || (markDoc[category].obtainedMarks === undefined && !markDoc[category].isAbsent);
-          } else {
-            const list = markDoc[category] || [];
-            return list.length === 0;
-          }
+          const list = markDoc[category] || [];
+          return list.length === 0;
         });
         setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
       }
@@ -99,25 +96,17 @@ const MarksSheet = () => {
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
-          if (['mids', 'finals'].includes(category)) {
-            if (markDoc[category]) {
-              obtained = markDoc[category].isAbsent ? 'A' : (markDoc[category].obtainedMarks ?? '');
-              isAbsent = !!markDoc[category].isAbsent;
-              if (markDoc[category].file) fileObj = markDoc[category].file;
-            }
-          } else {
-            const list = markDoc[category] || [];
-            const item = list.find(e => 
-              e._id?.toString() === itemId || 
-              e.title?.toLowerCase() === activeTitle?.toLowerCase()
-            );
-            if (item) {
-              obtained = item.isAbsent ? 'A' : (item.obtainedMarks ?? '');
-              isAbsent = !!item.isAbsent;
-              if (item.file) fileObj = item.file;
-              if (item.title && !itemTitle) setItemTitle(item.title);
-              if (item.totalMarks && !passedTotalMarks) setTotalMarks(item.totalMarks);
-            }
+          const list = markDoc[category] || [];
+          const item = list.find(e => 
+            e._id?.toString() === itemId || 
+            e.title?.toLowerCase() === activeTitle?.toLowerCase()
+          );
+          if (item) {
+            obtained = item.isAbsent ? 'A' : (item.obtainedMarks ?? '');
+            isAbsent = !!item.isAbsent;
+            if (item.file) fileObj = item.file;
+            if (item.title && !itemTitle) setItemTitle(item.title);
+            if (item.totalMarks && !passedTotalMarks) setTotalMarks(item.totalMarks);
           }
         }
 
@@ -130,7 +119,7 @@ const MarksSheet = () => {
 
       setMarkInputs(initialMap);
     } catch (err) {
-      console.error('Failed to load marksheet:', err);
+      console.error('Failed to load lab marksheet:', err);
       setError(err.response?.data?.message || 'Failed to load grading spreadsheet.');
     } finally {
       setLoading(false);
@@ -138,10 +127,10 @@ const MarksSheet = () => {
   };
 
   useEffect(() => {
-    if (classroomId && category) {
+    if (labroomId && category) {
       fetchSheetData();
     }
-  }, [classroomId, category, itemId]);
+  }, [labroomId, category, itemId]);
 
   const handleInputChange = (studentId, value) => {
     const cleanVal = value;
@@ -185,7 +174,7 @@ const MarksSheet = () => {
     try {
       const resolvedTitle = (itemTitle || (itemId !== 'new' ? itemId : '')).trim();
       if (!resolvedTitle || resolvedTitle === 'general') {
-        showToast('Please provide a valid evaluation title (e.g. Quiz 1).');
+        showToast('Please provide a valid evaluation title (e.g. Lab Task 1).');
         setSaving(false);
         return;
       }
@@ -212,18 +201,18 @@ const MarksSheet = () => {
         return;
       }
 
-      await API.post('/marks/batch-submit', {
-        classroomId,
+      await API.post('/labmarks/batch-submit', {
+        labroomId,
         category,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
         marksData
       });
 
-      showToast('Marks submitted successfully!');
+      showToast('Lab marks submitted successfully!');
       fetchSheetData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to submit marks.');
+      showToast(err.response?.data?.message || 'Failed to submit lab marks.');
     } finally {
       setSaving(false);
     }
@@ -237,9 +226,9 @@ const MarksSheet = () => {
 
     setDeleting(true);
     try {
-      await API.delete('/marks/delete-evaluation', {
+      await API.delete('/labmarks/delete-evaluation', {
         data: {
-          classroomId,
+          labroomId,
           category,
           itemTitle: targetTitle
         }
@@ -247,7 +236,7 @@ const MarksSheet = () => {
 
       showToast('Evaluation cancelled and removed successfully!');
       setTimeout(() => {
-        navigate(`/classroom/${classroomId}`);
+        navigate(`/labrooms/${labroomId}`);
       }, 1000);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to cancel evaluation.');
@@ -275,7 +264,7 @@ const MarksSheet = () => {
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `${classroom?.className || 'Class'}_${itemTitle || itemId}_Marks.csv`);
+      link.setAttribute("download", `${labroom?.labName || 'Lab'}_${itemTitle || itemId}_Marks.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -288,8 +277,8 @@ const MarksSheet = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-6 space-y-4">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-mono text-xs text-slate-400">Loading spreadsheet roster...</p>
+        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-mono text-xs text-slate-400">Loading lab spreadsheet roster...</p>
       </div>
     );
   }
@@ -300,7 +289,7 @@ const MarksSheet = () => {
         <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3">
           <p className="text-red-300 font-bold text-sm">Error Loading Sheet</p>
           <p className="text-xs text-slate-300">{error}</p>
-          <Link to={`/classroom/${classroomId}`} className="block py-3 bg-orange-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Classroom</Link>
+          <Link to={`/labrooms/${labroomId}`} className="block py-3 bg-blue-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Labroom</Link>
         </div>
       </div>
     );
@@ -312,25 +301,25 @@ const MarksSheet = () => {
   });
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-orange-400 selection:text-black">
+    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-blue-400 selection:text-black">
       
       {toastMessage && (
         <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-orange-500/50 bg-[#130910]/95 text-orange-300 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-blue-500/50 bg-[#130910]/95 text-blue-300 shadow-2xl backdrop-blur-xl">
             <span className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</span>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-orange-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
+      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-blue-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
         <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-          <Link to={`/classroom/${classroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
+          <Link to={`/labrooms/${labroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
             ← Back
           </Link>
           <div>
-            <h1 className="text-sm sm:text-base font-black text-white uppercase">{classroom?.className}</h1>
-            <p className="text-xs text-orange-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
+            <h1 className="text-sm sm:text-base font-black text-white uppercase">{labroom?.labName}</h1>
+            <p className="text-xs text-blue-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
           </div>
         </div>
 
@@ -356,21 +345,21 @@ const MarksSheet = () => {
       <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
         
         <div className="space-y-4">
-          <div className="bg-[#130910]/90 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+          <div className="bg-[#130910]/90 border border-blue-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
             
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
               <div className="w-full sm:w-1/3">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Evaluation Title</label>
+                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Evaluation Title</label>
                 <input 
                   type="text" 
                   value={itemTitle} 
                   onChange={(e) => setItemTitle(e.target.value)} 
-                  placeholder="e.g. Quiz 1" 
+                  placeholder="e.g. Lab Task 1" 
                   className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
                 />
               </div>
               <div className="w-full sm:w-1/4">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Total Marks</label>
+                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Total Marks</label>
                 <input 
                   type="number" 
                   min="1" 
@@ -381,21 +370,19 @@ const MarksSheet = () => {
                 />
               </div>
               <div className="w-full sm:w-auto flex items-center gap-2 self-end">
-                {['quizzes', 'assignments', 'labMarks'].includes(category) && (
-                  <button 
-                    type="button"
-                    onClick={handleCancelEvaluation}
-                    disabled={deleting}
-                    className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
-                  </button>
-                )}
+                <button 
+                  type="button"
+                  onClick={handleCancelEvaluation}
+                  disabled={deleting}
+                  className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
+                </button>
                 <button 
                   type="button" 
                   onClick={handleSubmitBatch}
                   disabled={saving}
-                  className="px-6 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+                  className="px-6 py-3 bg-gradient-to-r from-blue-400 to-cyan-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
                 >
                   {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
                 </button>
@@ -427,7 +414,7 @@ const MarksSheet = () => {
                       return (
                         <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
                           <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="py-3 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
+                          <td className="py-3 px-3 font-mono text-blue-400 font-bold">{student.rollNo || 'N/A'}</td>
                           <td className="py-3 px-3 text-white font-medium">{student.name}</td>
                           <td className="py-3 px-3">
                             <input 
@@ -435,7 +422,7 @@ const MarksSheet = () => {
                               value={inputData.obtainedMarks} 
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
                               placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
                             />
                           </td>
                           <td className="py-3 px-3">
@@ -459,21 +446,19 @@ const MarksSheet = () => {
             </div>
 
             <div className="pt-4 flex items-center justify-end gap-3">
-              {['quizzes', 'assignments', 'labMarks'].includes(category) && (
-                <button 
-                  type="button"
-                  onClick={handleCancelEvaluation}
-                  disabled={deleting}
-                  className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
-                </button>
-              )}
+              <button 
+                type="button"
+                onClick={handleCancelEvaluation}
+                disabled={deleting}
+                className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+              >
+                {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
+              </button>
               <button 
                 type="button" 
                 onClick={handleSubmitBatch}
                 disabled={saving}
-                className="px-8 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+                className="px-8 py-3 bg-gradient-to-r from-blue-400 to-cyan-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
               >
                 {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
               </button>
@@ -485,12 +470,11 @@ const MarksSheet = () => {
       </main>
 
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
-        <p>© 2026 PUCIT Classroom (Non-Official) • All Rights Reserved</p>
-        <p className="text-slate-600">Designed & Administered by <span className="text-orange-400/80 font-semibold">Shehzada Ather</span></p>
+        <p>© 2026 PUCIT Lab Portal • All Rights Reserved</p>
       </footer>
 
     </div>
   );
 };
 
-export default MarksSheet;
+export default LabMarksSheet;

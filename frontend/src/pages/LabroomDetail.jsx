@@ -120,7 +120,11 @@ const LabroomDetail = () => {
     if (clean.includes('project')) return 'projects';
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
-    return clean.endsWith('s') ? clean : clean + 's';
+    
+    // Fallback for custom added subjects/activities safely mapped to camelCase pluralized keys
+    const camelCaseCustom = clean
+      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase());
+    return camelCaseCustom.endsWith('s') ? camelCaseCustom : camelCaseCustom + 's';
   };
 
   const fetchLabroomData = async () => {
@@ -1858,7 +1862,7 @@ const LabroomDetail = () => {
                         {(isCustom || act.category === '') && (
                           <input 
                             type="text" 
-                            placeholder="Custom Category Name" 
+                            placeholder="Custom Subject Name" 
                             value={act.category} 
                             onChange={(e) => {
                               const updated = [...editSessionalActivities];
