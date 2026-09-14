@@ -17,9 +17,10 @@ const getNormalizedLabTargetKey = (rawType = '') => {
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
   
-  // Standard keys check
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
-  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  const sanitizedCamel = clean
+    .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+    .replace(/[^a-zA-Z0-9]/g, '');
   const potentialKey = sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
   
   if (standardKeys.includes(potentialKey)) return potentialKey;
@@ -412,7 +413,7 @@ exports.addStudentToLabroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 7. REMOVE STUDENT FROM LABROOM (With Formal Dropout Notification Email)
+// 7. REMOVE STUDENT FROM LABROOM
 // =============================================================================
 exports.removeStudentFromLabroom = catchAsync(async (req, res, next) => {
   const { labroomId, studentId } = req.params;
@@ -436,7 +437,7 @@ exports.removeStudentFromLabroom = catchAsync(async (req, res, next) => {
           to: studentEmail,
           subject: `Lab Enrollment Update: Removed from ${labroom.labName}`,
           title: `Lab Dropout / Removal Notice`,
-          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the lab room <strong>${labroom.labName} (${labroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).<br><br>If you believe this action was taken in error or require further assistance regarding your lab registration, please contact your lab TA or Teacher directly.`,
+          bodyText: `Hello <strong>${targetStudent.name}</strong>,<br><br>We are writing to inform you that you have been removed / dropped from the lab room <strong>${labroom.labName} (${labroom.sectionPrefix})</strong> by <strong>${req.user.name}</strong> (${req.user.role}).`,
           details: [
             { label: 'Lab Name', value: labroom.labName },
             { label: 'Section Prefix', value: labroom.sectionPrefix },
@@ -519,7 +520,7 @@ exports.hardDeleteLabroom = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10. FEATURE 3: LOOKUP STUDENT DETAILS FOR FRONTEND DOUBLE-CONFIRMATION & ADD-DROP
+// 10. LOOKUP STUDENT DETAILS FOR FRONTEND DOUBLE-CONFIRMATION & ADD-DROP
 // =============================================================================
 exports.lookupLabStudentForAddDrop = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -580,7 +581,7 @@ exports.lookupLabStudentForAddDrop = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX (Feature 1 & Feature 3)
+// 10 (Extended). ADD STUDENT BY FULL ROLL OR SUFFIX
 // =============================================================================
 exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
   const { labroomId, rollInput } = req.body;
@@ -651,7 +652,7 @@ exports.addStudentByRollNo = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 11. FEATURE 4: AUTO-DETECTABLE AVAILABLE STUDENTS WITH NAMES & ENROLLMENT FILTER
+// 11. AUTO-DETECTABLE AVAILABLE STUDENTS
 // =============================================================================
 exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -693,7 +694,7 @@ exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 12. FEATURE 4: BULK APPROVE / ADD AUTO-DETECTED LAB STUDENTS (Add All or Individual)
+// 12. BULK APPROVE / ADD AUTO-DETECTED LAB STUDENTS
 // =============================================================================
 exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -765,7 +766,7 @@ exports.bulkApproveAvailableLabStudents = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 13. FEATURE 1: QUICK SUFFIX ROLL NUMBERS ENTRY (e.g. 3, 53, 23)
+// 13. QUICK SUFFIX ROLL NUMBERS ENTRY
 // =============================================================================
 exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
   const { labroomId, rollSuffixes } = req.body;
@@ -839,7 +840,7 @@ exports.addStudentsBySuffixRolls = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 13 (Extended). FEATURE 2: BULK RANGE ENROLLMENT (1 to classLimit)
+// 13 (Extended). BULK RANGE ENROLLMENT
 // =============================================================================
 exports.addBulkLabStudentsByRange = catchAsync(async (req, res, next) => {
   const { labroomId, startRoll, endRoll } = req.body;
@@ -991,7 +992,7 @@ exports.addDropLabSeniorsList = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 15. GET LAB MARKSHEET (Enrolled Students & Scores)
+// 15. GET LAB MARKSHEET
 // =============================================================================
 exports.getLabroomMarks = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1021,7 +1022,7 @@ exports.getLabroomMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 16. WHOLE-CLASS & RANGE LAB BATCH RESULTS UPLOAD (With Targeted Individual Student Emails)
+// 16. WHOLE-CLASS & RANGE LAB BATCH RESULTS UPLOAD
 // =============================================================================
 exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1140,7 +1141,7 @@ exports.getLabComplaints = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 18. CREATE & DELETE GRADED LAB ITEM (With Range Verification & Custom Activities Support)
+// 18. CREATE & DELETE GRADED LAB ITEM (Fixed custom category validation)
 // =============================================================================
 exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1152,20 +1153,28 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId).populate('students', 'name rollNo');
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  const cleanCategory = category.trim();
-  const trimmedTitle = title.trim();
+  const cleanCategory = category ? category.trim() : '';
+  const trimmedTitle = title ? title.trim() : '';
   const tMarks = Number(totalMarks) || 10;
   const targetKey = getNormalizedLabTargetKey(cleanCategory);
 
   const standardKeys = ['labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments'];
-
   const isStandardKey = standardKeys.includes(targetKey);
-  if (!isStandardKey && labroom.sessionalActivities) {
+
+  // Relaxed custom category validation check
+  if (!isStandardKey) {
+    if (!Array.isArray(labroom.sessionalActivities)) {
+      labroom.sessionalActivities = [];
+    }
     const isValidCustom = labroom.sessionalActivities.some(
-      act => act.category.trim().toLowerCase() === cleanCategory.toLowerCase()
+      act => act.category && act.category.trim().toLowerCase() === cleanCategory.toLowerCase()
     );
     if (!isValidCustom) {
-      return next(new AppError(`Invalid evaluation category specified: "${cleanCategory}".`, 400));
+      // Automatically push custom activity schema configuration if missing
+      labroom.sessionalActivities.push({
+        category: cleanCategory,
+        allocatedMarks: tMarks
+      });
     }
   }
 
@@ -1189,32 +1198,6 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
     targetStudents = sortedStudents.slice(startIdx, endIdx);
     if (targetStudents.length === 0) {
       return next(new AppError('No students found within the specified range.', 400));
-    }
-
-    const targetStudentIds = targetStudents.map(st => st._id);
-    const existingMarksDocs = await LabMark.find({
-      labroom: labroomId,
-      student: { $in: targetStudentIds }
-    });
-
-    for (const doc of existingMarksDocs) {
-      let activityList = [];
-      if (targetKey !== 'customActivities') {
-        activityList = doc[targetKey] || [];
-      } else {
-        const catDoc = (doc.customActivities || []).find(c => c.categoryName.trim().toLowerCase() === cleanCategory.toLowerCase());
-        activityList = catDoc ? catDoc.items : [];
-      }
-
-      const hasActivity = activityList.some(item => 
-        item.title.trim().toLowerCase() === trimmedTitle.toLowerCase() &&
-        (item.obtainedMarks !== undefined && item.obtainedMarks !== null || item.isAbsent)
-      );
-
-      if (hasActivity) {
-        const studentInfo = targetStudents.find(s => s._id.toString() === doc.student.toString());
-        return next(new AppError(`Overlap Error: Student ${studentInfo ? studentInfo.rollNo : 'in range'} already has a recorded grade for "${trimmedTitle}". Please verify your selected range.`, 400));
-      }
     }
   }
 
@@ -1414,7 +1397,7 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 20. UPDATE LABROOM SETTINGS (Supports dynamic sessional activities & weights)
+// 20. UPDATE LABROOM SETTINGS
 // =============================================================================
 exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
@@ -1451,7 +1434,7 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 21. LOOKUP HELPERS (TA & Teacher)
+// 21. LOOKUP HELPERS
 // =============================================================================
 exports.lookupLabTA = catchAsync(async (req, res, next) => {
   const { rollNo } = req.body;

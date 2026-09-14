@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
@@ -38,13 +38,13 @@ const LabMarksSheet = () => {
   const [deleting, setDeleting] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  const showToast = (msg) => {
+  const showToast = useCallback((msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 2500);
-  };
+  }, []);
 
   // Robust matching LabroomDetail's category mapping for preset & custom subjects
-  const getCategoryTargetKey = (catName = '') => {
+  const getCategoryTargetKey = useCallback((catName = '') => {
     const clean = catName.trim().toLowerCase();
     if (clean.includes('task')) return 'labTasks';
     if (clean.includes('viva')) return 'vivas';
@@ -53,20 +53,18 @@ const LabMarksSheet = () => {
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
     
-    // Robust camelCase conversion for custom names, handling special characters and spaces safely
     const camel = clean
-      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+      .replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => chr.toUpperCase())
       .replace(/[^a-zA-Z0-9]/g, '');
     
     return camel.endsWith('s') ? camel : camel + 's';
-  };
+  }, []);
 
-  const fetchSheetData = async () => {
+  const fetchSheetData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
 
-      // Normalize category key in case a display name was passed
       const targetCategoryKey = getCategoryTargetKey(category);
 
       // 1. Fetch bulk roster sheet from endpoint
@@ -147,23 +145,22 @@ const LabMarksSheet = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [labroomId, category, itemId, itemTitle, passedTotalMarks, getCategoryTargetKey]);
 
   useEffect(() => {
     if (labroomId && category) {
       fetchSheetData();
     }
-  }, [labroomId, category, itemId]);
+  }, [labroomId, category, itemId, fetchSheetData]);
 
   const handleInputChange = (studentId, value) => {
-    const cleanVal = value;
-    const isAbs = cleanVal.trim().toUpperCase() === 'A';
+    const isAbs = value.trim().toUpperCase() === 'A';
 
     setMarkInputs(prev => ({
       ...prev,
       [studentId]: {
         ...prev[studentId],
-        obtainedMarks: cleanVal,
+        obtainedMarks: value,
         isAbsent: isAbs
       }
     }));
@@ -215,7 +212,7 @@ const LabMarksSheet = () => {
           studentId,
           obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),
           isAbsent: data.isAbsent,
-          file: data.file?.url ? data.file : null // Explicitly package attached file
+          file: data.file?.url ? data.file : null
         }));
 
       if (marksData.length === 0) {
@@ -281,10 +278,9 @@ const LabMarksSheet = () => {
         const roll = student.rollNo || 'N/A';
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
         const score = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks ?? '');
-        const total = totalMarks;
         const status = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks !== '' ? 'Graded' : 'Pending');
 
-        csvContent += `${roll},${name},${score},${total},${status}\r\n`;
+        csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
 
       const encodedUri = encodeURI(csvContent);
@@ -295,10 +291,17 @@ const LabMarksSheet = () => {
       link.click();
       document.body.removeChild(link);
       showToast('Excel/CSV sheet downloaded successfully!');
-    } catch (err) {
+    } catch {
       showToast('Failed to export spreadsheet.');
     }
   };
+
+  const displayedStudents = useMemo(() => {
+    return students.filter(s => {
+      if (!showUnassignedOnly) return true;
+      return unassignedStudentIds.has(s._id.toString());
+    });
+  }, [students, showUnassignedOnly, unassignedStudentIds]);
 
   if (loading) {
     return (
@@ -320,11 +323,6 @@ const LabMarksSheet = () => {
       </div>
     );
   }
-
-  const displayedStudents = students.filter(s => {
-    if (!showUnassignedOnly) return true;
-    return unassignedStudentIds.has(s._id.toString());
-  });
 
   return (
     <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-blue-400 selection:text-black">
@@ -369,7 +367,6 @@ const LabMarksSheet = () => {
 
       {/* Spreadsheet Main Area */}
       <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
-        
         <div className="space-y-4">
           <div className="bg-[#090d16]/90 border border-blue-500/25 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
             
@@ -492,7 +489,6 @@ const LabMarksSheet = () => {
 
           </div>
         </div>
-
       </main>
 
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
@@ -37,28 +37,27 @@ const MarksSheet = () => {
   const [deleting, setDeleting] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
-  const showToast = (msg) => {
+  const showToast = useCallback((msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 2500);
-  };
+  }, []);
 
-  const fetchSheetData = async () => {
+  const fetchSheetData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
 
-      // 1. Fetch bulk roster sheet from the correct classroom marks endpoint
       const res = await API.get(`/classroommarks/bulk-sheet/${classroomId}`);
       const data = res.data.data;
-      setClassroom(data.classroom || data.labroom);
+      const currentClass = data.classroom || data.labroom;
+      
+      setClassroom(currentClass);
       setStudents(data.students || []);
       setExistingMarks(data.existingMarks || []);
 
-      // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
       
-      // 3. Look up evaluation totalMarks if it already exists in classroom definition schemas
-      const currentClass = data.classroom || data.labroom;
+      // Look up evaluation totalMarks if it already exists in classroom definition schemas
       if (currentClass) {
         let foundActivity = null;
         if (currentClass[category] && Array.isArray(currentClass[category])) {
@@ -76,7 +75,7 @@ const MarksSheet = () => {
           }
         }
 
-        if (foundActivity && foundActivity.totalMarks) {
+        if (foundActivity?.totalMarks) {
           setTotalMarks(foundActivity.totalMarks);
         }
       }
@@ -105,7 +104,7 @@ const MarksSheet = () => {
         setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
       }
 
-      // 4. Populate spreadsheet inputs
+      // Populate spreadsheet inputs
       const initialMap = {};
       const marksMap = new Map((data.existingMarks || []).map(m => [m.student.toString(), m]));
 
@@ -155,23 +154,21 @@ const MarksSheet = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [classroomId, category, itemId, itemTitle, passedTotalMarks]);
 
   useEffect(() => {
     if (classroomId && category) {
       fetchSheetData();
     }
-  }, [classroomId, category, itemId]);
+  }, [classroomId, category, itemId, fetchSheetData]);
 
   const handleInputChange = (studentId, value) => {
-    const cleanVal = value;
-    const isAbs = cleanVal.trim().toUpperCase() === 'A';
-
+    const isAbs = value.trim().toUpperCase() === 'A';
     setMarkInputs(prev => ({
       ...prev,
       [studentId]: {
         ...prev[studentId],
-        obtainedMarks: cleanVal,
+        obtainedMarks: value,
         isAbsent: isAbs
       }
     }));
@@ -286,10 +283,9 @@ const MarksSheet = () => {
         const roll = student.rollNo || 'N/A';
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
         const score = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks ?? '');
-        const total = totalMarks;
         const status = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks !== '' ? 'Graded' : 'Pending');
 
-        csvContent += `${roll},${name},${score},${total},${status}\r\n`;
+        csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
 
       const encodedUri = encodeURI(csvContent);
@@ -300,10 +296,17 @@ const MarksSheet = () => {
       link.click();
       document.body.removeChild(link);
       showToast('Excel/CSV sheet downloaded successfully!');
-    } catch (err) {
+    } catch {
       showToast('Failed to export spreadsheet.');
     }
   };
+
+  const displayedStudents = useMemo(() => {
+    return students.filter(s => {
+      if (!showUnassignedOnly) return true;
+      return unassignedStudentIds.has(s._id.toString());
+    });
+  }, [students, showUnassignedOnly, unassignedStudentIds]);
 
   if (loading) {
     return (
@@ -325,11 +328,6 @@ const MarksSheet = () => {
       </div>
     );
   }
-
-  const displayedStudents = students.filter(s => {
-    if (!showUnassignedOnly) return true;
-    return unassignedStudentIds.has(s._id.toString());
-  });
 
   return (
     <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-orange-400 selection:text-black">
@@ -374,114 +372,36 @@ const MarksSheet = () => {
 
       {/* Spreadsheet Main Area */}
       <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
-        
-        <div className="space-y-4">
-          <div className="bg-[#130910]/90 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-            
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
-              <div className="w-full sm:w-1/3">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Evaluation Title</label>
-                <input 
-                  type="text" 
-                  value={itemTitle} 
-                  onChange={(e) => setItemTitle(e.target.value)} 
-                  placeholder="e.g. Lab Task 1" 
-                  className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
-                />
-              </div>
-              <div className="w-full sm:w-1/4">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Total Marks</label>
-                <input 
-                  type="number" 
-                  min="1" 
-                  required
-                  value={totalMarks} 
-                  onChange={(e) => setTotalMarks(e.target.value)} 
-                  className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
-                />
-              </div>
-              <div className="w-full sm:w-auto flex items-center gap-2 self-end">
-                <button 
-                  type="button"
-                  onClick={handleCancelEvaluation}
-                  disabled={deleting}
-                  className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
-                </button>
-                <button 
-                  type="button" 
-                  onClick={handleSubmitBatch}
-                  disabled={saving}
-                  className="px-6 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
-                >
-                  {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
-                </button>
-              </div>
+        <div className="bg-[#130910]/90 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+          
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div className="w-full sm:w-1/3">
+              <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Evaluation Title</label>
+              <input 
+                type="text" 
+                value={itemTitle} 
+                onChange={(e) => setItemTitle(e.target.value)} 
+                placeholder="e.g. Lab Task 1" 
+                className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
+              />
             </div>
-
-            {/* Student Roster Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
-                    <th className="py-3 px-3">#</th>
-                    <th className="py-3 px-3">Roll Number</th>
-                    <th className="py-3 px-3">Student Name</th>
-                    <th className="py-3 px-3">Marks (or 'A') / Out of {totalMarks}</th>
-                    <th className="py-3 px-3">Attachment Script</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 text-xs">
-                  {displayedStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="text-center py-8 text-slate-500 italic">No students found matching filter.</td>
-                    </tr>
-                  ) : (
-                    displayedStudents.map((student, idx) => {
-                      const studentId = student._id.toString();
-                      const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
-
-                      return (
-                        <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
-                          <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="py-3 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
-                          <td className="py-3 px-3 text-white font-medium">{student.name}</td>
-                          <td className="py-3 px-3">
-                            <input 
-                              type="text" 
-                              value={inputData.obtainedMarks} 
-                              onChange={(e) => handleInputChange(studentId, e.target.value)} 
-                              placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="flex items-center gap-2">
-                              {inputData.file?.url ? (
-                                <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
-                              ) : (
-                                <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded-lg border border-slate-700">
-                                  Upload
-                                  <input type="file" onChange={(e) => handleFileUpload(studentId, e)} className="hidden" />
-                                </label>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+            <div className="w-full sm:w-1/4">
+              <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Total Marks</label>
+              <input 
+                type="number" 
+                min="1" 
+                required
+                value={totalMarks} 
+                onChange={(e) => setTotalMarks(e.target.value)} 
+                className="w-full px-4 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
+              />
             </div>
-
-            <div className="pt-4 flex items-center justify-end gap-3">
+            <div className="w-full sm:w-auto flex items-center gap-2 self-end">
               <button 
                 type="button"
                 onClick={handleCancelEvaluation}
                 disabled={deleting}
-                className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
               >
                 {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
               </button>
@@ -489,15 +409,89 @@ const MarksSheet = () => {
                 type="button" 
                 onClick={handleSubmitBatch}
                 disabled={saving}
-                className="px-8 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+                className="px-6 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
               >
                 {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
               </button>
             </div>
-
           </div>
-        </div>
 
+          {/* Student Roster Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
+                  <th className="py-3 px-3">#</th>
+                  <th className="py-3 px-3">Roll Number</th>
+                  <th className="py-3 px-3">Student Name</th>
+                  <th className="py-3 px-3">Marks (or 'A') / Out of {totalMarks}</th>
+                  <th className="py-3 px-3">Attachment Script</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {displayedStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="text-center py-8 text-slate-500 italic">No students found matching filter.</td>
+                  </tr>
+                ) : (
+                  displayedStudents.map((student, idx) => {
+                    const studentId = student._id.toString();
+                    const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
+
+                    return (
+                      <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
+                        <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
+                        <td className="py-3 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
+                        <td className="py-3 px-3 text-white font-medium">{student.name}</td>
+                        <td className="py-3 px-3">
+                          <input 
+                            type="text" 
+                            value={inputData.obtainedMarks} 
+                            onChange={(e) => handleInputChange(studentId, e.target.value)} 
+                            placeholder="Score or A" 
+                            className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                          />
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-2">
+                            {inputData.file?.url ? (
+                              <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
+                            ) : (
+                              <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded-lg border border-slate-700">
+                                Upload
+                                <input type="file" onChange={(e) => handleFileUpload(studentId, e)} className="hidden" />
+                              </label>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pt-4 flex items-center justify-end gap-3">
+            <button 
+              type="button"
+              onClick={handleCancelEvaluation}
+              disabled={deleting}
+              className="px-6 py-3 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+            >
+              {deleting ? 'Cancelling...' : 'Cancel Evaluation ✕'}
+            </button>
+            <button 
+              type="button" 
+              onClick={handleSubmitBatch}
+              disabled={saving}
+              className="px-8 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+            >
+              {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
+            </button>
+          </div>
+
+        </div>
       </main>
 
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">

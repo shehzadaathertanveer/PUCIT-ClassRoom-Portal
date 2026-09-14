@@ -486,9 +486,9 @@ const Dashboard = () => {
 
   const isPucitVerified = Boolean(
     user?.isUniversityEmailVerified || 
+    (user?.email && user.email.endsWith('@pucit.edu.pk')) ||
     !isStudent || 
-    isAdmin ||
-    (user?.email && !user.email.endsWith('@pucit.edu.pk') && !user.email.endsWith('@temp.pucit.edu.pk'))
+    isAdmin
   );
 
   const needsRollNo = isStudent && isTempOrFresherRoll;

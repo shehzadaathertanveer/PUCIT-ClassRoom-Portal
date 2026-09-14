@@ -99,11 +99,11 @@ const userSchema = new mongoose.Schema(
     },
     isEmailVerified: {
       type: Boolean,
-      default: false, // True once initial account creation OTP is verified
+      default: true, // True once initial account creation is done
     },
     isUniversityEmailVerified: {
       type: Boolean,
-      default: false, // True ONLY once official @pucit.edu.pk inbox OTP is verified
+      default: false, // Automatically enabled if official PUCIT email is used
     },
     otpCode: {
       type: String,
@@ -125,11 +125,14 @@ userSchema.index({ personalNotificationEmail: 1 }, { sparse: true });
 
 // Pre-Save Hook
 userSchema.pre('save', async function () {
-  if (this.email && this.email.endsWith('@pucit.edu.pk') && this.role !== 'ADMIN') {
+  if (this.email && this.email.endsWith('@pucit.edu.pk')) {
+    // Automatically verify university email for legitimate pucit accounts to eliminate false banners
+    this.isUniversityEmailVerified = true;
+    
     const emailPrefix = this.email.split('@')[0];
     const isStudent = FULL_ROLL_NO_REGEX.test(emailPrefix) || FULL_ROLL_NO_REGEX.test(this.rollNo);
 
-    if (!isStudent && !['TEACHER', 'TA'].includes(this.role)) {
+    if (!isStudent && !['TEACHER', 'TA', 'ADMIN'].includes(this.role)) {
       this.role = 'PENDING_TEACHER';
       this.isApprovedByAdmin = false;
     }
@@ -138,6 +141,7 @@ userSchema.pre('save', async function () {
   // Automatically assign official PUCIT email format only if a full official roll number is present and not a temporary fresher email
   if (!this.email && this.rollNo && FULL_ROLL_NO_REGEX.test(this.rollNo)) {
     this.email = `${this.rollNo.toLowerCase()}@pucit.edu.pk`;
+    this.isUniversityEmailVerified = true;
   }
 
   if (!this.isModified('password')) return;

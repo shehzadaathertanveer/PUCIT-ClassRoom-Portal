@@ -5,6 +5,8 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 
+const STANDARD_CATEGORIES = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects', 'mids', 'finals'];
+
 // Helper: Normalize Schema Target Keys Safely (Supports Custom Sessional Activities)
 const getNormalizedTargetKey = (rawType = '') => {
   const clean = rawType.trim().toLowerCase();
@@ -19,11 +21,11 @@ const getNormalizedTargetKey = (rawType = '') => {
   if (clean === 'finals' || clean === 'final') return 'finals';
   
   // Dynamic normalization for custom activities (e.g., "Homework" -> "homeworks")
-  const sanitizedCamel = clean.replace(/[^a-zA-Z0-9]/g, '');
+  const sanitizedCamel = clean
+    .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+    .replace(/[^a-zA-Z0-9]/g, '');
   return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
 };
-
-const VALID_CATEGORIES = ['quizzes', 'assignments', 'labMarks', 'labTasks', 'vivas', 'labTests', 'projects', 'mids', 'finals'];
 
 // Helper: Normalizes singular/plural category inputs from frontend UI variants
 const CATEGORY_MAP = {
@@ -125,7 +127,8 @@ exports.getBulkMarkSheet = catchAsync(async (req, res, next) => {
         projects: classroom.projects,
         mids: classroom.mids,
         finals: classroom.finals,
-        sessionalActivities: classroom.sessionalActivities
+        sessionalActivities: classroom.sessionalActivities,
+        customActivities: classroom.customActivities || []
       },
       students: sortedStudents,
       existingMarks,
@@ -146,6 +149,7 @@ exports.getUnassignedStudents = catchAsync(async (req, res, next) => {
 
   const cleanCategory = category.trim().toLowerCase();
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(resolvedCategory);
 
   const classroom = await Classroom.findOne({ _id: classroomId, isActive: true })
     .populate('students', 'name rollNo email personalNotificationEmail')
@@ -169,12 +173,20 @@ exports.getUnassignedStudents = catchAsync(async (req, res, next) => {
       if (doc[resolvedCategory] && doc[resolvedCategory].totalMarks > 0) {
         gradedStudentIds.add(doc.student.toString());
       }
-    } else {
+    } else if (isStandard) {
       const itemsList = doc[resolvedCategory] || [];
       const found = itemsList.find(item => item.title && item.title.trim().toLowerCase() === cleanTitle);
       if (found) {
         gradedStudentIds.add(doc.student.toString());
       }
+    } else if (Array.isArray(doc.customActivities)) {
+      doc.customActivities.forEach(cat => {
+        if (cat.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+            cat.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()) {
+          const found = (cat.items || []).find(i => i.title?.trim().toLowerCase() === cleanTitle);
+          if (found) gradedStudentIds.add(doc.student.toString());
+        }
+      });
     }
   });
 
@@ -221,6 +233,20 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
         });
       }
     });
+
+    if (Array.isArray(doc.customActivities)) {
+      doc.customActivities.forEach(cat => {
+        if (Array.isArray(cat.items)) {
+          cat.items.forEach(item => {
+            if (item.title && item.totalMarks > 0) {
+              const key = `${cat.categoryName.trim().toLowerCase()}:${item.title.trim().toLowerCase()}`;
+              if (!gradedCountMap[key]) gradedCountMap[key] = new Set();
+              gradedCountMap[key].add(studentId);
+            }
+          });
+        }
+      });
+    }
   });
 
   const pendingActivities = [];
@@ -252,6 +278,30 @@ exports.getPendingGradingActivities = catchAsync(async (req, res, next) => {
       }
     });
   });
+
+  if (Array.isArray(classroom.customActivities)) {
+    classroom.customActivities.forEach(customCat => {
+      const catName = customCat.categoryName;
+      if (Array.isArray(customCat.items)) {
+        customCat.items.forEach(item => {
+          const title = item.title;
+          const key = `${catName.trim().toLowerCase()}:${title.trim().toLowerCase()}`;
+          const gradedSet = gradedCountMap[key] || new Set();
+          const remainingCount = totalStudentsCount - gradedSet.size;
+
+          if (remainingCount > 0) {
+            pendingActivities.push({
+              category: catName,
+              title,
+              totalStudents: totalStudentsCount,
+              gradedCount: gradedSet.size,
+              remainingCount
+            });
+          }
+        });
+      }
+    });
+  }
 
   res.status(200).json({
     status: 'success',
@@ -300,6 +350,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       vivas: [],
       labTests: [],
       projects: [],
+      customActivities: [],
       mids: { totalMarks: 0, obtainedMarks: 0 }, 
       finals: { totalMarks: 0, obtainedMarks: 0 } 
     };
@@ -316,6 +367,17 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
         });
       }
     });
+
+    if (Array.isArray(doc.customActivities)) {
+      doc.customActivities.forEach(customCat => {
+        if (Array.isArray(customCat.items)) {
+          customCat.items.forEach(item => {
+            if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
+            totalTotSessional += (Number(item.totalMarks) || 0);
+          });
+        }
+      });
+    }
 
     const sessionalPercentage = totalTotSessional > 0 ? (totalObtSessional / totalTotSessional) * 100 : 0;
     if (totalTotSessional > 0) { 
@@ -387,12 +449,15 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 
   const cleanCategory = category.trim().toLowerCase();
   const targetCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(targetCategory);
 
   const studentMarksDocs = await Mark.find({ classroom: classroomId });
   const markMap = {};
   studentMarksDocs.forEach(doc => {
     markMap[doc.student.toString()] = doc;
   });
+
+  const decodedTitle = decodeURIComponent(title).trim().toLowerCase();
 
   const studentSheet = (classroom.students || []).map(st => {
     const studentId = st._id.toString();
@@ -401,12 +466,29 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
     let isAbsent = false;
     let file = null;
 
-    if (markDoc && markDoc[targetCategory]) {
-      const entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodeURIComponent(title).toLowerCase());
-      if (entry) {
-        obtainedMarks = entry.obtainedMarks;
-        isAbsent = Boolean(entry.isAbsent);
-        file = entry.file || null;
+    if (markDoc) {
+      if (isStandard) {
+        if (Array.isArray(markDoc[targetCategory])) {
+          const entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodedTitle);
+          if (entry) {
+            obtainedMarks = entry.obtainedMarks;
+            isAbsent = Boolean(entry.isAbsent);
+            file = entry.file || null;
+          }
+        }
+      } else if (Array.isArray(markDoc.customActivities)) {
+        const customCat = markDoc.customActivities.find(
+          c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+               c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+        );
+        if (customCat && Array.isArray(customCat.items)) {
+          const entry = customCat.items.find(e => e.title?.toLowerCase() === decodedTitle);
+          if (entry) {
+            obtainedMarks = entry.obtainedMarks;
+            isAbsent = Boolean(entry.isAbsent);
+            file = entry.file || null;
+          }
+        }
       }
     }
 
@@ -427,7 +509,7 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// SAVE SINGLE EVALUATION SHEET FROM POPUP EDITOR (Targeted Student Emails Only)
+// SAVE SINGLE EVALUATION SHEET FROM POPUP EDITOR
 // =============================================================================
 exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
@@ -440,19 +522,40 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 
   const cleanCategory = (category || '').trim().toLowerCase();
   const targetCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(targetCategory);
 
   const parsedTotal = Number(totalMarks) || 10;
   let cleanTitle = (title || '').trim();
 
   if (!['mids', 'finals'].includes(targetCategory)) {
-    if (!Array.isArray(classroom[targetCategory])) {
-      classroom[targetCategory] = [];
-    }
-    const existingIndex = classroom[targetCategory].findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
-    if (existingIndex > -1) {
-      classroom[targetCategory][existingIndex].totalMarks = parsedTotal;
+    if (isStandard) {
+      if (!Array.isArray(classroom[targetCategory])) classroom[targetCategory] = [];
+      const existingIndex = classroom[targetCategory].findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+      if (existingIndex > -1) {
+        classroom[targetCategory][existingIndex].totalMarks = parsedTotal;
+      } else {
+        classroom[targetCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+      }
     } else {
-      classroom[targetCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+      if (!Array.isArray(classroom.customActivities)) classroom.customActivities = [];
+      let customCat = classroom.customActivities.find(
+        c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+             c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+      );
+      if (!customCat) {
+        classroom.customActivities.push({
+          categoryName: cleanCategory,
+          items: [{ title: cleanTitle, totalMarks: parsedTotal }]
+        });
+      } else {
+        if (!Array.isArray(customCat.items)) customCat.items = [];
+        const existingIndex = customCat.items.findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (existingIndex > -1) {
+          customCat.items[existingIndex].totalMarks = parsedTotal;
+        } else {
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal });
+        }
+      }
     }
     await classroom.save();
   }
@@ -479,6 +582,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           quizzes: [],
           assignments: [],
           labMarks: [],
+          customActivities: []
         });
       }
 
@@ -492,7 +596,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           isAbsent,
           file: fileData || markDoc[targetCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
         };
-      } else {
+      } else if (isStandard) {
         if (!Array.isArray(markDoc[targetCategory])) markDoc[targetCategory] = [];
         const entryIndex = markDoc[targetCategory].findIndex(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
         const scoreObj = {
@@ -507,6 +611,34 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           markDoc[targetCategory][entryIndex] = scoreObj;
         } else {
           markDoc[targetCategory].push(scoreObj);
+        }
+      } else {
+        if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
+        let customCat = markDoc.customActivities.find(
+          c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+               c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+        );
+        if (!customCat) {
+          markDoc.customActivities.push({
+            categoryName: cleanCategory,
+            items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, file: fileData || { url: '' } }]
+          });
+        } else {
+          if (!Array.isArray(customCat.items)) customCat.items = [];
+          const entryIndex = customCat.items.findIndex(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
+          const scoreObj = {
+            title: cleanTitle,
+            totalMarks: parsedTotal,
+            obtainedMarks: obtained,
+            isAbsent,
+            file: fileData || (entryIndex > -1 ? customCat.items[entryIndex].file : { url: '' })
+          };
+
+          if (entryIndex > -1) {
+            customCat.items[entryIndex] = scoreObj;
+          } else {
+            customCat.items.push(scoreObj);
+          }
         }
       }
 
@@ -556,6 +688,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(resolvedCategory);
 
   if (!classroomId || totalMarks === undefined || !Array.isArray(marksData) || marksData.length === 0) {
     return next(new AppError('Classroom ID, Total Marks (>0), and Marks Data array are required!', 400));
@@ -593,21 +726,36 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   if (!['mids', 'finals'].includes(resolvedCategory)) {
-    if (!Array.isArray(classroom[resolvedCategory])) {
-      classroom[resolvedCategory] = [];
-    }
-
-    const existingClassItem = classroom[resolvedCategory].find(
-      (item) => item.title && item.title.toLowerCase() === cleanTitle.toLowerCase()
-    );
-
-    if (existingClassItem) {
-      existingClassItem.totalMarks = parsedTotal;
+    if (isStandard) {
+      if (!Array.isArray(classroom[resolvedCategory])) classroom[resolvedCategory] = [];
+      const existingClassItem = classroom[resolvedCategory].find(
+        (item) => item.title && item.title.toLowerCase() === cleanTitle.toLowerCase()
+      );
+      if (existingClassItem) {
+        existingClassItem.totalMarks = parsedTotal;
+      } else {
+        classroom[resolvedCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+      }
     } else {
-      classroom[resolvedCategory].push({
-        title: cleanTitle,
-        totalMarks: parsedTotal
-      });
+      if (!Array.isArray(classroom.customActivities)) classroom.customActivities = [];
+      let customCat = classroom.customActivities.find(
+        c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+             c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+      );
+      if (!customCat) {
+        classroom.customActivities.push({
+          categoryName: cleanCategory,
+          items: [{ title: cleanTitle, totalMarks: parsedTotal }]
+        });
+      } else {
+        if (!Array.isArray(customCat.items)) customCat.items = [];
+        const existingCustomItem = customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (existingCustomItem) {
+          existingCustomItem.totalMarks = parsedTotal;
+        } else {
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal });
+        }
+      }
     }
     await classroom.save();
   }
@@ -633,7 +781,6 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     const parsedObtained = absentFlag ? 0 : Math.max(0, Number(rawVal) || 0);
 
     let markDoc = docMap.get(studentIdStr);
-
     if (!markDoc) {
       markDoc = new Mark({
         classroom: classroomId,
@@ -641,6 +788,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         quizzes: [],
         assignments: [],
         labMarks: [],
+        customActivities: []
       });
     }
 
@@ -649,31 +797,43 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       markDoc[resolvedCategory].obtainedMarks = parsedObtained;
       markDoc[resolvedCategory].isAbsent = absentFlag;
       if (file) markDoc[resolvedCategory].file = file;
-    } else {
-      if (!Array.isArray(markDoc[resolvedCategory])) {
-        markDoc[resolvedCategory] = [];
-      }
-
+    } else if (isStandard) {
+      if (!Array.isArray(markDoc[resolvedCategory])) markDoc[resolvedCategory] = [];
       const existingIdx = markDoc[resolvedCategory].findIndex(
         (e) => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase()
       );
-
       if (existingIdx > -1) {
         markDoc[resolvedCategory][existingIdx].totalMarks = parsedTotal;
         markDoc[resolvedCategory][existingIdx].obtainedMarks = parsedObtained;
         markDoc[resolvedCategory][existingIdx].isAbsent = absentFlag;
-        if (file) {
-          markDoc[resolvedCategory][existingIdx].file = file;
-        }
+        if (file) markDoc[resolvedCategory][existingIdx].file = file;
       } else {
-        const newItem = {
-          title: cleanTitle,
-          totalMarks: parsedTotal,
-          obtainedMarks: parsedObtained,
-          isAbsent: absentFlag,
-        };
+        const newItem = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag };
         if (file) newItem.file = file;
         markDoc[resolvedCategory].push(newItem);
+      }
+    } else {
+      if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
+      let customCat = markDoc.customActivities.find(
+        c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+             c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+      );
+      if (!customCat) {
+        markDoc.customActivities.push({
+          categoryName: cleanCategory,
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, file: file || { url: '' } }]
+        });
+      } else {
+        if (!Array.isArray(customCat.items)) customCat.items = [];
+        const existingItemIdx = customCat.items.findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (existingItemIdx > -1) {
+          customCat.items[existingItemIdx].totalMarks = parsedTotal;
+          customCat.items[existingItemIdx].obtainedMarks = parsedObtained;
+          customCat.items[existingItemIdx].isAbsent = absentFlag;
+          if (file) customCat.items[existingItemIdx].file = file;
+        } else {
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, file: file || { url: '' } });
+        }
       }
     }
 
@@ -689,7 +849,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
           email: targetStudentEmail,
           title: `${cleanTitle} (${resolvedCategory.toUpperCase()})`,
           bodyText: absentFlag
-            ? `You were marked <strong>ABSENT ('A')</strong> for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong>. Your score has been recorded as 0.`
+            ? `You were marked <strong>ABSENT ('A')</strong> for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong>.`
             : `Your grade for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been uploaded.`,
           details: [
             { label: 'Evaluation', value: cleanTitle },
@@ -726,7 +886,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// UPDATE SINGLE ITEM MARK FOR A STUDENT (Spam-Free Notification Fix)
+// UPDATE SINGLE ITEM MARK FOR A STUDENT
 // =============================================================================
 exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   const { classroomId, studentId, category } = req.body;
@@ -742,6 +902,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(resolvedCategory);
 
   const [classroom, student] = await Promise.all([
     Classroom.findById(classroomId).lean(),
@@ -759,6 +920,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       quizzes: [],
       assignments: [],
       labMarks: [],
+      customActivities: []
     });
   }
 
@@ -770,10 +932,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
     const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
 
-    if (currentTotal <= 0) {
-      return next(new AppError('Total marks must be greater than 0!', 400));
-    }
-
+    if (currentTotal <= 0) return next(new AppError('Total marks must be greater than 0!', 400));
     if (!absentFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
@@ -784,12 +943,9 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       isAbsent: absentFlag,
       file: fileData || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
     };
-  } else {
+  } else if (isStandard) {
     if (!itemTitle) return next(new AppError('Item title is required!', 400));
-
-    if (!Array.isArray(markDoc[resolvedCategory])) {
-      markDoc[resolvedCategory] = [];
-    }
+    if (!Array.isArray(markDoc[resolvedCategory])) markDoc[resolvedCategory] = [];
 
     const itemIdx = markDoc[resolvedCategory].findIndex(
       (item) => item.title.toLowerCase() === itemTitle.trim().toLowerCase()
@@ -800,10 +956,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
     const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
 
-    if (currentTotal <= 0) {
-      return next(new AppError('Total marks must be greater than 0!', 400));
-    }
-
+    if (currentTotal <= 0) return next(new AppError('Total marks must be greater than 0!', 400));
     if (!absentFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
@@ -821,6 +974,49 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
         isAbsent: absentFlag,
         file: fileData || { url: '', public_id: '', fileType: '', fileName: '' }
       });
+    }
+  } else {
+    if (!itemTitle) return next(new AppError('Item title is required!', 400));
+    if (!Array.isArray(markDoc.customActivities)) markDoc.customActivities = [];
+
+    let customCat = markDoc.customActivities.find(
+      c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+           c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+    );
+
+    if (!customCat) {
+      markDoc.customActivities.push({
+        categoryName: cleanCategory,
+        items: [{
+          title: itemTitle.trim(),
+          totalMarks: Number(incomingTotal) || 10,
+          obtainedMarks: isAbsentFlag ? 0 : (Number(incomingObtained) || 0),
+          isAbsent: isAbsentFlag,
+          file: fileData || { url: '' }
+        }]
+      });
+    } else {
+      if (!Array.isArray(customCat.items)) customCat.items = [];
+      const itemIdx = customCat.items.findIndex(i => i.title?.toLowerCase() === itemTitle.trim().toLowerCase());
+      const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (itemIdx > -1 ? customCat.items[itemIdx].totalMarks : 10);
+      const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : (itemIdx > -1 ? String(customCat.items[itemIdx].obtainedMarks) : '0');
+      const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
+      const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+
+      if (itemIdx > -1) {
+        customCat.items[itemIdx].totalMarks = currentTotal;
+        customCat.items[itemIdx].obtainedMarks = currentObtained;
+        customCat.items[itemIdx].isAbsent = absentFlag;
+        if (fileData) customCat.items[itemIdx].file = fileData;
+      } else {
+        customCat.items.push({
+          title: itemTitle.trim(),
+          totalMarks: currentTotal,
+          obtainedMarks: currentObtained,
+          isAbsent: absentFlag,
+          file: fileData || { url: '' }
+        });
+      }
     }
   }
 
@@ -862,6 +1058,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
+  const isStandard = STANDARD_CATEGORIES.includes(resolvedCategory);
 
   if (!classroomId || !resolvedCategory || !itemTitle) {
     return next(new AppError('Classroom ID, Category, and Item Title are required!', 400));
@@ -877,13 +1074,25 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   const savePromises = [];
 
   for (const doc of markDocs) {
-    const initialLength = (doc[resolvedCategory] || []).length;
-    doc[resolvedCategory] = (doc[resolvedCategory] || []).filter(
-      (item) => item.title.trim().toLowerCase() !== cleanTitle
-    );
-
-    if (doc[resolvedCategory].length !== initialLength) {
-      savePromises.push(doc.save());
+    if (isStandard) {
+      const initialLength = (doc[resolvedCategory] || []).length;
+      doc[resolvedCategory] = (doc[resolvedCategory] || []).filter(
+        (item) => item.title.trim().toLowerCase() !== cleanTitle
+      );
+      if (doc[resolvedCategory].length !== initialLength) {
+        savePromises.push(doc.save());
+      }
+    } else if (Array.isArray(doc.customActivities)) {
+      let modified = false;
+      doc.customActivities.forEach(cat => {
+        if (cat.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+            cat.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()) {
+          const initialLen = (cat.items || []).length;
+          cat.items = (cat.items || []).filter(i => i.title?.trim().toLowerCase() !== cleanTitle);
+          if (cat.items.length !== initialLen) modified = true;
+        }
+      });
+      if (modified) savePromises.push(doc.save());
     }
   }
 
@@ -891,7 +1100,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     status: 'success',
-    message: `Removed "${itemTitle}" from ${savePromises.length} student record(s) and recalculated totals.`,
+    message: `Removed "${itemTitle}" successfully.`,
   });
 });
 
@@ -912,6 +1121,7 @@ exports.getStudentMarks = catchAsync(async (req, res, next) => {
       quizzes: [],
       assignments: [],
       labMarks: [],
+      customActivities: []
     });
     
     markDoc = await Mark.findById(markDoc._id)

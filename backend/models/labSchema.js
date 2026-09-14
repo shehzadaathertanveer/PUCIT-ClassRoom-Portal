@@ -75,7 +75,7 @@ const labRoomSchema = new mongoose.Schema(
       default: [] 
     },
 
-    // NOTICE BOARD FOR LAB ANNOUNCEMENTS (Supports image/file attachments)
+    // NOTICE BOARD FOR LAB ANNOUNCEMENTS (Supports image/file attachments & auto-url normalization)
     notices: [{
       title: { type: String, required: true, trim: true },
       content: { type: String, required: true, trim: true },
@@ -98,7 +98,6 @@ const labRoomSchema = new mongoose.Schema(
     }],
 
     // 🚀 STANDARD & CUSTOM EVALUATION STORAGE ARRAYS
-    // Standard pools for fast direct queries
     labTasks: [{
       title: { type: String, required: true, trim: true },
       totalMarks: { type: Number, required: true, min: 1 },
@@ -132,7 +131,7 @@ const labRoomSchema = new mongoose.Schema(
 
     // 🌟 UNIVERSAL FALLBACK: Handles any custom activity a teacher picks or types on the fly!
     customActivities: [{
-      categoryName: { type: String, required: true, trim: true }, // e.g. "Hackathon", "Code Reviews"
+      categoryName: { type: String, required: true, trim: true },
       items: [{
         title: { type: String, required: true, trim: true },
         totalMarks: { type: Number, required: true, min: 1 },
@@ -150,8 +149,44 @@ const labRoomSchema = new mongoose.Schema(
       ref: 'User' 
     },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    strict: false 
+  }
 );
+
+// Helper function to normalize Cloudinary raw resource URLs (e.g. PDFs)
+const normalizeNoticeAttachments = (doc) => {
+  if (doc && doc.notices && Array.isArray(doc.notices)) {
+    doc.notices.forEach(notice => {
+      if (notice.attachment && notice.attachment.url) {
+        const isRaw = notice.attachment.fileType === 'raw' || 
+                      notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
+        
+        if (isRaw && notice.attachment.url.includes('/image/upload/')) {
+          notice.attachment.url = notice.attachment.url.replace('/image/upload/', '/raw/upload/');
+          notice.attachment.fileType = 'raw';
+        }
+      }
+    });
+  }
+};
+
+// Pre-save hook to ensure URLs are clean before hitting the database
+labRoomSchema.pre('save', function (next) {
+  normalizeNoticeAttachments(this);
+  next();
+});
+
+// Post-query middleware to fix any legacy URLs returned to the client
+labRoomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
+  if (!docs) return;
+  if (Array.isArray(docs)) {
+    docs.forEach(doc => normalizeNoticeAttachments(doc));
+  } else {
+    normalizeNoticeAttachments(docs);
+  }
+});
 
 // Performance Indexes for Roster Lookups
 labRoomSchema.index({ isActive: 1, sectionPrefix: 1 });

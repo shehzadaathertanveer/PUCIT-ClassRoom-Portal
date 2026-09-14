@@ -73,7 +73,7 @@ const classroomSchema = new mongoose.Schema(
       default: [] 
     },
 
-    // NOTICE BOARD FOR ANNOUNCEMENTS (With attachment support)
+    // NOTICE BOARD FOR ANNOUNCEMENTS (With attachment support & auto-url normalization)
     notices: [{
       title: { type: String, required: true, trim: true },
       content: { type: String, required: true, trim: true },
@@ -119,9 +119,42 @@ const classroomSchema = new mongoose.Schema(
   },
   { 
     timestamps: true,
-    strict: false // 👈 CRITICAL: Allows dynamic custom activity arrays & fields without stripping them
+    strict: false // Allows dynamic custom activity arrays & fields without stripping them
   }
 );
+
+// Helper function to normalize Cloudinary raw resource URLs (e.g. PDFs)
+const normalizeNoticeAttachments = (doc) => {
+  if (doc && doc.notices && Array.isArray(doc.notices)) {
+    doc.notices.forEach(notice => {
+      if (notice.attachment && notice.attachment.url) {
+        const isRaw = notice.attachment.fileType === 'raw' || 
+                      notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
+        
+        if (isRaw && notice.attachment.url.includes('/image/upload/')) {
+          notice.attachment.url = notice.attachment.url.replace('/image/upload/', '/raw/upload/');
+          notice.attachment.fileType = 'raw';
+        }
+      }
+    });
+  }
+};
+
+// Pre-save hook to ensure URLs are clean before hitting the database
+classroomSchema.pre('save', function (next) {
+  normalizeNoticeAttachments(this);
+  next();
+});
+
+// Post-query middleware to fix any legacy URLs returned to the client
+classroomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
+  if (!docs) return;
+  if (Array.isArray(docs)) {
+    docs.forEach(doc => normalizeNoticeAttachments(doc));
+  } else {
+    normalizeNoticeAttachments(docs);
+  }
+});
 
 // Performance Indexes for Roster Lookups and Auto-Enrollment Sync
 classroomSchema.index({ isActive: 1, sectionPrefix: 1 });

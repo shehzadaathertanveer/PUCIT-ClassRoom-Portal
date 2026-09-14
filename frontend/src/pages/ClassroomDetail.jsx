@@ -235,7 +235,7 @@ const ClassroomDetail = () => {
       const students = res.data?.data?.students || [];
       setAvailableAutoStudents(students);
     } catch (err) {
-      console.warn('Failed to fetch auto-detect students:', err);
+      console.warn('Could not fetch auto-detect students:', err);
     } finally {
       setLoadingAutoStudents(false);
     }
