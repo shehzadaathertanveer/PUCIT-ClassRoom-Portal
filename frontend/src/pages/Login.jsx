@@ -12,7 +12,7 @@ const Login = () => {
   const [isEmailDisabled, setIsEmailDisabled] = useState(false);
   const [isRollNoDisabled, setIsRollNoDisabled] = useState(false);
   
-  const [helperText, setHelperText] = useState('Enter your Roll No / Registration No (if student) OR Email (if teacher/admin) with your password.');
+  const [helperText, setHelperText] = useState('Enter your Roll Number (if student) OR Email (if teacher/admin) with your password.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
   
@@ -24,15 +24,15 @@ const Login = () => {
     if (rollNo.trim().length > 0) {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(true);
-      if (!isErrorState) setHelperText('Student profile linked: Roll/Registration number entry active.');
+      if (!isErrorState) setHelperText('Student profile linked: Roll number entry active.');
     } else if (email.trim().length > 0) {
       setIsRollNoDisabled(true);
       setIsEmailDisabled(false);
-      if (!isErrorState) setHelperText('Faculty profile active: Roll number entry bypassed.');
+      if (!isErrorState) setHelperText('Faculty/Fresher profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
-      if (!isErrorState) setHelperText('Enter your Roll No / Registration No (if student) OR Email (if teacher/admin) with your password.');
+      if (!isErrorState) setHelperText('Enter your Roll Number (if student) OR Email (if teacher/admin) with your password.');
     }
   }, [rollNo, email, isErrorState]);
 
@@ -48,7 +48,7 @@ const Login = () => {
     const trimmedEmail = email.trim();
 
     if (!trimmedRoll && !trimmedEmail) {
-      setHelperText('Please provide either your Roll/Registration Number or Email Address.');
+      setHelperText('Please provide either your Roll Number or Email Address.');
       setIsErrorState(true);
       return;
     }
@@ -76,7 +76,6 @@ const Login = () => {
     } catch (err) {
       let errorMsg = 'Invalid credentials or network error.';
       
-      // PRIORITIZE backend error message first so wrong passwords/credentials show immediately
       if (err?.response?.data?.message) {
         errorMsg = err.response.data.message;
       } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
@@ -129,7 +128,7 @@ const Login = () => {
         <form onSubmit={handleLogin} className="space-y-3">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-1.5">
-              Roll / Registration Number {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed)</span>}
+              Roll Number {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed)</span>}
             </label>
             <input 
               type="text" 
@@ -144,7 +143,7 @@ const Login = () => {
                   ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
                   : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
               }`} 
-              placeholder="BITF26A001 or Registration No" 
+              placeholder="BITF26A001" 
             />
           </div>
 

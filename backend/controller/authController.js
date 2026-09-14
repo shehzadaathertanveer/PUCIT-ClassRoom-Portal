@@ -47,30 +47,31 @@ const syncStudentEnrollment = async (user) => {
     queryConditions.push({ isActive: true, sectionPrefix: userRoll });
   }
 
-  const matchingClassrooms = await Classroom.find({ $or: queryConditions });
+  const matchingClassrooms = await Classroom.find({ $or: queryConditions }).select('_id students maxCapacity');
 
   if (matchingClassrooms.length === 0) return;
 
   const syncPromises = matchingClassrooms.map(async (classroom) => {
     if (classroom.students.length >= classroom.maxCapacity) return;
 
-    await Classroom.updateOne(
-      { _id: classroom._id },
-      { $addToSet: { students: user._id } },
-    );
-
-    await Mark.findOneAndUpdate(
-      { classroom: classroom._id, student: user._id },
-      {
-        $setOnInsert: {
-          classroom: classroom._id,
-          student: user._id,
-          quizzes: [],
-          assignments: [],
+    await Promise.all([
+      Classroom.updateOne(
+        { _id: classroom._id },
+        { $addToSet: { students: user._id } }
+      ),
+      Mark.findOneAndUpdate(
+        { classroom: classroom._id, student: user._id },
+        {
+          $setOnInsert: {
+            classroom: classroom._id,
+            student: user._id,
+            quizzes: [],
+            assignments: [],
+          },
         },
-      },
-      { upsert: true, returnDocument: "after" },
-    );
+        { upsert: true, returnDocument: "after" }
+      )
+    ]);
   });
 
   await Promise.all(syncPromises);
@@ -126,7 +127,7 @@ exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
 // 1. GET ME PROFILE
 // =============================================================================
 exports.getMe = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.user._id);
+  const user = await User.findById(req.user._id).select("-password");
   if (!user) {
     return next(new AppError("User not found.", 404));
   }
@@ -150,7 +151,7 @@ exports.getMe = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. INITIATE REGISTRATION (Supports Freshers with Reg No & Temporary Prefix)
+// 2. INITIATE REGISTRATION (Supports Freshers with Reg No & Temporary Prefix / Roll No)
 // =============================================================================
 exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const { name, password, rollNo, registrationNo, personalNotificationEmail, email } = req.body;
@@ -160,7 +161,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   }
 
   let formattedRollNo = rollNo ? rollNo.trim().toUpperCase() : "";
-  let formattedRegNo = registrationNo ? registrationNo.trim() : "";
+  let formattedRegNo = registrationNo ? registrationNo.trim().toUpperCase() : "";
   let cleanEmail = email ? email.trim().toLowerCase() : "";
   const cleanPersonalEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
 
@@ -184,7 +185,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
 
   if (formattedRegNo) {
-    const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true });
+    const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
     if (existingRegHolder) {
       return next(new AppError("This Registration / Form Number is already linked to an active account.", 400));
     }
@@ -194,30 +195,27 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const hashedOtp = hashOtp(otp);
   const otpExpiry = Date.now() + 10 * 60 * 1000;
 
-  const destinationEmail = cleanPersonalEmail || (cleanEmail.endsWith('@pucit.edu.pk') ? cleanEmail : null) || cleanPersonalEmail;
+  const destinationEmail = cleanPersonalEmail || (cleanEmail && cleanEmail.endsWith('@pucit.edu.pk') ? cleanEmail : null) || cleanPersonalEmail;
 
   if (!destinationEmail) {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
   }
 
-  try {
-    await sendStyledEmail({
-      to: destinationEmail,
-      subject: "Account Registration OTP",
-      title: "Complete Your Registration",
-      bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
-      otpCode: otp,
-      details: [
-        { label: "Assigned Roll / Prefix", value: formattedRollNo },
-        { label: "Registration / Form No", value: formattedRegNo || "N/A" },
-        { label: "Notification Email", value: destinationEmail }
-      ],
-    });
-  } catch (err) {
-    return next(new AppError("Failed to send verification email. Check SMTP settings.", 500));
-  }
+  // Fire email dispatch concurrently if possible or await directly
+  await sendStyledEmail({
+    to: destinationEmail,
+    subject: "Account Registration OTP",
+    title: "Complete Your Registration",
+    bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
+    otpCode: otp,
+    details: [
+      { label: "Assigned Roll / Prefix", value: formattedRollNo },
+      { label: "Registration / Form No", value: formattedRegNo || "N/A" },
+      { label: "Notification Email", value: destinationEmail }
+    ],
+  });
 
-  let user = await User.findOne({ $or: [{ email: officialEmail }, ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : [])] });
+  let user = await User.findOne({ $or: [{ email: officialEmail }, ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []), ...(formattedRollNo ? [{ rollNo: formattedRollNo }] : [])] });
 
   if (user) {
     user.name = name;
@@ -292,10 +290,12 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const userRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
 
   if (user.role === "TA" && userRoll) {
-    const taClassrooms = await Classroom.find({ isActive: true, taRollNumbers: userRoll });
-    for (const classroom of taClassrooms) {
-      await Classroom.updateOne({ _id: classroom._id }, { $addToSet: { tas: user._id } });
-    }
+    const taClassrooms = await Classroom.find({ isActive: true, taRollNumbers: userRoll }).select('_id');
+    await Promise.all(
+      taClassrooms.map(classroom =>
+        Classroom.updateOne({ _id: classroom._id }, { $addToSet: { tas: user._id } })
+      )
+    );
   }
 
   if (user.role === "STUDENT") {
@@ -314,21 +314,21 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 4. USER LOGIN & DASHBOARD DATA PRE-LOAD
+// 4. USER LOGIN & DASHBOARD DATA PRE-LOAD (Optimized with Parallel Execution)
 // =============================================================================
 exports.login = catchAsync(async (req, res, next) => {
   const { loginIdentifier, password } = req.body;
 
   if (!loginIdentifier || !password) {
-    return next(new AppError("Please provide Roll Number/Email/Registration Number and Password!", 400));
+    return next(new AppError("Please provide Roll Number/Email and Password!", 400));
   }
 
   const identifier = loginIdentifier.trim();
+  const fresherBatchCode = (process.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
 
   const user = await User.findOne({
     $or: [
       { rollNo: identifier.toUpperCase() },
-      { registrationNo: identifier },
       { email: identifier.toLowerCase() },
       { personalNotificationEmail: identifier.toLowerCase() }
     ],
@@ -336,6 +336,16 @@ exports.login = catchAsync(async (req, res, next) => {
 
   if (!user || !(await user.correctPassword(password, user.password))) {
     return next(new AppError("Incorrect credentials provided!", 401));
+  }
+
+  const isEmailLogin = identifier.includes('@') || identifier.toLowerCase() === user.email || identifier.toLowerCase() === user.personalNotificationEmail;
+  
+  if (user.role === "STUDENT" && isEmailLogin) {
+    const isFresher = (user.rollNo && user.rollNo.toUpperCase().includes(fresherBatchCode)) || user.personalNotificationEmail;
+    
+    if (!isFresher) {
+      return next(new AppError("Senior students must log in using their Roll Number and Password.", 403));
+    }
   }
 
   if (user.requiresEmail && !user.isEmailVerified) {
@@ -357,6 +367,7 @@ exports.login = catchAsync(async (req, res, next) => {
   const token = signToken(user._id, user.role);
   let dashboardData = {};
 
+  // High-Efficiency Parallelized Dashboard Data Loading
   if (user.role === "STUDENT") {
     const classrooms = await Classroom.find({ students: user._id, isActive: true })
       .populate("teacher", "name email")
@@ -368,33 +379,37 @@ exports.login = catchAsync(async (req, res, next) => {
     dashboardData = { classrooms, marks };
   } else if (["TA", "TEACHER"].includes(user.role)) {
     const roleKey = user.role === "TA" ? "tas" : "teacher";
-    const classrooms = await Classroom.find({ [roleKey]: user._id, isActive: true })
-      .populate("teacher", "name email")
-      .populate("tas", "name rollNo email")
-      .populate("students", "name rollNo registrationNo email requiresEmail");
-
-    const labrooms = await Labroom.find({ [roleKey]: user._id, isActive: true })
-      .populate("teacher", "name email")
-      .populate("tas", "name rollNo email")
-      .populate("students", "name rollNo registrationNo email requiresEmail");
+    
+    // Fetch Classrooms and Labrooms concurrently in parallel for blazing-fast speed
+    const [classrooms, labrooms] = await Promise.all([
+      Classroom.find({ [roleKey]: user._id, isActive: true })
+        .populate("teacher", "name email")
+        .populate("tas", "name rollNo email")
+        .populate("students", "name rollNo registrationNo email requiresEmail"),
+      Labroom.find({ [roleKey]: user._id, isActive: true })
+        .populate("teacher", "name email")
+        .populate("tas", "name rollNo email")
+        .populate("students", "name rollNo registrationNo email requiresEmail")
+    ]);
 
     const classroomIds = classrooms.map((c) => c._id);
     const marks = await Mark.find({ classroom: { $in: classroomIds } });
 
     dashboardData = { classrooms, labrooms, marks };
   } else if (user.role === "ADMIN") {
-    const activeClassrooms = await Classroom.find({ isActive: true })
-      .populate("teacher", "name email")
-      .populate("tas", "name rollNo")
-      .populate("students", "name rollNo registrationNo");
-
-    const activeLabrooms = await Labroom.find({ isActive: true })
-      .populate("teacher", "name email")
-      .populate("tas", "name rollNo")
-      .populate("students", "name rollNo registrationNo");
-
-    const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
-    const allUsers = await User.find().select("-password");
+    // Fetch all admin data concurrently in parallel
+    const [activeClassrooms, activeLabrooms, pendingTeachers, allUsers] = await Promise.all([
+      Classroom.find({ isActive: true })
+        .populate("teacher", "name email")
+        .populate("tas", "name rollNo")
+        .populate("students", "name rollNo registrationNo"),
+      Labroom.find({ isActive: true })
+        .populate("teacher", "name email")
+        .populate("tas", "name rollNo")
+        .populate("students", "name rollNo registrationNo"),
+      User.find({ role: "PENDING_TEACHER" }).select("-password"),
+      User.find().select("-password")
+    ]);
 
     dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
   }
@@ -446,18 +461,14 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const targetEmail = user.personalNotificationEmail || user.email;
 
-  try {
-    await sendStyledEmail({
-      to: targetEmail,
-      subject: "Password Recovery OTP",
-      title: "Password Reset Request",
-      bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
-      otpCode: otp,
-      details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
-    });
-  } catch (err) {
-    return next(new AppError("Error sending reset email. Try again later!", 500));
-  }
+  await sendStyledEmail({
+    to: targetEmail,
+    subject: "Password Recovery OTP",
+    title: "Password Reset Request",
+    bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
+    otpCode: otp,
+    details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
+  });
 
   user.otpCode = hashOtp(otp);
   user.otpExpiresAt = Date.now() + 10 * 60 * 1000;
@@ -611,18 +622,14 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  try {
-    await sendStyledEmail({
-      to: targetEmail,
-      subject: "Official Inbox Activation OTP",
-      title: "Activate Official University Inbox",
-      bodyText: `Hello <strong>${user.name}</strong>, your official university inbox is now accessible. Use the secure verification code boxes below to link and lock your account permanently.`,
-      otpCode: otp,
-      details: [{ label: "Official Email", value: targetEmail }],
-    });
-  } catch (err) {
-    return next(new AppError("Could not send activation OTP to official inbox. Try again later!", 500));
-  }
+  await sendStyledEmail({
+    to: targetEmail,
+    subject: "Official Inbox Activation OTP",
+    title: "Activate Official University Inbox",
+    bodyText: `Hello <strong>${user.name}</strong>, your official university inbox is now accessible. Use the secure verification code boxes below to link and lock your account permanently.`,
+    otpCode: otp,
+    details: [{ label: "Official Email", value: targetEmail }],
+  });
 
   user.otpCode = hashOtp(otp);
   user.otpExpiresAt = Date.now() + 10 * 60 * 1000;
@@ -789,17 +796,26 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 15. ADMIN ANALYTICS & BREAKDOWNS
+// 15. ADMIN ANALYTICS & BREAKDOWNS (Optimized via Concurrent Promise.all)
 // =============================================================================
 exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
-  const totalUsers = await User.countDocuments();
-  const studentsCount = await User.countDocuments({ role: "STUDENT" });
-  const teachersCount = await User.countDocuments({ role: "TEACHER" });
-  const adminsCount = await User.countDocuments({ role: "ADMIN" });
-  const pendingTeachersCount = await User.countDocuments({ role: "PENDING_TEACHER" });
-
-  const activeClassroomsCount = await Classroom.countDocuments({ isActive: true });
-  const activeLabroomsCount = await Labroom.countDocuments({ isActive: true });
+  const [
+    totalUsers,
+    studentsCount,
+    teachersCount,
+    adminsCount,
+    pendingTeachersCount,
+    activeClassroomsCount,
+    activeLabroomsCount
+  ] = await Promise.all([
+    User.countDocuments(),
+    User.countDocuments({ role: "STUDENT" }),
+    User.countDocuments({ role: "TEACHER" }),
+    User.countDocuments({ role: "ADMIN" }),
+    User.countDocuments({ role: "PENDING_TEACHER" }),
+    Classroom.countDocuments({ isActive: true }),
+    Labroom.countDocuments({ isActive: true })
+  ]);
 
   res.status(200).json({
     status: "success",
@@ -826,7 +842,7 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
 // 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT
 // =============================================================================
 exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
-  const users = await User.find().select("-password").sort({ createdAt: -1 });
+  const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
   
   res.status(200).json({
     status: "success",

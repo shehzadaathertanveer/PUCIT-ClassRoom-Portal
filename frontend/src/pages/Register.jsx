@@ -5,7 +5,7 @@ import API from '../api/axios';
 
 const Register = () => {
   const [rollNo, setRollNo] = useState('');
-  const [registrationNo, setRegistrationNo] = useState(''); // Specific field for freshers without a digit suffix
+  const [registrationNo, setRegistrationNo] = useState(''); // Specific field for freshers
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [personalNotificationEmail, setPersonalNotificationEmail] = useState('');
@@ -16,7 +16,7 @@ const Register = () => {
   
   const [isEmailDisabled, setIsEmailDisabled] = useState(false);
   const [isRollNoDisabled, setIsRollNoDisabled] = useState(false);
-  const [isFresherWithoutRoll, setIsFresherWithoutRoll] = useState(false); // Triggers regNo & personal email inputs
+  const [isFresherWithoutEmail, setIsFresherWithoutEmail] = useState(false); // Triggers regNo & personal email inputs for ANY F26 student
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,7 @@ const Register = () => {
 
   const fresherBatchCode = (import.meta.env.VITE_FRESHER_BATCH || 'f26').trim().toLowerCase();
 
-  // Smart dual-role and fresher prefix detection logic
+  // Smart dual-role and fresher detection logic (catches both BITF26A and BITF26A004)
   useEffect(() => {
     if (isErrorState) return;
 
@@ -37,43 +37,42 @@ const Register = () => {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(true);
 
-      // Check if it's a fresher section prefix without a trailing student number index (e.g., "BITF26A" instead of "BITF26A001")
-      // A standard roll number usually ends with digits (e.g., 001, 45). If it just ends with a letter like A, B, M, or the batch code itself.
-      const hasNumberSuffix = /\d{2,3}$/.test(trimmedRoll);
-      const isPrefixOnly = trimmedRoll.includes(fresherBatchCode) && !hasNumberSuffix;
+      // Check if it belongs to the fresher batch (e.g., contains 'f26')
+      const isFresherBatch = trimmedRoll.includes(fresherBatchCode);
 
-      if (isPrefixOnly) {
+      if (isFresherBatch) {
         setEmail('');
-        setIsFresherWithoutRoll(true);
-        setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+        setIsFresherWithoutEmail(true);
+        setHelperText(`Fresher batch detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
       } else {
         setEmail(`${trimmedRoll}@pucit.edu.pk`);
-        setIsFresherWithoutRoll(false);
+        setIsFresherWithoutEmail(false);
         setHelperText(`Senior student profile linked to: ${trimmedRoll.toUpperCase()}@pucit.edu.pk`);
       }
     } else if (email.trim().length > 0 && !isEmailDisabled) {
       setIsRollNoDisabled(true);
-      setIsFresherWithoutRoll(false);
+      setIsFresherWithoutEmail(false);
       setHelperText('Faculty profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
-      setIsFresherWithoutRoll(false);
+      setIsFresherWithoutEmail(false);
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
   }, [rollNo, email, fresherBatchCode, isErrorState]);
 
-  // Real-time form validation
+  // Real-time form validation including password matching
   useEffect(() => {
     const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
-    const fresherCheck = !isFresherWithoutRoll || (registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0);
+    const fresherCheck = !isFresherWithoutEmail || (registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0);
+    const passwordsMatch = password.length > 0 && password === confirmPassword;
     
-    if (hasIdentifier && fresherCheck && name.trim() && password.length >= 6 && password === confirmPassword) {
+    if (hasIdentifier && fresherCheck && name.trim() && password.length >= 6 && passwordsMatch) {
       setIsFormValid(true);
     } else {
       setIsFormValid(false);
     }
-  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherWithoutRoll]);
+  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherWithoutEmail]);
 
   const handleRegister = async (e) => {
     if (e) {
@@ -81,6 +80,12 @@ const Register = () => {
       e.stopPropagation();
     }
     if (!isFormValid || loading) return;
+
+    if (password !== confirmPassword) {
+      setHelperText('Passwords do not match.');
+      setIsErrorState(true);
+      return;
+    }
 
     setLoading(true);
     setIsErrorState(false);
@@ -94,7 +99,7 @@ const Register = () => {
         password,
         rollNo: identifierRoll,
         ...(email.trim() && { email: email.trim().toLowerCase() }),
-        ...(isFresherWithoutRoll && {
+        ...(isFresherWithoutEmail && {
           registrationNo: registrationNo.trim().toUpperCase(),
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         })
@@ -183,7 +188,7 @@ const Register = () => {
                   ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
                   : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
               }`} 
-              placeholder="BITF26A or BITF26A001" 
+              placeholder="BITF26A or BITF26A004" 
             />
           </div>
 
@@ -199,13 +204,13 @@ const Register = () => {
                 if (isErrorState) setIsErrorState(false);
               }} 
               className="w-full px-4 py-3.5 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm sm:text-base transition-all shadow-inner" 
-              placeholder="Shehzada Ather" 
+              placeholder="Enter your full name" 
             />
           </div>
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Email Address {isEmailDisabled && <span className="text-orange-300 font-normal lowercase">(auto-configured)</span>}
+              Email Address {isEmailDisabled && !isFresherWithoutEmail && <span className="text-orange-300 font-normal lowercase">(auto-configured)</span>}
             </label>
             <input 
               type="email" 
@@ -214,12 +219,12 @@ const Register = () => {
                 if (!isEmailDisabled) setEmail(e.target.value);
                 if (isErrorState) setIsErrorState(false);
               }} 
-              disabled={isEmailDisabled}
+              disabled={isEmailDisabled && !isFresherWithoutEmail}
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck="false"
               className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
-                isEmailDisabled 
+                isEmailDisabled && !isFresherWithoutEmail 
                   ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
                   : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
               }`} 
@@ -227,8 +232,8 @@ const Register = () => {
             />
           </div>
 
-          {/* Conditional Freshers Registration Number & Personal Email Fields */}
-          {isFresherWithoutRoll && (
+          {/* Conditional Freshers Registration Number & Personal Email Fields for all F26 profiles */}
+          {isFresherWithoutEmail && (
             <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
@@ -308,7 +313,11 @@ const Register = () => {
                   setConfirmPassword(e.target.value);
                   if (isErrorState) setIsErrorState(false);
                 }} 
-                className="w-full px-4 py-3.5 pr-12 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm sm:text-base transition-all shadow-inner" 
+                className={`w-full px-4 py-3.5 pr-12 bg-[#080507]/80 border rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 text-sm sm:text-base transition-all shadow-inner ${
+                  confirmPassword.length > 0 && password !== confirmPassword 
+                    ? 'border-red-500 focus:ring-red-400' 
+                    : 'border-slate-700/80 focus:ring-orange-400 focus:border-orange-400'
+                }`} 
                 placeholder="••••••••" 
               />
               <button
@@ -319,6 +328,12 @@ const Register = () => {
                 {showConfirmPassword ? 'Hide' : 'Show'}
               </button>
             </div>
+            {/* Live Password Mismatch Error Indicator */}
+            {confirmPassword.length > 0 && password !== confirmPassword && (
+              <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
+                ⚠️ Passwords do not match
+              </p>
+            )}
           </div>
 
           <button 

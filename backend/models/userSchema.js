@@ -8,6 +8,10 @@ const isValidRollNo = (rollNo) => FULL_ROLL_NO_REGEX.test(rollNo) || TEMP_PREFIX
 
 const isValidPucitEmail = (email, role, rollNo) => {
   if (!email || role === 'ADMIN') return true;
+  
+  // Allow temporary placeholder emails for freshers before official inbox verification
+  if (email.endsWith('@temp.pucit.edu.pk')) return true;
+
   if (!email.endsWith('@pucit.edu.pk')) return false;
 
   if (role === 'STUDENT' && rollNo && FULL_ROLL_NO_REGEX.test(rollNo)) {
@@ -131,7 +135,7 @@ userSchema.pre('save', async function () {
     }
   }
 
-  // Automatically assign official PUCIT email format only if a full official roll number is present
+  // Automatically assign official PUCIT email format only if a full official roll number is present and not a temporary fresher email
   if (!this.email && this.rollNo && FULL_ROLL_NO_REGEX.test(this.rollNo)) {
     this.email = `${this.rollNo.toLowerCase()}@pucit.edu.pk`;
   }
