@@ -133,12 +133,16 @@ const ClassroomDetail = () => {
     if (clean.includes('assign')) return 'assignments';
     if (clean.includes('mid')) return 'mids';
     if (clean.includes('final')) return 'finals';
+    if (clean.includes('task')) return 'labTasks';
+    if (clean.includes('viva')) return 'vivas';
+    if (clean.includes('test')) return 'labTests';
+    if (clean.includes('project')) return 'projects';
     
     const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'labtasks', 'vivas', 'labtests', 'projects'];
     const potentialKey = clean.endsWith('s') ? clean : clean + 's';
     if (standardKeys.includes(potentialKey)) return potentialKey;
     
-    return 'customActivities';
+    return clean;
   };
 
   const getItemsForCategory = (catName = '') => {
@@ -332,7 +336,7 @@ const ClassroomDetail = () => {
       const catKey = getCategoryTargetKey(itemCategory);
 
       const payload = {
-        category: itemCategory, // Passing raw category name for custom activities support
+        category: itemCategory,
         title: trimmedTitle,
         totalMarks: tMarks,
         mode: itemCreationMode

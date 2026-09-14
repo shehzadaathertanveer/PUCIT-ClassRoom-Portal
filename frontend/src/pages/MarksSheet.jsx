@@ -4,15 +4,15 @@ import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
-const LabMarksSheet = () => {
-  const { labroomId, category, itemId } = useParams();
+const MarksSheet = () => {
+  const { classroomId, category, itemId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [labroom, setLabroom] = useState(null);
+  const [classroom, setClassroom] = useState(null);
   const [students, setStudents] = useState([]);
   const [existingMarks, setExistingMarks] = useState([]);
   
@@ -47,29 +47,42 @@ const LabMarksSheet = () => {
       setLoading(true);
       setError('');
 
-      // 1. Fetch bulk roster sheet from the correct labmarks endpoint
-      const res = await API.get(`/labmarks/bulk-sheet/${labroomId}`);
+      // 1. Fetch bulk roster sheet from the correct classroom marks endpoint
+      const res = await API.get(`/classroommarks/bulk-sheet/${classroomId}`);
       const data = res.data.data;
-      setLabroom(data.labroom || data.classroom);
+      setClassroom(data.classroom || data.labroom);
       setStudents(data.students || []);
       setExistingMarks(data.existingMarks || []);
 
       // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
       
-      // 3. Look up evaluation totalMarks if it already exists in labroom definition schemas
-      const currentLab = data.labroom || data.classroom;
-      if (currentLab && currentLab[category]) {
-        const foundActivity = currentLab[category].find(
-          act => act.title?.toLowerCase() === activeTitle?.toLowerCase()
-        );
+      // 3. Look up evaluation totalMarks if it already exists in classroom definition schemas
+      const currentClass = data.classroom || data.labroom;
+      if (currentClass) {
+        let foundActivity = null;
+        if (currentClass[category] && Array.isArray(currentClass[category])) {
+          foundActivity = currentClass[category].find(
+            act => act.title?.toLowerCase() === activeTitle?.toLowerCase()
+          );
+        } else if (currentClass.customActivities && Array.isArray(currentClass.customActivities)) {
+          const customCat = currentClass.customActivities.find(
+            c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+          );
+          if (customCat && customCat.items) {
+            foundActivity = customCat.items.find(
+              act => act.title?.toLowerCase() === activeTitle?.toLowerCase()
+            );
+          }
+        }
+
         if (foundActivity && foundActivity.totalMarks) {
           setTotalMarks(foundActivity.totalMarks);
         }
       }
 
       if (activeTitle && activeTitle !== 'general') {
-        const unassignedRes = await API.get(`/labmarks/unassigned/${labroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
+        const unassignedRes = await API.get(`/classroommarks/unassigned/${classroomId}?category=${category}&title=${encodeURIComponent(activeTitle)}`);
         const unassignedList = unassignedRes.data?.data?.unassignedStudents || unassignedRes.data?.unassignedStudents || [];
         setUnassignedStudentIds(new Set(unassignedList.map(s => s._id.toString())));
       } else {
@@ -77,7 +90,16 @@ const LabMarksSheet = () => {
           const studentId = student._id.toString();
           const markDoc = (data.existingMarks || []).find(m => m.student.toString() === studentId);
           if (!markDoc) return true;
-          const list = markDoc[category] || [];
+          
+          let list = [];
+          if (markDoc[category] && Array.isArray(markDoc[category])) {
+            list = markDoc[category];
+          } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
+            const customCat = markDoc.customActivities.find(
+              c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+            );
+            list = customCat ? customCat.items || [] : [];
+          }
           return list.length === 0;
         });
         setUnassignedStudentIds(new Set(unassigned.map(s => s._id.toString())));
@@ -96,7 +118,16 @@ const LabMarksSheet = () => {
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
-          const list = markDoc[category] || [];
+          let list = [];
+          if (markDoc[category] && Array.isArray(markDoc[category])) {
+            list = markDoc[category];
+          } else if (markDoc.customActivities && Array.isArray(markDoc.customActivities)) {
+            const customCat = markDoc.customActivities.find(
+              c => c.categoryName?.trim().toLowerCase() === category?.trim().toLowerCase()
+            );
+            list = customCat ? customCat.items || [] : [];
+          }
+
           const item = list.find(e => 
             e._id?.toString() === itemId || 
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
@@ -119,7 +150,7 @@ const LabMarksSheet = () => {
 
       setMarkInputs(initialMap);
     } catch (err) {
-      console.error('Failed to load lab marksheet:', err);
+      console.error('Failed to load marksheet:', err);
       setError(err.response?.data?.message || 'Failed to load grading spreadsheet.');
     } finally {
       setLoading(false);
@@ -127,10 +158,10 @@ const LabMarksSheet = () => {
   };
 
   useEffect(() => {
-    if (labroomId && category) {
+    if (classroomId && category) {
       fetchSheetData();
     }
-  }, [labroomId, category, itemId]);
+  }, [classroomId, category, itemId]);
 
   const handleInputChange = (studentId, value) => {
     const cleanVal = value;
@@ -201,18 +232,18 @@ const LabMarksSheet = () => {
         return;
       }
 
-      await API.post('/labmarks/batch-submit', {
-        labroomId,
+      await API.post('/classroommarks/batch-submit', {
+        classroomId,
         category,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
         marksData
       });
 
-      showToast('Lab marks submitted successfully!');
+      showToast('Marks submitted successfully!');
       fetchSheetData();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to submit lab marks.');
+      showToast(err.response?.data?.message || 'Failed to submit marks.');
     } finally {
       setSaving(false);
     }
@@ -226,9 +257,9 @@ const LabMarksSheet = () => {
 
     setDeleting(true);
     try {
-      await API.delete('/labmarks/delete-evaluation', {
+      await API.delete('/classroommarks/delete-evaluation', {
         data: {
-          labroomId,
+          classroomId,
           category,
           itemTitle: targetTitle
         }
@@ -236,7 +267,7 @@ const LabMarksSheet = () => {
 
       showToast('Evaluation cancelled and removed successfully!');
       setTimeout(() => {
-        navigate(`/labrooms/${labroomId}`);
+        navigate(`/classroom/${classroomId}`);
       }, 1000);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to cancel evaluation.');
@@ -264,7 +295,7 @@ const LabMarksSheet = () => {
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `${labroom?.labName || 'Lab'}_${itemTitle || itemId}_Marks.csv`);
+      link.setAttribute("download", `${classroom?.className || 'Class'}_${itemTitle || itemId}_Marks.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -277,8 +308,8 @@ const LabMarksSheet = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-6 space-y-4">
-        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-mono text-xs text-slate-400">Loading lab spreadsheet roster...</p>
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-mono text-xs text-slate-400">Loading classroom spreadsheet roster...</p>
       </div>
     );
   }
@@ -289,7 +320,7 @@ const LabMarksSheet = () => {
         <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3">
           <p className="text-red-300 font-bold text-sm">Error Loading Sheet</p>
           <p className="text-xs text-slate-300">{error}</p>
-          <Link to={`/labrooms/${labroomId}`} className="block py-3 bg-blue-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Labroom</Link>
+          <Link to={`/classroom/${classroomId}`} className="block py-3 bg-orange-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Classroom</Link>
         </div>
       </div>
     );
@@ -301,25 +332,25 @@ const LabMarksSheet = () => {
   });
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-blue-400 selection:text-black">
+    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-6 selection:bg-orange-400 selection:text-black">
       
       {toastMessage && (
         <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-blue-500/50 bg-[#130910]/95 text-blue-300 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-orange-500/50 bg-[#130910]/95 text-orange-300 shadow-2xl backdrop-blur-xl">
             <span className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</span>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-blue-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
+      <header className="relative z-10 w-full max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#130910]/90 backdrop-blur-2xl border border-orange-500/30 rounded-3xl sm:rounded-2xl px-5 py-4 shadow-xl">
         <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-          <Link to={`/labrooms/${labroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
+          <Link to={`/classroom/${classroomId}`} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
             ← Back
           </Link>
           <div>
-            <h1 className="text-sm sm:text-base font-black text-white uppercase">{labroom?.labName}</h1>
-            <p className="text-xs text-blue-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
+            <h1 className="text-sm sm:text-base font-black text-white uppercase">{classroom?.className}</h1>
+            <p className="text-xs text-orange-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
           </div>
         </div>
 
@@ -345,11 +376,11 @@ const LabMarksSheet = () => {
       <main className="relative z-10 w-full max-w-5xl mx-auto my-6 space-y-6 flex-grow">
         
         <div className="space-y-4">
-          <div className="bg-[#130910]/90 border border-blue-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+          <div className="bg-[#130910]/90 border border-orange-500/20 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
             
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-800">
               <div className="w-full sm:w-1/3">
-                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Evaluation Title</label>
+                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Evaluation Title</label>
                 <input 
                   type="text" 
                   value={itemTitle} 
@@ -359,7 +390,7 @@ const LabMarksSheet = () => {
                 />
               </div>
               <div className="w-full sm:w-1/4">
-                <label className="block text-xs font-bold uppercase text-blue-400 mb-1">Total Marks</label>
+                <label className="block text-xs font-bold uppercase text-orange-400 mb-1">Total Marks</label>
                 <input 
                   type="number" 
                   min="1" 
@@ -382,7 +413,7 @@ const LabMarksSheet = () => {
                   type="button" 
                   onClick={handleSubmitBatch}
                   disabled={saving}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-400 to-cyan-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
+                  className="px-6 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
                 >
                   {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
                 </button>
@@ -414,7 +445,7 @@ const LabMarksSheet = () => {
                       return (
                         <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
                           <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="py-3 px-3 font-mono text-blue-400 font-bold">{student.rollNo || 'N/A'}</td>
+                          <td className="py-3 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
                           <td className="py-3 px-3 text-white font-medium">{student.name}</td>
                           <td className="py-3 px-3">
                             <input 
@@ -422,7 +453,7 @@ const LabMarksSheet = () => {
                               value={inputData.obtainedMarks} 
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
                               placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
                             />
                           </td>
                           <td className="py-3 px-3">
@@ -458,7 +489,7 @@ const LabMarksSheet = () => {
                 type="button" 
                 onClick={handleSubmitBatch}
                 disabled={saving}
-                className="px-8 py-3 bg-gradient-to-r from-blue-400 to-cyan-500 hover:from-blue-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-blue-500/20 cursor-pointer"
+                className="px-8 py-3 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
               >
                 {saving ? 'Saving Sheet...' : 'Save All Marks ✓'}
               </button>
@@ -470,11 +501,11 @@ const LabMarksSheet = () => {
       </main>
 
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
-        <p>© 2026 PUCIT Lab Portal • All Rights Reserved</p>
+        <p>© 2026 PUCIT Classroom Portal • All Rights Reserved</p>
       </footer>
 
     </div>
   );
 };
 
-export default LabMarksSheet;
+export default MarksSheet;

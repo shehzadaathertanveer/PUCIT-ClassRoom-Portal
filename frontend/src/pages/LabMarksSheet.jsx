@@ -43,7 +43,7 @@ const LabMarksSheet = () => {
     setTimeout(() => setToastMessage(''), 2500);
   };
 
-  // Helper matching LabroomDetail's robust category mapping for preset & custom subjects
+  // Robust matching LabroomDetail's category mapping for preset & custom subjects
   const getCategoryTargetKey = (catName = '') => {
     const clean = catName.trim().toLowerCase();
     if (clean.includes('task')) return 'labTasks';
@@ -53,10 +53,12 @@ const LabMarksSheet = () => {
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
     
-    // Fallback for custom added subjects/activities safely mapped to camelCase pluralized keys
-    const camelCaseCustom = clean
-      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase());
-    return camelCaseCustom.endsWith('s') ? camelCaseCustom : camelCaseCustom + 's';
+    // Robust camelCase conversion for custom names, handling special characters and spaces safely
+    const camel = clean
+      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+      .replace(/[^a-zA-Z0-9]/g, '');
+    
+    return camel.endsWith('s') ? camel : camel + 's';
   };
 
   const fetchSheetData = async () => {
@@ -67,7 +69,7 @@ const LabMarksSheet = () => {
       // Normalize category key in case a display name was passed
       const targetCategoryKey = getCategoryTargetKey(category);
 
-      // 1. Fetch bulk roster sheet from correct matching endpoint (/bulk-sheet/:labroomId)
+      // 1. Fetch bulk roster sheet from endpoint
       const res = await API.get(`/labmarks/bulk-sheet/${labroomId}`);
       const data = res.data.data;
       const activeLabroom = data.labroom || data.classroom;
@@ -78,7 +80,7 @@ const LabMarksSheet = () => {
       // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
       
-      // 3. Look up evaluation totalMarks if it already exists in labroom definitions (checking both clean key and original)
+      // 3. Look up evaluation totalMarks if it already exists in labroom definitions
       if (activeLabroom) {
         const activitiesList = activeLabroom[targetCategoryKey] || activeLabroom[category] || [];
         const foundActivity = activitiesList.find(
@@ -171,7 +173,7 @@ const LabMarksSheet = () => {
     const file = e.target.files[0];
     if (!file) return;
 
-    showToast('Uploading lab script to Cloudinary...');
+    showToast('Uploading script attachment...');
     try {
       const uploadedData = await uploadToCloudinary(file);
       setMarkInputs(prev => ({
@@ -195,7 +197,7 @@ const LabMarksSheet = () => {
     try {
       const resolvedTitle = (itemTitle || (itemId !== 'new' ? itemId : '')).trim();
       if (!resolvedTitle || resolvedTitle === 'general') {
-        showToast('Please provide a valid lab activity title (e.g. Lab Task 1).');
+        showToast('Please provide a valid lab activity title.');
         setSaving(false);
         return;
       }
@@ -213,7 +215,7 @@ const LabMarksSheet = () => {
           studentId,
           obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),
           isAbsent: data.isAbsent,
-          file: data.file?.url ? data.file : null
+          file: data.file?.url ? data.file : null // Explicitly package attached file
         }));
 
       if (marksData.length === 0) {

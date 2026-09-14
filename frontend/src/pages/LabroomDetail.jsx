@@ -121,10 +121,12 @@ const LabroomDetail = () => {
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
     
-    // Fallback for custom added subjects/activities safely mapped to camelCase pluralized keys
-    const camelCaseCustom = clean
-      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase());
-    return camelCaseCustom.endsWith('s') ? camelCaseCustom : camelCaseCustom + 's';
+    // Robust camelCase conversion for custom names, handling special characters and spaces safely
+    const camel = clean
+      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+      .replace(/[^a-zA-Z0-9]/g, '');
+    
+    return camel.endsWith('s') ? camel : camel + 's';
   };
 
   const fetchLabroomData = async () => {
@@ -550,7 +552,7 @@ const LabroomDetail = () => {
 
   const handleExportExcelSheet = () => {
     try {
-      const rankings = labAnalytics?.rankings || [];
+      let rankings = labAnalytics?.rankings || [];
       if (rankings.length === 0) {
         showToast('No student ranking data available to export.', 'error');
         return;
@@ -1269,7 +1271,7 @@ const LabroomDetail = () => {
                     const obtained = studentItemScore?.obtainedMarks ?? 0;
                     const total = Number(item.totalMarks || 10);
                     const studentPercentage = total > 0 ? ((obtained / total) * 100).toFixed(2) : '0.00';
-                    const hasPhoto = studentItemScore?.file && studentItemScore.file.url;
+                    const hasFile = studentItemScore?.file && studentItemScore.file.url;
 
                     return (
                       <div 
@@ -1337,12 +1339,12 @@ const LabroomDetail = () => {
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
                             <div className="w-full flex items-center justify-between">
                               <span className="text-[10px] text-slate-500 italic">Submission Status Active</span>
-                              {hasPhoto && (
+                              {hasFile && (
                                 <button 
                                   onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
                                   className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                                 >
-                                  <span>📷</span> View Photo
+                                  <span>📎</span> View Attachment
                                 </button>
                               )}
                             </div>
@@ -1445,7 +1447,7 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 2. Create Result Sheet Modal (Supercharged with 2 Options: Full Sheet or Range) */}
+      {/* 2. Create Result Sheet Modal */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
@@ -1977,36 +1979,42 @@ const LabroomDetail = () => {
         </div>
       )}
 
-      {/* 10. Focused Photo-Only Modal */}
+      {/* 10. Focused Attachment / Photo Inspection Modal */}
       {selectedActivityItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl px-4 overflow-y-auto py-6">
           <div className="w-full max-w-md bg-[#130910] border border-blue-500/55 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-xs font-bold text-blue-400 uppercase font-mono">{selectedActivityItem.item.title} — Uploaded Photo</h3>
+              <h3 className="text-xs font-bold text-blue-400 uppercase font-mono">
+                {selectedActivityItem.item.title} — Attachment Inspection
+              </h3>
               <button onClick={() => setSelectedActivityItem(null)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
 
-            {selectedActivityItem.scoreData?.file?.url ? (
-              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-2 overflow-hidden">
-                <img 
-                  src={selectedActivityItem.scoreData.file.url} 
-                  alt="Activity File" 
-                  className="max-h-[60vh] mx-auto rounded-xl border border-slate-700 object-contain" 
-                />
-              </div>
-            ) : (
-              <div className="bg-[#080507] border border-slate-800 p-6 rounded-2xl space-y-1">
-                <p className="text-[10px] text-slate-400 uppercase">Your Obtained Score</p>
-                <p className="text-2xl font-black font-mono text-emerald-400">
-                  {(() => {
-                    const sScore = (studentMark?.[selectedActivityItem.targetKey] || []).find(e => e.title?.trim().toLowerCase() === selectedActivityItem.item.title?.trim().toLowerCase());
-                    if (!sScore) return 'Pending Evaluation';
-                    if (sScore.isAbsent) return 'Marked Absent';
-                    return `${sScore.obtainedMarks} / ${selectedActivityItem.item.totalMarks}`;
-                  })()}
-                </p>
-              </div>
-            )}
+            {(() => {
+              const sScore = (studentMark?.[selectedActivityItem.targetKey] || []).find(
+                e => e.title?.trim().toLowerCase() === selectedActivityItem.item.title?.trim().toLowerCase()
+              );
+              const fileObj = sScore?.file || selectedActivityItem.scoreData?.file;
+
+              return fileObj?.url ? (
+                <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 overflow-hidden space-y-2">
+                  {fileObj.fileType === 'image' || fileObj.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
+                    <img src={fileObj.url} alt="Activity Script" className="max-h-[60vh] mx-auto rounded-xl border border-slate-700 object-contain" />
+                  ) : (
+                    <a href={fileObj.url} target="_blank" rel="noreferrer" className="block py-6 text-xs font-mono text-emerald-400 underline">
+                      📄 Download Attached Script ({fileObj.fileName || 'File'})
+                    </a>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-[#080507] border border-slate-800 p-6 rounded-2xl space-y-1">
+                  <p className="text-[10px] text-slate-400 uppercase">Your Obtained Score</p>
+                  <p className="text-2xl font-black font-mono text-emerald-400">
+                    {sScore ? (sScore.isAbsent ? 'Marked Absent' : `${sScore.obtainedMarks} / ${selectedActivityItem.item.totalMarks}`) : 'Pending Evaluation'}
+                  </p>
+                </div>
+              );
+            })()}
 
             <button 
               onClick={() => setSelectedActivityItem(null)} 
