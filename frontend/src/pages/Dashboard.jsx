@@ -352,10 +352,10 @@ const Dashboard = () => {
     setRollNoMessage('');
 
     try {
-      const res = await API.patch('/auth/update-profile', {
+      const res = await API.patch('/auth/update-rollno', {
         rollNo: missingRollNoInput.trim().toUpperCase()
       });
-      setRollNoMessage('Roll number updated successfully!');
+      setRollNoMessage('Official roll number claimed successfully!');
       if (res.data?.data?.user) {
         updateUser(res.data.data.user);
       }
@@ -447,24 +447,21 @@ const Dashboard = () => {
   const isAdmin = user?.role === 'ADMIN';
   const isTeacherOrAdmin = ['TEACHER', 'ADMIN'].includes(user?.role);
   
-  const rawRoll = (user?.rollNo || user?.rollNumber || user?.email || '').trim().toUpperCase();
-  const envFresherBatch = (import.meta.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
-  const batchDigits = envFresherBatch.replace(/[^0-9]/g, '');
-
-  const isFresher = Boolean(
-    rawRoll.includes(envFresherBatch) ||
-    rawRoll.includes('F26') ||
-    rawRoll.includes('S26') ||
-    (batchDigits && rawRoll.includes(batchDigits))
+  const rawRoll = (user?.rollNo || user?.rollNumber || '').trim().toUpperCase();
+  const isTempOrFresherRoll = Boolean(
+    !rawRoll ||
+    rawRoll.startsWith('FRESHER_') ||
+    /^[A-Z]{2,5}[FS]\d{2}[A-Z]?$/.test(rawRoll)
   );
 
   const isPucitVerified = Boolean(
     user?.isUniversityEmailVerified || 
     !isStudent || 
-    (isStudent && !isFresher)
+    isAdmin ||
+    (user?.email && !user.email.endsWith('@pucit.edu.pk') && !user.email.endsWith('@temp.pucit.edu.pk'))
   );
 
-  const needsRollNo = isStudent && (!user?.rollNo || user?.rollNo.trim() === '');
+  const needsRollNo = isStudent && isTempOrFresherRoll;
   const needsEmailLink = isStudent && !isPucitVerified;
 
   const classroomsOnly = classroomsList.filter(c => c.courseType !== 'LAB');
@@ -489,32 +486,32 @@ const Dashboard = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-orange-500/15 sm:bg-orange-500/20 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[60vw] sm:w-[40vw] h-[60vw] sm:h-[40vw] bg-rose-500/10 sm:bg-rose-500/15 rounded-full blur-[100px] sm:blur-[120px] pointer-events-none"></div>
 
-      {/* MISSING ROLL NUMBER BANNER FOR STUDENTS */}
+      {/* MISSING ROLL NUMBER BANNER FOR STUDENTS WITHOUT FULL ROLL */}
       {needsRollNo && (
         <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-rose-950/80 border border-rose-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 text-center sm:text-left">
             <span className="text-xl">🎓</span>
             <div>
-              <p className="text-xs font-bold text-rose-200 uppercase tracking-wide">Roll Number Required</p>
-              <p className="text-[11px] text-slate-300">Please register your university roll number (e.g. <span className="font-mono text-rose-300">BITF26A001</span>) to view enrolled courses.</p>
+              <p className="text-xs font-bold text-rose-200 uppercase tracking-wide">Official Roll Number Required</p>
+              <p className="text-[11px] text-slate-300">You currently have a temporary prefix assigned. Claim your official roll number (e.g. <span className="font-mono text-rose-300">BITF26A001</span>) to complete your profile.</p>
             </div>
           </div>
           <button
             onClick={() => setIsRollNoModalOpen(true)}
             className="w-full sm:w-auto px-4 py-2 bg-rose-500 hover:bg-rose-400 text-black font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer whitespace-nowrap shadow-md text-center"
           >
-            Register Roll No →
+            Claim Official Roll No →
           </button>
         </div>
       )}
 
-      {/* OFFICIAL EMAIL VERIFICATION BANNER FOR FRESHERS / STUDENTS */}
-      {needsEmailLink && (
+      {/* OFFICIAL EMAIL VERIFICATION BANNER FOR FRESHERS / STUDENTS WITH ROLL BUT NO VERIFIED EMAIL */}
+      {!needsRollNo && needsEmailLink && (
         <div className="relative z-20 max-w-6xl mx-auto w-full mb-4 bg-amber-950/80 border border-amber-500/50 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-3 text-center sm:text-left">
             <span className="text-xl">⚠️</span>
             <div>
-              <p className="text-xs font-bold text-amber-200 uppercase tracking-wide">Official PUCIT Email Not Linked</p>
+              <p className="text-xs font-bold text-amber-200 uppercase tracking-wide">Official PUCIT Email Not Verified</p>
               <p className="text-[11px] text-slate-300">Link and verify your official <span className="font-mono text-orange-300">@pucit.edu.pk</span> email address to unlock complete portal features.</p>
             </div>
           </div>
@@ -522,7 +519,7 @@ const Dashboard = () => {
             onClick={() => { setProfileData({ name: user?.name || '', password: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
             className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer whitespace-nowrap shadow-md text-center"
           >
-            Link Email Now →
+            Verify Email Now →
           </button>
         </div>
       )}
@@ -1061,13 +1058,13 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* MISSING ROLL NUMBER MODAL */}
+      {/* CLAIM OFFICIAL ROLL NUMBER MODAL */}
       {isRollNoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-3 sm:px-4">
           <div className="w-full max-w-md bg-[#130910] border border-rose-500/40 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-rose-300 uppercase tracking-wide">
-                Register Your Roll Number
+                Claim Official Roll Number
               </h3>
               <button onClick={() => setIsRollNoModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer p-1">✕</button>
             </div>
@@ -1080,7 +1077,7 @@ const Dashboard = () => {
 
             <form onSubmit={handleUpdateMissingRollNo} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Roll Number / Registration ID</label>
+                <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Official Roll Number</label>
                 <input 
                   type="text"
                   required
@@ -1089,6 +1086,9 @@ const Dashboard = () => {
                   placeholder="e.g. BITF26A001"
                   className="w-full px-4 py-3 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm font-mono uppercase focus:ring-2 focus:ring-rose-400"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Once entered, your portal account will upgrade to full roll number login mode and re-sync your registered classrooms.
+                </p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button 
@@ -1103,7 +1103,7 @@ const Dashboard = () => {
                   disabled={rollNoUpdating}
                   className="w-1/2 py-2.5 bg-rose-500 hover:bg-rose-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50"
                 >
-                  {rollNoUpdating ? 'Saving...' : 'Save Roll Number'}
+                  {rollNoUpdating ? 'Claiming...' : 'Claim Roll No'}
                 </button>
               </div>
             </form>

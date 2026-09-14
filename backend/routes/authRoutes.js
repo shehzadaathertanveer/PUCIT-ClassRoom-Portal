@@ -29,6 +29,7 @@ router.patch('/update-my-password', authController.updatePasswordInProfile);
 // PUCIT Email Linking for Freshers
 router.post('/attach-email/initiate', authController.requestOfficialEmailActivation);
 router.post('/attach-email/verify-otp', authController.verifyOfficialEmailActivation);
+router.patch('/update-rollno', authController.updateFresherRollNo);
 
 // =============================================================================
 // ADMIN ANALYTICS & MAINTENANCE CONTROL ROUTES (Admin Only)

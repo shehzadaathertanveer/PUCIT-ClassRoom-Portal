@@ -201,7 +201,6 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
   }
 
-  // Fire email dispatch concurrently if possible or await directly
   await sendStyledEmail({
     to: destinationEmail,
     subject: "Account Registration OTP",
@@ -367,7 +366,6 @@ exports.login = catchAsync(async (req, res, next) => {
   const token = signToken(user._id, user.role);
   let dashboardData = {};
 
-  // High-Efficiency Parallelized Dashboard Data Loading
   if (user.role === "STUDENT") {
     const classrooms = await Classroom.find({ students: user._id, isActive: true })
       .populate("teacher", "name email")
@@ -380,7 +378,6 @@ exports.login = catchAsync(async (req, res, next) => {
   } else if (["TA", "TEACHER"].includes(user.role)) {
     const roleKey = user.role === "TA" ? "tas" : "teacher";
     
-    // Fetch Classrooms and Labrooms concurrently in parallel for blazing-fast speed
     const [classrooms, labrooms] = await Promise.all([
       Classroom.find({ [roleKey]: user._id, isActive: true })
         .populate("teacher", "name email")
@@ -397,7 +394,6 @@ exports.login = catchAsync(async (req, res, next) => {
 
     dashboardData = { classrooms, labrooms, marks };
   } else if (user.role === "ADMIN") {
-    // Fetch all admin data concurrently in parallel
     const [activeClassrooms, activeLabrooms, pendingTeachers, allUsers] = await Promise.all([
       Classroom.find({ isActive: true })
         .populate("teacher", "name email")
@@ -854,7 +850,7 @@ exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// VERIFY PASSWORD RECOVERY OTP (Standalone step for 3-page flow)
+// 17. VERIFY PASSWORD RECOVERY OTP (Standalone step for 3-page flow)
 // =============================================================================
 exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
   const { email, otp } = req.body;
@@ -885,5 +881,63 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: "success",
     message: "OTP verified successfully. Please set your new password.",
+  });
+});
+
+// =============================================================================
+// 18. UPDATE FRESHER ROLL NUMBER (Upgrades temporary prefix to official roll no)
+// =============================================================================
+exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
+  const { rollNo } = req.body;
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    return next(new AppError("User record not found.", 404));
+  }
+
+  const currentRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
+  const isTempOrFresher = TEMP_PREFIX_REGEX.test(currentRoll) || currentRoll.startsWith('FRESHER_');
+
+  if (!isTempOrFresher && FULL_ROLL_NO_REGEX.test(currentRoll)) {
+    return next(new AppError("You already have an official PUCIT Roll Number assigned.", 400));
+  }
+
+  const newRoll = rollNo ? rollNo.trim().toUpperCase() : "";
+
+  if (!FULL_ROLL_NO_REGEX.test(newRoll)) {
+    return next(new AppError("Please provide a valid official PUCIT Roll Number (e.g., BITF26A001).", 400));
+  }
+
+  const existingUserWithRoll = await User.findOne({ rollNo: newRoll, _id: { $ne: user._id } }).select('_id');
+  if (existingUserWithRoll) {
+    return next(new AppError("This Roll Number is already registered to another account.", 400));
+  }
+
+  user.rollNo = newRoll;
+  if (!user.isUniversityEmailVerified) {
+    user.email = `${newRoll.toLowerCase()}@temp.pucit.edu.pk`;
+  }
+
+  await user.save();
+
+  if (user.role === 'STUDENT') {
+    await syncStudentEnrollment(user);
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: `Official Roll Number (${newRoll}) successfully claimed! You can now log in using this roll number. Next, you can link your official @pucit.edu.pk email when it becomes active.`,
+    data: {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        rollNo: user.rollNo,
+        registrationNo: user.registrationNo,
+        role: user.role,
+        personalNotificationEmail: user.personalNotificationEmail,
+        isUniversityEmailVerified: user.isUniversityEmailVerified,
+      },
+    },
   });
 });
