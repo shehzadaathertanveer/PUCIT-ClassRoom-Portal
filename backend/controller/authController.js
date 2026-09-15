@@ -255,7 +255,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 3. VERIFY REGISTRATION OTP & ACTIVATE ACCOUNT
+// 3. VERIFY REGISTRATION OTP & ACTIVATE ACCOUNT (FIXED FOR PRE-PROVISIONED ROSTERS)
 // =============================================================================
 exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const { email, otp } = req.body;
@@ -268,10 +268,19 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const cleanOtp = otp.trim();
   const hashedInputOtp = hashOtp(cleanOtp);
 
-  const user = await User.findOne({ email: cleanEmail });
+  // Extract roll number prefix in case student was pre-added by staff via batch upload/roll roster
+  const rollFromEmail = cleanEmail.split('@')[0].toUpperCase();
+
+  const user = await User.findOne({
+    $or: [
+      { email: cleanEmail },
+      { personalNotificationEmail: cleanEmail },
+      { rollNo: rollFromEmail }
+    ]
+  });
 
   if (!user) {
-    return next(new AppError("No account found with this email!", 400));
+    return next(new AppError("No account found with this email or roll number!", 400));
   }
 
   if (!user.otpCode || user.otpCode !== hashedInputOtp) {
@@ -280,6 +289,10 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
 
   if (user.otpExpiresAt && user.otpExpiresAt < Date.now()) {
     return next(new AppError("OTP code has expired!", 400));
+  }
+
+  if (cleanEmail.endsWith('@pucit.edu.pk')) {
+    user.email = cleanEmail;
   }
 
   user.isEmailVerified = true;
@@ -957,7 +970,6 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     return next(new AppError('Target User ID is required!', 400));
   }
 
-  // Prevent admin from deleting themselves
   if (userId.toString() === req.user._id.toString()) {
     return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
   }
@@ -989,7 +1001,6 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 
   await User.findByIdAndDelete(userId);
 
-  // Clean up references in mark records and rosters
   await Promise.all([
     Mark.deleteMany({ student: userId }),
     LabMark.deleteMany({ student: userId }),
