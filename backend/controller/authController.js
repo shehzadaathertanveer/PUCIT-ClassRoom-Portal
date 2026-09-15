@@ -157,7 +157,7 @@ exports.getMe = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. INITIATE REGISTRATION (Supports Freshers with Reg No & Temporary Prefix / Roll No)
+// 2. INITIATE REGISTRATION (Fixed Direct Model Reference)
 // =============================================================================
 exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const { name, password, rollNo, registrationNo, personalNotificationEmail, email } = req.body;
@@ -195,10 +195,9 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
 
-  const UserModel = getUserModel();
-
   if (formattedRegNo) {
-    const existingRegHolder = await UserModel.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
+    // Direct call to User model
+    const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
     if (existingRegHolder) {
       return next(new AppError("This Registration / Form Number is already linked to an active account.", 400));
     }
@@ -227,7 +226,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     ],
   });
 
-  let user = await UserModel.findOne({ 
+  let user = await User.findOne({ 
     $or: [
       { email: officialEmail }, 
       ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []), 
@@ -249,7 +248,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     user.otpExpiresAt = otpExpiry;
     await user.save();
   } else {
-    user = await UserModel.create({
+    user = await User.create({
       name,
       email: officialEmail,
       rollNo: formattedRollNo,
