@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const User = require("../models/userSchema");
 const Classroom = require("../models/classRoomSchema");
 const Labroom = require("../models/labSchema");
 const Mark = require("../models/markSchema");
@@ -10,8 +9,10 @@ const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
 
-// Safe model getter to prevent circular dependency runtime errors
-const getUserModel = () => mongoose.models.User || User;
+// Safe runtime model getter bypassing circular dependencies or undefined exports
+const getSafeUser = () => {
+  return mongoose.models.User || mongoose.connection.model('User');
+};
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -132,8 +133,8 @@ exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
 // 1. GET ME PROFILE
 // =============================================================================
 exports.getMe = catchAsync(async (req, res, next) => {
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id).select("-password");
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id).select("-password");
   if (!user) {
     return next(new AppError("User not found.", 404));
   }
@@ -157,7 +158,7 @@ exports.getMe = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 2. INITIATE REGISTRATION (Fixed Direct Model Reference)
+// 2. INITIATE REGISTRATION (Supports Freshers with Reg No & Temporary Prefix / Roll No)
 // =============================================================================
 exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const { name, password, rollNo, registrationNo, personalNotificationEmail, email } = req.body;
@@ -195,8 +196,9 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
 
+  const User = getSafeUser();
+
   if (formattedRegNo) {
-    // Direct call to User model
     const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
     if (existingRegHolder) {
       return next(new AppError("This Registration / Form Number is already linked to an active account.", 400));
@@ -286,10 +288,9 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const hashedInputOtp = hashOtp(cleanOtp);
   const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
-  const UserModel = getUserModel();
+  const User = getSafeUser();
 
-  // Flexible lookup accommodating personal notification emails, temp emails, or roll prefixes
-  const user = await UserModel.findOne({
+  const user = await User.findOne({
     $or: [
       { email: cleanEmail },
       { personalNotificationEmail: cleanEmail },
@@ -353,9 +354,9 @@ exports.login = catchAsync(async (req, res, next) => {
   const identifier = loginIdentifier.trim();
   const fresherBatchCode = (process.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
 
-  const UserModel = getUserModel();
+  const User = getSafeUser();
 
-  const user = await UserModel.findOne({
+  const user = await User.findOne({
     $or: [
       { rollNo: identifier.toUpperCase() },
       { email: identifier.toLowerCase() },
@@ -433,8 +434,8 @@ exports.login = catchAsync(async (req, res, next) => {
         .populate("teacher", "name email")
         .populate("tas", "name rollNo")
         .populate("students", "name rollNo registrationNo"),
-      UserModel.find({ role: "PENDING_TEACHER" }).select("-password"),
-      UserModel.find().select("-password")
+      User.find({ role: "PENDING_TEACHER" }).select("-password"),
+      User.find().select("-password")
     ]);
 
     dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
@@ -469,9 +470,9 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
-  const UserModel = getUserModel();
+  const User = getSafeUser();
 
-  const user = await UserModel.findOne({
+  const user = await User.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -522,9 +523,9 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
-  const UserModel = getUserModel();
+  const User = getSafeUser();
 
-  const user = await UserModel.findOne({
+  const user = await User.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -565,8 +566,8 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("New password must be at least 6 characters long!", 400));
   }
 
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id).select("+password");
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id).select("+password");
   if (!(await user.correctPassword(currentPassword, user.password))) {
     return next(new AppError("Your current password is incorrect!", 401));
   }
@@ -586,8 +587,8 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
 exports.updateProfile = catchAsync(async (req, res, next) => {
   const { name, password, personalNotificationEmail, rollNo, registrationNo } = req.body;
 
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id);
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id);
   if (!user) return next(new AppError("User not found.", 404));
 
   if (name) user.name = name.trim();
@@ -642,8 +643,8 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
   const { universityEmail } = req.body;
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id);
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id);
 
   const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
 
@@ -682,8 +683,8 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code is required!", 400));
   }
 
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id);
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id);
 
   if (
     !user.otpCode ||
@@ -727,8 +728,8 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
     return next(new AppError("Password must be at least 6 characters long!", 400));
   }
 
-  const UserModel = getUserModel();
-  const student = await UserModel.findById(targetId);
+  const User = getSafeUser();
+  const student = await User.findById(targetId);
   if (!student || student.role !== "STUDENT") {
     return next(new AppError("Student record not found!", 404));
   }
@@ -746,8 +747,8 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
 // 12. ADMIN: GET PENDING TEACHERS
 // =============================================================================
 exports.getPendingTeachers = catchAsync(async (req, res, next) => {
-  const UserModel = getUserModel();
-  const pendingTeachers = await UserModel.find({ role: "PENDING_TEACHER" }).select("-password");
+  const User = getSafeUser();
+  const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
   res.status(200).json({
     status: "success",
     results: pendingTeachers.length,
@@ -760,8 +761,8 @@ exports.getPendingTeachers = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(userId);
+  const User = getSafeUser();
+  const user = await User.findById(userId);
 
   if (!user) return next(new AppError("User account not found.", 404));
   if (user.role !== "PENDING_TEACHER") {
@@ -797,8 +798,8 @@ exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.rejectTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(userId);
+  const User = getSafeUser();
+  const user = await User.findById(userId);
 
   if (!user) {
     return next(new AppError("Teacher registration request not found.", 404));
@@ -824,7 +825,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
     }
   }
 
-  await UserModel.findByIdAndDelete(userId);
+  await User.findByIdAndDelete(userId);
 
   res.status(200).json({
     status: "success",
@@ -836,7 +837,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 // 15. ADMIN ANALYTICS & BREAKDOWNS (Optimized via Concurrent Promise.all)
 // =============================================================================
 exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
-  const UserModel = getUserModel();
+  const User = getSafeUser();
   const [
     totalUsers,
     studentsCount,
@@ -846,11 +847,11 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
     activeClassroomsCount,
     activeLabroomsCount
   ] = await Promise.all([
-    UserModel.countDocuments(),
-    UserModel.countDocuments({ role: "STUDENT" }),
-    UserModel.countDocuments({ role: "TEACHER" }),
-    UserModel.countDocuments({ role: "ADMIN" }),
-    UserModel.countDocuments({ role: "PENDING_TEACHER" }),
+    User.countDocuments(),
+    User.countDocuments({ role: "STUDENT" }),
+    User.countDocuments({ role: "TEACHER" }),
+    User.countDocuments({ role: "ADMIN" }),
+    User.countDocuments({ role: "PENDING_TEACHER" }),
     Classroom.countDocuments({ isActive: true }),
     Labroom.countDocuments({ isActive: true })
   ]);
@@ -880,8 +881,8 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
 // 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT
 // =============================================================================
 exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
-  const UserModel = getUserModel();
-  const users = await UserModel.find().select("-password").sort({ createdAt: -1 }).lean();
+  const User = getSafeUser();
+  const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
   
   res.status(200).json({
     status: "success",
@@ -904,9 +905,9 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 
   const identifier = email.trim().toLowerCase();
   const cleanOtp = otp.trim();
-  const UserModel = getUserModel();
+  const User = getSafeUser();
 
-  const user = await UserModel.findOne({
+  const user = await User.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -933,8 +934,8 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
   const { rollNo } = req.body;
-  const UserModel = getUserModel();
-  const user = await UserModel.findById(req.user._id);
+  const User = getSafeUser();
+  const user = await User.findById(req.user._id);
 
   if (!user) {
     return next(new AppError("User record not found.", 404));
@@ -953,7 +954,7 @@ exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
     return next(new AppError("Please provide a valid official PUCIT Roll Number (e.g., BITF26A001).", 400));
   }
 
-  const existingUserWithRoll = await UserModel.findOne({ rollNo: newRoll, _id: { $ne: user._id } }).select('_id');
+  const existingUserWithRoll = await User.findOne({ rollNo: newRoll, _id: { $ne: user._id } }).select('_id');
   if (existingUserWithRoll) {
     return next(new AppError("This Roll Number is already registered to another account.", 400));
   }
@@ -1004,8 +1005,8 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
   }
 
-  const UserModel = getUserModel();
-  const targetUser = await UserModel.findById(userId);
+  const User = getSafeUser();
+  const targetUser = await User.findById(userId);
   if (!targetUser) {
     return next(new AppError('User account not found.', 404));
   }
@@ -1030,7 +1031,7 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     }
   }
 
-  await UserModel.findByIdAndDelete(userId);
+  await User.findByIdAndDelete(userId);
 
   await Promise.all([
     Mark.deleteMany({ student: userId }),
