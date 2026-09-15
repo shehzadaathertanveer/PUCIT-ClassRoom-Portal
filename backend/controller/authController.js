@@ -22,7 +22,7 @@ let systemMaintenance = {
 // RegEx to validate official PUCIT roll number structures or temporary fresher prefixes
 const FULL_ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
 const TEMP_PREFIX_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]?$/i;
-const REG_NO_REGEX = /^\d{6,7}$/;
+const REG_NO_REGEX = /^[a-zA-Z0-9-]{6,15}$/;
 
 // Helper: Generates signed JWT authentication token
 const signToken = (id, role) => {
@@ -188,7 +188,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   }
 
   if (formattedRegNo && !REG_NO_REGEX.test(formattedRegNo)) {
-    return next(new AppError("Registration number must be a valid 6 or 7 digit unique number!", 400));
+    return next(new AppError("Registration number must be a valid unique number!", 400));
   }
 
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
