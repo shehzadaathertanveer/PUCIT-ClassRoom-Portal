@@ -42,6 +42,15 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "awake", timestamp: new Date() });
 });
 
+// Root health check so external pingers (e.g. Render) hitting "/" don't 404
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "awake",
+    message: "PUCIT ClassRoom & Lab Portal API",
+    timestamp: new Date(),
+  });
+});
+
 // 🛑 GLOBAL MAINTENANCE MODE INTERCEPTOR
 app.use(authController.checkMaintenanceMode);
 
