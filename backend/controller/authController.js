@@ -226,8 +226,9 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   let user = await User.findOne({ 
     $or: [
       { email: officialEmail }, 
-      ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []), 
-      ...(formattedRollNo ? [{ rollNo: formattedRollNo }] : [])
+      { personalNotificationEmail: cleanPersonalEmail },
+      ...(formattedRegNo && REG_NO_REGEX.test(formattedRegNo) ? [{ registrationNo: formattedRegNo }] : []),
+      ...(formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) ? [{ rollNo: formattedRollNo }] : [])
     ] 
   });
 
@@ -288,8 +289,8 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
     $or: [
       { email: cleanEmail },
       { personalNotificationEmail: cleanEmail },
-      { rollNo: prefixFromEmail },
-      { registrationNo: prefixFromEmail }
+      ...(FULL_ROLL_NO_REGEX.test(prefixFromEmail) ? [{ rollNo: prefixFromEmail }] : []),
+      ...(REG_NO_REGEX.test(prefixFromEmail) ? [{ registrationNo: prefixFromEmail }] : [])
     ]
   }).select("+otpCode +otpExpiresAt");
 
