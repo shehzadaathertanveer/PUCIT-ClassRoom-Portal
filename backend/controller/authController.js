@@ -235,6 +235,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     user.name = name;
     user.rollNo = formattedRollNo;
     if (formattedRegNo) user.registrationNo = formattedRegNo;
+    if (!user.isUniversityEmailVerified) user.email = officialEmail;
     user.password = password;
     user.role = assignedRole;
     user.personalNotificationEmail = cleanPersonalEmail;
@@ -287,7 +288,8 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
     $or: [
       { email: cleanEmail },
       { personalNotificationEmail: cleanEmail },
-      { rollNo: prefixFromEmail }
+      { rollNo: prefixFromEmail },
+      { registrationNo: prefixFromEmail }
     ]
   }).select("+otpCode +otpExpiresAt");
 
@@ -350,6 +352,7 @@ exports.login = catchAsync(async (req, res, next) => {
   const user = await User.findOne({
     $or: [
       { rollNo: identifier.toUpperCase() },
+      { registrationNo: identifier.toUpperCase() },
       { email: identifier.toLowerCase() },
       { personalNotificationEmail: identifier.toLowerCase() }
     ],
@@ -466,14 +469,13 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
-      { registrationNo: email.trim() },
+      { registrationNo: email.trim().toUpperCase() },
       { personalNotificationEmail: identifier }
     ],
-    isEmailVerified: true,
   });
 
   if (!user) {
-    return next(new AppError("No verified account found with this identifier.", 404));
+    return next(new AppError("No account found with this identifier.", 404));
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -518,10 +520,9 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
-      { registrationNo: email.trim() },
+      { registrationNo: email.trim().toUpperCase() },
       { personalNotificationEmail: identifier }
     ],
-    isEmailVerified: true,
     otpCode: hashOtp(otp),
     otpExpiresAt: { $gt: Date.now() },
   });
@@ -531,6 +532,8 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
   }
 
   user.password = newPassword;
+  user.isEmailVerified = true;
+  user.requiresEmail = false;
   user.otpCode = undefined;
   user.otpExpiresAt = undefined;
   await user.save();
@@ -889,10 +892,9 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
-      { registrationNo: email.trim() },
+      { registrationNo: email.trim().toUpperCase() },
       { personalNotificationEmail: identifier }
     ],
-    isEmailVerified: true,
     otpCode: hashOtp(cleanOtp),
     otpExpiresAt: { $gt: Date.now() },
   });
