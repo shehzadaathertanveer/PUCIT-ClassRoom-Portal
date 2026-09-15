@@ -42,7 +42,15 @@ const OtpVerify = () => {
       setIsSuccess(true);
       setStatusMessage('User validated, please login now.');
     } catch (err) {
-      setStatusMessage(err.response?.data?.message || 'Invalid or expired OTP.');
+      const msg = err.response?.data?.message || 'Invalid or expired OTP.';
+      if (msg.includes('No pending registration')) {
+        setStatusMessage('Your registration was not recorded by the server. Re-registering now, please wait...');
+        setTimeout(() => {
+          navigate('/register', { replace: true });
+        }, 1200);
+        return;
+      }
+      setStatusMessage(msg);
     } finally {
       setLoading(false);
     }

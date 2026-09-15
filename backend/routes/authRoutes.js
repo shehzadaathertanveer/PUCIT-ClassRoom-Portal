@@ -40,6 +40,9 @@ router.get('/admin/users', restrictTo('ADMIN'), authController.getAllUsersAdmin)
 // Admin User Deletion Control Route
 router.delete('/admin/users/:userId', restrictTo('ADMIN'), authController.adminDeleteUser);
 
+// Admin: remove stale unverified registration attempts so stuck freshers can re-register
+router.post('/admin/cleanup-registrations', restrictTo('ADMIN'), authController.cleanupUnverifiedRegistrations);
+
 router.post('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
 router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
 

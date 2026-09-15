@@ -294,6 +294,7 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   }).select("+otpCode +otpExpiresAt");
 
   if (!user) {
+    console.warn(`[verifyRegistrationOTP] No pending registration found. Searched email="${cleanEmail}" prefix="${prefixFromEmail}"`);
     return next(new AppError("No pending registration found for this account. Please re-initiate registration.", 400));
   }
 
@@ -1035,5 +1036,23 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     message: `User account ${targetUser.name} (${targetUser.email}) successfully deleted by admin and notification email sent.`,
+  });
+});
+
+// =============================================================================
+// 20. ADMIN: CLEAN UP STALE UNVERIFIED REGISTRATION ATTEMPTS
+// Removes leftover records that never finished OTP verification, so stuck
+// freshers can re-register cleanly. Safely keeps all verified accounts intact.
+// =============================================================================
+exports.cleanupUnverifiedRegistrations = catchAsync(async (req, res, next) => {
+  const deleted = await User.deleteMany({
+    requiresEmail: true,
+    isEmailVerified: false,
+  });
+
+  res.status(200).json({
+    status: "success",
+    message: `Cleaned up ${deleted.deletedCount} unverified registration record(s). Verified accounts were not touched.`,
+    data: { deletedCount: deleted.deletedCount },
   });
 });
