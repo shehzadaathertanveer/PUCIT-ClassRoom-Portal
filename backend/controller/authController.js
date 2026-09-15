@@ -31,7 +31,7 @@ const signToken = (id, role) => {
 // Helper: SHA-256 OTP hashing for secure database storage
 const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
 
-// FIXED SECURE SYNC: Enrolls student if their exact roll number or temporary prefix matches approved lists
+// SECURE SYNC: Enrolls student if their exact roll number or temporary prefix matches approved lists
 const syncStudentEnrollment = async (user) => {
   if (user.role !== "STUDENT") return;
 
@@ -255,7 +255,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
-// 3. VERIFY REGISTRATION OTP & ACTIVATE ACCOUNT (FIXED FOR PRE-PROVISIONED ROSTERS)
+// 3. VERIFY REGISTRATION OTP & ACTIVATE ACCOUNT (FRESHER TEMP-EMAIL SAFE)
 // =============================================================================
 exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const { email, otp } = req.body;
@@ -268,19 +268,19 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const cleanOtp = otp.trim();
   const hashedInputOtp = hashOtp(cleanOtp);
 
-  // Extract roll number prefix in case student was pre-added by staff via batch upload/roll roster
-  const rollFromEmail = cleanEmail.split('@')[0].toUpperCase();
+  const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
+  // Flexible lookup to accommodate freshers using personal notification emails, temp emails, or roll prefixes
   const user = await User.findOne({
     $or: [
       { email: cleanEmail },
       { personalNotificationEmail: cleanEmail },
-      { rollNo: rollFromEmail }
+      { rollNo: prefixFromEmail }
     ]
   });
 
   if (!user) {
-    return next(new AppError("No account found with this email or roll number!", 400));
+    return next(new AppError("No pending registration found for this account. Please re-initiate registration.", 400));
   }
 
   if (!user.otpCode || user.otpCode !== hashedInputOtp) {
@@ -289,10 +289,6 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
 
   if (user.otpExpiresAt && user.otpExpiresAt < Date.now()) {
     return next(new AppError("OTP code has expired!", 400));
-  }
-
-  if (cleanEmail.endsWith('@pucit.edu.pk')) {
-    user.email = cleanEmail;
   }
 
   user.isEmailVerified = true;
