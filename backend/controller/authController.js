@@ -477,6 +477,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   });
 
   if (!user) {
+    console.warn(`[forgotPassword] No account found. Searched email/rollNo/regNo/personalNotificationEmail="${identifier}"`);
     return next(new AppError("No account found with this identifier.", 404));
   }
 
@@ -1042,18 +1043,36 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 
 // =============================================================================
 // 20. ADMIN: CLEAN UP STALE UNVERIFIED REGISTRATION ATTEMPTS
-// Removes leftover records that never finished OTP verification, so stuck
-// freshers can re-register cleanly. Safely keeps all verified accounts intact.
+// SAFE VERSION: Only removes STUDENT / PENDING_TEACHER registrations that were
+// created more than 24 hours ago, never completed OTP verification, AND still
+// carry temporary temp emails. Admin, teacher, verified, and recent accounts
+// are ALWAYS protected from this cleanup.
 // =============================================================================
 exports.cleanupUnverifiedRegistrations = catchAsync(async (req, res, next) => {
-  const deleted = await User.deleteMany({
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const staleFilter = {
+    role: { $in: ["STUDENT", "PENDING_TEACHER"] },
     requiresEmail: true,
     isEmailVerified: false,
-  });
+    createdAt: { $lt: cutoff },
+    $or: [
+      { email: /@temp\.pucit\.edu\.pk$/ },
+      { rollNo: /^(TEMP_|FRESHER_)/ },
+    ],
+  };
+
+  const staleRecords = await User.find(staleFilter)
+    .select("name email rollNo registrationNo role createdAt")
+    .lean();
+
+  const deleted = staleRecords.length
+    ? await User.deleteMany({ _id: { $in: staleRecords.map((r) => r._id) } })
+    : { deletedCount: 0 };
 
   res.status(200).json({
     status: "success",
-    message: `Cleaned up ${deleted.deletedCount} unverified registration record(s). Verified accounts were not touched.`,
-    data: { deletedCount: deleted.deletedCount },
+    message: `Cleaned up ${deleted.deletedCount} stale unverified registration record(s) older than 24 hours. Admins, teachers, verified and recent accounts were NOT touched.`,
+    data: { deletedCount: deleted.deletedCount, deletedRecords: staleRecords },
   });
 });
