@@ -289,7 +289,7 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
       { personalNotificationEmail: cleanEmail },
       { rollNo: prefixFromEmail }
     ]
-  });
+  }).select("+otpCode +otpExpiresAt");
 
   if (!user) {
     return next(new AppError("No pending registration found for this account. Please re-initiate registration.", 400));
@@ -669,7 +669,7 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code is required!", 400));
   }
 
-  const user = await User.findById(req.user._id);
+  const user = await User.findById(req.user._id).select("+otpCode +otpExpiresAt");
 
   if (
     !user.otpCode ||
