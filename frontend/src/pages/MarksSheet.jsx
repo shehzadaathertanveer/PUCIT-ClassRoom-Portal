@@ -59,6 +59,7 @@ const MarksSheet = () => {
   const [error, setError] = useState('');
   const [classroom, setClassroom] = useState(null);
   const [students, setStudents] = useState([]);
+  const [existingMarks, setExistingMarks] = useState([]);
   
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
