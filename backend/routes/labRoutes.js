@@ -120,10 +120,17 @@ router
 // =============================================================================
 // INDIVIDUAL LABROOM DETAILS, SETTINGS & DELETION
 // =============================================================================
+
+// Labroom Settings Update (Name, Section Prefix, Capacity, Placeholder Teacher, Activities)
+router.patch(
+  "/:labroomId/settings",
+  restrictToLabStaff,
+  labController.updateLabroomSettings,
+);
+
 router
   .route("/:labroomId")
   .get(labController.getLabroomById)
-  .patch(restrictToLabStaff, labController.updateLabroomSettings)
   .delete(restrictTo("ADMIN", "TEACHER"), labController.hardDeleteLabroom);
 
 router

@@ -117,9 +117,17 @@ const LabroomDetail = () => {
     if (clean.includes('task')) return 'labTasks';
     if (clean.includes('viva')) return 'vivas';
     if (clean.includes('test')) return 'labTests';
+    if (clean.includes('final project') || clean.includes('finalproject')) return 'finalProject';
     if (clean.includes('project')) return 'projects';
     if (clean.includes('quiz')) return 'quizzes';
     if (clean.includes('assign')) return 'assignments';
+    if (clean.includes('present')) return 'presentations';
+    if (clean === 'mids' || clean === 'midterm' || clean.includes('lab mid') || clean.includes('labmid')) return 'labMids';
+    if (clean === 'finals' || clean === 'final' || clean.includes('lab final') || clean.includes('labfinal')) return 'labFinals';
+    if (clean.includes('activ')) return 'labActivities';
+    if (clean.includes('behavior') || clean.includes('behaviour')) return 'labBehavior';
+    if (clean.includes('worksheet')) return 'labWorksheets';
+    if (clean.includes('troubleshoot')) return 'troubleshooting';
     return 'labTasks';
   };
 

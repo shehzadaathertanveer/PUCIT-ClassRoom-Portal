@@ -1110,6 +1110,8 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
   const parsedTotal = Number(totalMarks);
   const cleanTitle = title.trim();
 
+  const notificationPromises = [];
+
   for (const scoreEntry of studentScores) {
     let markRec = await LabMark.findOne({ labroom: labroomId, student: scoreEntry.studentId });
     if (!markRec) {
@@ -1139,20 +1141,24 @@ exports.updateWholeClassLabMarks = catchAsync(async (req, res, next) => {
     if (studentObj) {
       const studentEmail = studentObj.personalNotificationEmail || studentObj.email;
       if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
-        sendStyledEmail({
-          to: studentEmail,
-          subject: `Lab Marks Updated: ${labroom.labName} - ${cleanTitle}`,
-          title: `Lab Evaluation: ${cleanTitle}`,
-          bodyText: `Your marks for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong> have been updated.`,
-          details: [
-            { label: 'Lab Course', value: labroom.labName },
-            { label: 'Activity', value: cleanTitle },
-            { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
-          ]
-        }).catch(err => console.warn('Email send warning:', err.message));
+        notificationPromises.push(
+          sendStyledEmail({
+            to: studentEmail,
+            subject: `Lab Marks Updated: ${labroom.labName} - ${cleanTitle}`,
+            title: `Lab Evaluation: ${cleanTitle}`,
+            bodyText: `Your marks for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong> have been updated.`,
+            details: [
+              { label: 'Lab Course', value: labroom.labName },
+              { label: 'Activity', value: cleanTitle },
+              { label: 'Obtained / Total', value: `${isAbsent ? 'Absent (0)' : obtained} / ${parsedTotal}` }
+            ]
+          }).catch(err => console.warn('Email send warning:', err.message))
+        );
       }
     }
   }
+
+  await Promise.all(notificationPromises);
 
   res.status(200).json({
     status: 'success',
