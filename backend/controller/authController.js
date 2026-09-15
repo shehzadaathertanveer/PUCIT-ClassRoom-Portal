@@ -2,9 +2,7 @@ const mongoose = require("mongoose");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
-// REQUIRE THE MODEL DIRECTLY SO MONGOOSE REGISTERS IT IMMEDIATELY
-require("../models/userSchema");
-const User = mongoose.model("User");
+const User = require("../models/userSchema");
 
 const Classroom = require("../models/classRoomSchema");
 const Labroom = require("../models/labSchema");
