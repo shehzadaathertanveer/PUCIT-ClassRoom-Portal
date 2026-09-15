@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+
+// REQUIRE THE MODEL DIRECTLY SO MONGOOSE REGISTERS IT IMMEDIATELY
+require("../models/userSchema");
+const User = mongoose.model("User");
+
 const Classroom = require("../models/classRoomSchema");
 const Labroom = require("../models/labSchema");
 const Mark = require("../models/markSchema");
@@ -8,11 +13,6 @@ const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
-
-// Safe runtime model getter bypassing circular dependencies or undefined exports
-const getSafeUser = () => {
-  return mongoose.models.User || mongoose.connection.model('User');
-};
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -133,7 +133,6 @@ exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
 // 1. GET ME PROFILE
 // =============================================================================
 exports.getMe = catchAsync(async (req, res, next) => {
-  const User = getSafeUser();
   const user = await User.findById(req.user._id).select("-password");
   if (!user) {
     return next(new AppError("User not found.", 404));
@@ -195,8 +194,6 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   }
 
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
-
-  const User = getSafeUser();
 
   if (formattedRegNo) {
     const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
@@ -288,8 +285,6 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const hashedInputOtp = hashOtp(cleanOtp);
   const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
-  const User = getSafeUser();
-
   const user = await User.findOne({
     $or: [
       { email: cleanEmail },
@@ -353,8 +348,6 @@ exports.login = catchAsync(async (req, res, next) => {
 
   const identifier = loginIdentifier.trim();
   const fresherBatchCode = (process.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
-
-  const User = getSafeUser();
 
   const user = await User.findOne({
     $or: [
@@ -470,7 +463,6 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
-  const User = getSafeUser();
 
   const user = await User.findOne({
     $or: [
@@ -523,7 +515,6 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
-  const User = getSafeUser();
 
   const user = await User.findOne({
     $or: [
@@ -566,7 +557,6 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("New password must be at least 6 characters long!", 400));
   }
 
-  const User = getSafeUser();
   const user = await User.findById(req.user._id).select("+password");
   if (!(await user.correctPassword(currentPassword, user.password))) {
     return next(new AppError("Your current password is incorrect!", 401));
@@ -587,7 +577,6 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
 exports.updateProfile = catchAsync(async (req, res, next) => {
   const { name, password, personalNotificationEmail, rollNo, registrationNo } = req.body;
 
-  const User = getSafeUser();
   const user = await User.findById(req.user._id);
   if (!user) return next(new AppError("User not found.", 404));
 
@@ -643,7 +632,6 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
   const { universityEmail } = req.body;
-  const User = getSafeUser();
   const user = await User.findById(req.user._id);
 
   const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
@@ -683,7 +671,6 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code is required!", 400));
   }
 
-  const User = getSafeUser();
   const user = await User.findById(req.user._id);
 
   if (
@@ -728,7 +715,6 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
     return next(new AppError("Password must be at least 6 characters long!", 400));
   }
 
-  const User = getSafeUser();
   const student = await User.findById(targetId);
   if (!student || student.role !== "STUDENT") {
     return next(new AppError("Student record not found!", 404));
@@ -747,7 +733,6 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
 // 12. ADMIN: GET PENDING TEACHERS
 // =============================================================================
 exports.getPendingTeachers = catchAsync(async (req, res, next) => {
-  const User = getSafeUser();
   const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
   res.status(200).json({
     status: "success",
@@ -761,7 +746,6 @@ exports.getPendingTeachers = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const User = getSafeUser();
   const user = await User.findById(userId);
 
   if (!user) return next(new AppError("User account not found.", 404));
@@ -798,7 +782,6 @@ exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.rejectTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const User = getSafeUser();
   const user = await User.findById(userId);
 
   if (!user) {
@@ -837,7 +820,6 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 // 15. ADMIN ANALYTICS & BREAKDOWNS (Optimized via Concurrent Promise.all)
 // =============================================================================
 exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
-  const User = getSafeUser();
   const [
     totalUsers,
     studentsCount,
@@ -881,7 +863,6 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
 // 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT
 // =============================================================================
 exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
-  const User = getSafeUser();
   const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
   
   res.status(200).json({
@@ -905,7 +886,6 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 
   const identifier = email.trim().toLowerCase();
   const cleanOtp = otp.trim();
-  const User = getSafeUser();
 
   const user = await User.findOne({
     $or: [
@@ -934,7 +914,6 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
   const { rollNo } = req.body;
-  const User = getSafeUser();
   const user = await User.findById(req.user._id);
 
   if (!user) {
@@ -1005,7 +984,6 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
   }
 
-  const User = getSafeUser();
   const targetUser = await User.findById(userId);
   if (!targetUser) {
     return next(new AppError('User account not found.', 404));
