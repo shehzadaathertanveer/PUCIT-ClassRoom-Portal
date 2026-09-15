@@ -1,7 +1,9 @@
 const express = require('express');
+const multer = require('multer');
 const classroomController = require('../controller/classroomController');
 const { protect, restrictTo, restrictToClassStaff } = require('../middleware/authMiddleware');
 
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const router = express.Router();
 
 // =============================================================================
@@ -56,6 +58,7 @@ router.get('/:classroomId/complaints', restrictToClassStaff, classroomController
 // Graded Items & Result Sheets Creation & Deletion
 router.post('/:classroomId/items', restrictToClassStaff, classroomController.createGradedItem);
 router.delete('/:classroomId/items', restrictToClassStaff, classroomController.deleteGradedItem);
+router.post('/:classroomId/sync-excel', restrictToClassStaff, upload.single('file'), classroomController.syncExcelClassroomMarks);
 
 // TA Lookup & Assignment
 router.post('/:classroomId/lookup-ta', restrictToClassStaff, classroomController.lookupTA);

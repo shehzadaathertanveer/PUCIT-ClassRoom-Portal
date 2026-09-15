@@ -7,9 +7,11 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
+const path = require('path');
+
 // Load local .env file ONLY if not in production (Vercel uses its own dashboard env vars)
 if (process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: './config/config.env' });
+  dotenv.config({ path: path.join(__dirname, 'config/config.env') });
 }
 
 const app = require('./app');

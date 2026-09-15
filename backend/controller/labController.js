@@ -1549,3 +1549,133 @@ exports.getUnassignedLabStudents = catchAsync(async (req, res, next) => {
     data: { unassignedStudents }
   });
 });
+
+// =============================================================================
+// 24. CSV / EXCEL LAB MARKS BATCH SYNC ENDPOINT
+// =============================================================================
+exports.syncExcelLabMarks = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const { category, title, totalMarks } = req.body;
+
+  const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to sync lab marks.', 403));
+
+  const labroom = await Labroom.findById(labroomId).populate('students', 'name rollNo registrationNo');
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  if (!req.file || !req.file.buffer) {
+    return next(new AppError('Please provide a valid CSV or Excel file to sync.', 400));
+  }
+
+  const standardKey = getNormalizedLabTargetKey(category || '');
+  const cleanTitle = (title || 'Lab Evaluation').trim();
+  const parsedTotal = Number(totalMarks) || 10;
+
+  if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
+    labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal }];
+  } else {
+    if (!Array.isArray(labroom[standardKey])) labroom[standardKey] = [];
+    const exists = labroom[standardKey].find(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
+    if (exists) {
+      exists.totalMarks = parsedTotal;
+    } else {
+      labroom[standardKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+    }
+  }
+  await labroom.save();
+
+  const content = req.file.buffer.toString('utf-8');
+  const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  let totalProcessed = 0;
+  let updatedCount = 0;
+  const errors = [];
+
+  const studentMap = new Map();
+  (labroom.students || []).forEach(st => {
+    if (st.rollNo) studentMap.set(st.rollNo.toUpperCase(), st._id);
+    if (st.registrationNo) studentMap.set(st.registrationNo.toUpperCase(), st._id);
+  });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0 && /(roll|student|name|marks|score|reg)/i.test(line)) {
+      continue;
+    }
+
+    const delimiter = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
+    const cols = line.split(delimiter).map(c => c.replace(/^["']|["']$/g, '').trim());
+    if (cols.length < 2) continue;
+
+    totalProcessed++;
+
+    let rollCandidate = '';
+    let marksCandidate = null;
+
+    for (const col of cols) {
+      if (!rollCandidate && (/^[A-Za-z]{2,5}[FSfs]\d{2}/.test(col) || /^\d{6,7}$/.test(col) || studentMap.has(col.toUpperCase()))) {
+        rollCandidate = col.toUpperCase();
+      } else if (marksCandidate === null && (/^\d+(\.\d+)?$/.test(col) || col.toUpperCase() === 'A')) {
+        marksCandidate = col;
+      }
+    }
+
+    if (!rollCandidate) {
+      rollCandidate = cols[0].toUpperCase();
+      marksCandidate = cols[cols.length - 1];
+    }
+
+    let studentId = studentMap.get(rollCandidate);
+    if (!studentId) {
+      const digits = rollCandidate.replace(/\D/g, '').padStart(3, '0');
+      const targetPrefixed = `${labroom.sectionPrefix}${digits}`;
+      studentId = studentMap.get(targetPrefixed);
+    }
+
+    if (!studentId) {
+      errors.push(`Row ${i + 1}: Student "${rollCandidate}" not found in this labroom.`);
+      continue;
+    }
+
+    const isAbsent = marksCandidate ? marksCandidate.toUpperCase() === 'A' : false;
+    const obtained = isAbsent ? 0 : Math.max(0, Math.min(parsedTotal, Number(marksCandidate) || 0));
+
+    let markDoc = await LabMark.findOne({ labroom: labroomId, student: studentId });
+    if (!markDoc) {
+      markDoc = new LabMark({
+        labroom: labroomId,
+        student: studentId,
+        labTasks: [], quizzes: [], assignments: [], presentations: [],
+        vivas: [], projects: [], finalProject: [], labMids: [], labFinals: [],
+        labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: []
+      });
+    }
+
+    const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, file: {} };
+
+    if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
+      markDoc[standardKey] = [itemPayload];
+    } else {
+      if (!Array.isArray(markDoc[standardKey])) markDoc[standardKey] = [];
+      const idx = markDoc[standardKey].findIndex(e => e.title.toLowerCase() === cleanTitle.toLowerCase());
+      if (idx > -1) {
+        markDoc[standardKey][idx] = { ...markDoc[standardKey][idx], ...itemPayload };
+      } else {
+        markDoc[standardKey].push(itemPayload);
+      }
+    }
+
+    await markDoc.save();
+    updatedCount++;
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Processed ${totalProcessed} records, successfully updated ${updatedCount}.`,
+    data: {
+      totalProcessed,
+      updatedCount,
+      errors
+    }
+  });
+});

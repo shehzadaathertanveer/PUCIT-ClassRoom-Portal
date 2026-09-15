@@ -204,7 +204,7 @@ const LabroomDetail = () => {
       setLoadingComplaints(true);
       const res = await API.get(`/labrooms/${labroomId}/complaints`);
       setComplaintsList(res.data?.data?.complaints || res.data?.complaints || []);
-    } catch (err) {
+    } catch {
       console.warn('Failed to fetch complaints');
     } finally {
       setLoadingComplaints(false);
@@ -466,7 +466,11 @@ const LabroomDetail = () => {
     }
 
     try {
-      await API.patch('/auth/reset-student-password-staff', { userId: studentUserId, newPassword: newPassword.trim() });
+      await API.patch('/auth/reset-student-password-staff', { 
+        studentId: studentUserId, 
+        userId: studentUserId, 
+        newPassword: newPassword.trim() 
+      });
       showToast(`Password successfully updated for ${studentName}!`);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to reset password.', 'error');
@@ -1935,7 +1939,7 @@ const LabroomDetail = () => {
                 {complaintsList.map((c, i) => (
                   <div key={i} className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-1">
                     <p className="text-xs text-white leading-relaxed">{c.message}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{new Date(c.createdAt || Date.now()).toLocaleDateString()}</p>
+                    <p className="text-[10px] text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
                   </div>
                 ))}
               </div>

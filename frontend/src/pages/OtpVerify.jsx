@@ -14,7 +14,7 @@ const OtpVerify = () => {
   const location = useLocation();
 
   // Extract user data passed from the registration page state
-  const { email, name, rollNo, password, personalNotificationEmail } = location.state || {};
+  const { email, name, rollNo, password, personalNotificationEmail, registrationNo } = location.state || {};
 
   useEffect(() => {
     if (!email) {
@@ -60,7 +60,8 @@ const OtpVerify = () => {
         email, 
         password, 
         rollNo,
-        ...(personalNotificationEmail && { personalNotificationEmail }) 
+        ...(personalNotificationEmail && { personalNotificationEmail }),
+        ...(registrationNo && { registrationNo })
       });
       setStatusMessage('A new verification code has been sent to your email.');
       setCountdown(60);

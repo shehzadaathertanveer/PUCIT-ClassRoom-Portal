@@ -28,7 +28,13 @@ API.interceptors.response.use(
   (error) => {
     if (error.response) {
       // Clear storage and redirect to login if unauthorized/token expired
-      if (error.response.status === 401) {
+      const isAuthEndpoint = error.config?.url?.includes('/auth/login') ||
+                             error.config?.url?.includes('/auth/verify') ||
+                             error.config?.url?.includes('/auth/forgot') ||
+                             error.config?.url?.includes('/auth/reset');
+      const isAuthPage = ['/login', '/register', '/otp-verify', '/forgot-password', '/verify-recovery-otp', '/reset-password'].includes(window.location.pathname);
+
+      if (error.response.status === 401 && !isAuthEndpoint && !isAuthPage) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/login';

@@ -218,7 +218,7 @@ markSchema.pre("save", async function () {
   let activeWeightSum = 0;
   let weightedScoreSum = 0;
 
-  const calculatedSessionalPct = totalSessionalWeight > 0 ? (totalSessionalEarnedWeighted / totalSessionalWeight) * 100 : 0;
+  const calculatedSessionalPct = totalSessionalWeight > 0 ? (totalSessionalEarnedWeighted / totalSessionalWeight) : 0;
   if (totalSessionalWeight > 0) {
     weightedScoreSum += calculatedSessionalPct * sessionalWeight;
     activeWeightSum += sessionalWeight;

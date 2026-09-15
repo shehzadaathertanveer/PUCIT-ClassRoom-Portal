@@ -220,7 +220,7 @@ const ClassroomDetail = () => {
       setLoadingComplaints(true);
       const res = await API.get(`/classrooms/${classroomId}/complaints`);
       setComplaintsList(res.data?.data?.complaints || res.data?.complaints || []);
-    } catch (err) {
+    } catch {
       console.warn('Failed to fetch complaints');
     } finally {
       setLoadingComplaints(false);
@@ -612,7 +612,11 @@ const ClassroomDetail = () => {
     }
 
     try {
-      await API.patch('/auth/reset-student-password-staff', { userId: studentUserId, newPassword: newPassword.trim() });
+      await API.patch('/auth/reset-student-password-staff', { 
+        studentId: studentUserId, 
+        userId: studentUserId, 
+        newPassword: newPassword.trim() 
+      });
       showToast(`Password successfully updated for ${studentName}!`);
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to reset password.', 'error');
@@ -748,7 +752,7 @@ const ClassroomDetail = () => {
     return ((totalObtained / totalPossible) * 100).toFixed(2);
   };
 
-  const getItemClassAverageRaw = (targetKey, itemTitle, categoryName) => {
+  const getItemClassAverageRaw = (targetKey, itemTitle, _categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return '0.00';
     
@@ -771,7 +775,7 @@ const ClassroomDetail = () => {
     return (totalObtained / count).toFixed(2);
   };
 
-  const getItemGradedCount = (targetKey, itemTitle, categoryName) => {
+  const getItemGradedCount = (targetKey, itemTitle, _categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return 0;
     let graded = 0;
@@ -2026,7 +2030,7 @@ const ClassroomDetail = () => {
                 {complaintsList.map((c, i) => (
                   <div key={i} className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-1">
                     <p className="text-xs text-white leading-relaxed">{c.message}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{new Date(c.createdAt || Date.now()).toLocaleDateString()}</p>
+                    <p className="text-[10px] text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
                   </div>
                 ))}
               </div>

@@ -4,6 +4,7 @@ const User = require("../models/userSchema");
 const Classroom = require("../models/classRoomSchema");
 const Labroom = require("../models/labSchema");
 const Mark = require("../models/markSchema");
+const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
@@ -680,9 +681,10 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
 // 11. EMERGENCY STAFF PASSWORD RESET
 // =============================================================================
 exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
-  const { studentId, newPassword } = req.body;
+  const targetId = req.body.studentId || req.body.userId;
+  const { newPassword } = req.body;
 
-  if (!studentId || !newPassword) {
+  if (!targetId || !newPassword) {
     return next(new AppError("Student ID and new password are required!", 400));
   }
 
@@ -690,7 +692,7 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
     return next(new AppError("Password must be at least 6 characters long!", 400));
   }
 
-  const student = await User.findById(studentId);
+  const student = await User.findById(targetId);
   if (!student || student.role !== "STUDENT") {
     return next(new AppError("Student record not found!", 404));
   }
@@ -987,8 +989,27 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 
   await User.findByIdAndDelete(userId);
 
-  // Clean up references in mark records if needed
-  await Mark.deleteMany({ student: userId });
+  // Clean up references in mark records and rosters
+  await Promise.all([
+    Mark.deleteMany({ student: userId }),
+    LabMark.deleteMany({ student: userId }),
+    Classroom.updateMany(
+      {},
+      { $pull: { students: userId, tas: userId } }
+    ),
+    Labroom.updateMany(
+      {},
+      { $pull: { students: userId, tas: userId } }
+    ),
+    Classroom.updateMany(
+      { teacher: userId },
+      { $set: { teacher: null, placeholderTeacherName: 'Faculty / TBD' } }
+    ),
+    Labroom.updateMany(
+      { teacher: userId },
+      { $set: { teacher: null, placeholderTeacherName: 'Faculty / TBD' } }
+    )
+  ]);
 
   res.status(200).json({
     status: 'success',

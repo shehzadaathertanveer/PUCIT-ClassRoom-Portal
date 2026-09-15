@@ -24,7 +24,6 @@ const Register = () => {
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isFormValid, setIsFormValid] = useState(false);
   
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -81,24 +80,15 @@ const Register = () => {
   }, [rollNo, email, fresherBatchCode, isErrorState]);
 
   // Real-time form validation including password matching
-  useEffect(() => {
-    const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
-    
-    let fresherCheck = true;
-    if (isFresherPrefixOnly) {
-      fresherCheck = registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0;
-    } else if (isFresherWithRoll) {
-      fresherCheck = personalNotificationEmail.trim().length > 0;
-    }
-
-    const passwordsMatch = password.length > 0 && password === confirmPassword;
-    
-    if (hasIdentifier && fresherCheck && name.trim() && password.length >= 6 && passwordsMatch) {
-      setIsFormValid(true);
-    } else {
-      setIsFormValid(false);
-    }
-  }, [rollNo, registrationNo, name, email, personalNotificationEmail, password, confirmPassword, isFresherPrefixOnly, isFresherWithRoll]);
+  const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
+  let fresherCheck = true;
+  if (isFresherPrefixOnly) {
+    fresherCheck = registrationNo.trim().length > 0 && personalNotificationEmail.trim().length > 0;
+  } else if (isFresherWithRoll) {
+    fresherCheck = personalNotificationEmail.trim().length > 0;
+  }
+  const passwordsMatch = password.length > 0 && password === confirmPassword;
+  const isFormValid = hasIdentifier && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch;
 
   const handleRegister = async (e) => {
     if (e) {
@@ -145,7 +135,9 @@ const Register = () => {
             email: responseData.email, 
             name: name.trim(), 
             rollNo: identifierRoll, 
-            password 
+            password,
+            registrationNo: registrationNo.trim().toUpperCase(),
+            personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
           } 
         });
       } else if (responseData.data?.user) {

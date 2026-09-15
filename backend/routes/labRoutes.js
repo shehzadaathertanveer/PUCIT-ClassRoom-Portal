@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const labController = require("../controller/labController");
 const labMarkController = require("../controller/labMarkController");
 const authController = require("../controller/authController");
@@ -8,6 +9,7 @@ const {
   restrictToLabStaff,
 } = require("../middleware/authMiddleware");
 
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const router = express.Router();
 
 // All routes require authentication
@@ -86,11 +88,15 @@ router
   .post(restrictToLabStaff, labController.bulkApproveAvailableLabStudents);
 
 // =============================================================================
-// EXCEL EXPORT ROUTE
+// EXCEL EXPORT & SYNC ROUTES
 // =============================================================================
 router
   .route("/:labroomId/export-excel")
   .get(restrictToLabStaff, labMarkController.downloadLabExcelExport);
+
+router
+  .route("/:labroomId/sync-excel")
+  .post(restrictToLabStaff, upload.single("file"), labController.syncExcelLabMarks);
 
 // =============================================================================
 // INSTRUCTOR & TA LOOKUP / ASSIGNMENT ROUTES

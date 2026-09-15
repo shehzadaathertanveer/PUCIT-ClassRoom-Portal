@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 
@@ -140,8 +140,9 @@ const Dashboard = () => {
         API.get('/auth/admin/users').catch(() => ({ data: { data: { users: [] } } }))
       ]);
 
+      const teachers = pendingRes?.data?.data?.teachers || [];
       if (pendingRes?.data?.data?.teachers) {
-        setPendingTeachers(pendingRes.data.data.teachers);
+        setPendingTeachers(teachers);
       }
       
       let fetchedUsers = usersRes?.data?.data?.users || usersRes?.data?.users || [];
@@ -158,9 +159,9 @@ const Dashboard = () => {
 
       setDetailedAnalyticsData({
         users: fetchedUsers,
-        teachers: pendingTeachers
+        teachers: teachers
       });
-    } catch (err) {
+    } catch {
       console.warn('Failed to fetch admin backend data');
     } finally {
       setLoadingPending(false);

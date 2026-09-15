@@ -1,12 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
 const LabMarksSheet = () => {
   const { labroomId, category, itemId } = useParams();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -14,7 +12,6 @@ const LabMarksSheet = () => {
   const [error, setError] = useState('');
   const [labroom, setLabroom] = useState(null);
   const [students, setStudents] = useState([]);
-  const [existingMarks, setExistingMarks] = useState([]);
   
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
@@ -68,7 +65,6 @@ const LabMarksSheet = () => {
       const activeLabroom = data.labroom || data.classroom;
       setLabroom(activeLabroom);
       setStudents(data.students || []);
-      setExistingMarks(data.existingMarks || []);
 
       // 2. Resolve active title
       const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
@@ -202,7 +198,7 @@ const LabMarksSheet = () => {
       }
 
       const marksData = Object.entries(markInputs)
-        .filter(([_, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
+        .filter(([_key, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
         .map(([studentId, data]) => ({
           studentId,
           obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),

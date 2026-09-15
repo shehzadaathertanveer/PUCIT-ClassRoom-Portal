@@ -1436,33 +1436,7 @@ exports.bulkApproveAvailableStudents = catchAsync(async (req, res, next) => {
 // =============================================================================
 // 21. ADMIN USER DELETION CONTROL
 // =============================================================================
-exports.adminDeleteUser = catchAsync(async (req, res, next) => {
-  if (req.user.role !== 'ADMIN') {
-    return next(new AppError('Only administrators can delete user accounts.', 403));
-  }
-
-  const { userId } = req.params;
-  if (!userId) {
-    return next(new AppError('Target User ID is required!', 400));
-  }
-
-  if (userId.toString() === req.user._id.toString()) {
-    return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
-  }
-
-  const targetUser = await User.findById(userId);
-  if (!targetUser) {
-    return next(new AppError('User account not found.', 404));
-  }
-
-  await User.findByIdAndDelete(userId);
-  await Mark.deleteMany({ student: userId });
-
-  res.status(200).json({
-    status: 'success',
-    message: `User account ${targetUser.name} (${targetUser.email}) successfully deleted by admin.`,
-  });
-});
+exports.adminDeleteUser = require('./authController').adminDeleteUser;
 
 // =============================================================================
 // 22. MARKSHEET BULK SHEET & UNASSIGNED ENDPOINTS (SYNCHRONIZED)
@@ -1646,5 +1620,138 @@ exports.deleteEvaluationItemRoute = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     message: 'Evaluation removed successfully!'
+  });
+});
+
+// =============================================================================
+// 23. CSV / EXCEL BATCH SYNC ENDPOINT
+// =============================================================================
+exports.syncExcelClassroomMarks = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { category, type, title, totalMarks } = req.body;
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to sync marks.', 403));
+
+  const classroom = await Classroom.findById(classroomId).populate('students', 'name rollNo registrationNo');
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  if (!req.file || !req.file.buffer) {
+    return next(new AppError('Please provide a valid CSV or Excel file to sync.', 400));
+  }
+
+  const targetKey = getNormalizedTargetKey(category || type);
+  const cleanTitle = (title || 'Evaluation').trim();
+  const parsedTotal = Number(totalMarks) || 10;
+
+  if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal };
+  } else {
+    if (!Array.isArray(classroom[targetKey])) classroom[targetKey] = [];
+    const exists = classroom[targetKey].find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+    if (exists) {
+      exists.totalMarks = parsedTotal;
+    } else {
+      classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+    }
+  }
+  await classroom.save();
+
+  const content = req.file.buffer.toString('utf-8');
+  const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  let totalProcessed = 0;
+  let updatedCount = 0;
+  const errors = [];
+
+  const studentMap = new Map();
+  (classroom.students || []).forEach(st => {
+    if (st.rollNo) studentMap.set(st.rollNo.toUpperCase(), st._id);
+    if (st.registrationNo) studentMap.set(st.registrationNo.toUpperCase(), st._id);
+  });
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0 && /(roll|student|name|marks|score|reg)/i.test(line)) {
+      continue;
+    }
+
+    const delimiter = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
+    const cols = line.split(delimiter).map(c => c.replace(/^["']|["']$/g, '').trim());
+    if (cols.length < 2) continue;
+
+    totalProcessed++;
+
+    let rollCandidate = '';
+    let marksCandidate = null;
+
+    for (const col of cols) {
+      if (!rollCandidate && (/^[A-Za-z]{2,5}[FSfs]\d{2}/.test(col) || /^\d{6,7}$/.test(col) || studentMap.has(col.toUpperCase()))) {
+        rollCandidate = col.toUpperCase();
+      } else if (marksCandidate === null && (/^\d+(\.\d+)?$/.test(col) || col.toUpperCase() === 'A')) {
+        marksCandidate = col;
+      }
+    }
+
+    if (!rollCandidate) {
+      rollCandidate = cols[0].toUpperCase();
+      marksCandidate = cols[cols.length - 1];
+    }
+
+    let studentId = studentMap.get(rollCandidate);
+    if (!studentId) {
+      const digits = rollCandidate.replace(/\D/g, '').padStart(3, '0');
+      const targetPrefixed = `${classroom.sectionPrefix}${digits}`;
+      studentId = studentMap.get(targetPrefixed);
+    }
+
+    if (!studentId) {
+      errors.push(`Row ${i + 1}: Student "${rollCandidate}" not found in this classroom.`);
+      continue;
+    }
+
+    const isAbsent = marksCandidate ? marksCandidate.toUpperCase() === 'A' : false;
+    const obtained = isAbsent ? 0 : Math.max(0, Math.min(parsedTotal, Number(marksCandidate) || 0));
+
+    let markDoc = await Mark.findOne({ classroom: classroomId, student: studentId });
+    if (!markDoc) {
+      markDoc = new Mark({
+        classroom: classroomId,
+        student: studentId,
+        quizzes: [], assignments: [], presentations: [], projects: [], homework: [],
+        classActivities: [], classParticipation: [], vivas: [], specialMarks: [], customActivities: []
+      });
+    }
+
+    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+      markDoc[targetKey] = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent
+      };
+    } else {
+      if (!Array.isArray(markDoc[targetKey])) markDoc[targetKey] = [];
+      const itemIdx = markDoc[targetKey].findIndex(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
+      const payload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
+      if (itemIdx > -1) {
+        markDoc[targetKey][itemIdx] = { ...markDoc[targetKey][itemIdx], ...payload };
+      } else {
+        markDoc[targetKey].push(payload);
+      }
+    }
+
+    await markDoc.save();
+    updatedCount++;
+  }
+
+  res.status(200).json({
+    status: 'success',
+    message: `Processed ${totalProcessed} records, successfully updated ${updatedCount}.`,
+    data: {
+      totalProcessed,
+      updatedCount,
+      errors
+    }
   });
 });

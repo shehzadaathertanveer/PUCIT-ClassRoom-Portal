@@ -124,6 +124,16 @@ app.use((err, req, res, next) => {
     err.message = `Invalid ${err.path}: ${err.value}`;
   }
 
+  if (err.name === "JsonWebTokenError") {
+    err.statusCode = 401;
+    err.message = "Invalid token. Please log in again!";
+  }
+
+  if (err.name === "TokenExpiredError") {
+    err.statusCode = 401;
+    err.message = "Your token has expired! Please log in again.";
+  }
+
   res.status(err.statusCode).json({
     status: err.status,
     message: err.message,

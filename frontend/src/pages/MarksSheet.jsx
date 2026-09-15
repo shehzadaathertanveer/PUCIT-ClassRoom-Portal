@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
@@ -53,7 +52,6 @@ const MarksSheet = () => {
   const { classroomId, category: rawCategory, itemId } = useParams();
   const category = getNormalizedCategory(rawCategory);
 
-  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   
@@ -61,7 +59,6 @@ const MarksSheet = () => {
   const [error, setError] = useState('');
   const [classroom, setClassroom] = useState(null);
   const [students, setStudents] = useState([]);
-  const [existingMarks, setExistingMarks] = useState([]);
   
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
@@ -273,7 +270,7 @@ const MarksSheet = () => {
       }
 
       const marksData = Object.entries(markInputs)
-        .filter(([_, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
+        .filter(([_key, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
         .map(([studentId, data]) => {
           const rawVal = String(data.obtainedMarks).trim();
           const isAbs = data.isAbsent || rawVal.toUpperCase() === 'A';
