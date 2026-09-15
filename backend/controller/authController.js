@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userSchema");
@@ -8,6 +9,9 @@ const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
+
+// Safe model getter to prevent circular dependency runtime errors
+const getUserModel = () => mongoose.models.User || User;
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -128,7 +132,8 @@ exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
 // 1. GET ME PROFILE
 // =============================================================================
 exports.getMe = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.user._id).select("-password");
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id).select("-password");
   if (!user) {
     return next(new AppError("User not found.", 404));
   }
@@ -172,10 +177,15 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     assignedRole = "PENDING_TEACHER";
     formattedRollNo = cleanEmail.split('@')[0].toUpperCase();
   } else if (!formattedRollNo && formattedRegNo) {
-    formattedRollNo = `FRESHER_${formattedRegNo}`;
+    formattedRollNo = `TEMP_${formattedRegNo}`;
   }
 
-  if (assignedRole === "STUDENT" && !FULL_ROLL_NO_REGEX.test(formattedRollNo) && !TEMP_PREFIX_REGEX.test(formattedRollNo)) {
+  const isValidStudentFormat = 
+    FULL_ROLL_NO_REGEX.test(formattedRollNo) || 
+    TEMP_PREFIX_REGEX.test(formattedRollNo) || 
+    formattedRollNo.startsWith('TEMP_');
+
+  if (assignedRole === "STUDENT" && !isValidStudentFormat) {
     return next(new AppError("A valid Roll Number or Temporary Prefix is required for student registration!", 400));
   }
 
@@ -185,8 +195,10 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
 
+  const UserModel = getUserModel();
+
   if (formattedRegNo) {
-    const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
+    const existingRegHolder = await UserModel.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
     if (existingRegHolder) {
       return next(new AppError("This Registration / Form Number is already linked to an active account.", 400));
     }
@@ -215,7 +227,13 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     ],
   });
 
-  let user = await User.findOne({ $or: [{ email: officialEmail }, ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []), ...(formattedRollNo ? [{ rollNo: formattedRollNo }] : [])] });
+  let user = await UserModel.findOne({ 
+    $or: [
+      { email: officialEmail }, 
+      ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []), 
+      ...(formattedRollNo ? [{ rollNo: formattedRollNo }] : [])
+    ] 
+  });
 
   if (user) {
     user.name = name;
@@ -231,7 +249,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     user.otpExpiresAt = otpExpiry;
     await user.save();
   } else {
-    user = await User.create({
+    user = await UserModel.create({
       name,
       email: officialEmail,
       rollNo: formattedRollNo,
@@ -267,11 +285,12 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const cleanEmail = email.trim().toLowerCase();
   const cleanOtp = otp.trim();
   const hashedInputOtp = hashOtp(cleanOtp);
-
   const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
-  // Flexible lookup to accommodate freshers using personal notification emails, temp emails, or roll prefixes
-  const user = await User.findOne({
+  const UserModel = getUserModel();
+
+  // Flexible lookup accommodating personal notification emails, temp emails, or roll prefixes
+  const user = await UserModel.findOne({
     $or: [
       { email: cleanEmail },
       { personalNotificationEmail: cleanEmail },
@@ -335,7 +354,9 @@ exports.login = catchAsync(async (req, res, next) => {
   const identifier = loginIdentifier.trim();
   const fresherBatchCode = (process.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
 
-  const user = await User.findOne({
+  const UserModel = getUserModel();
+
+  const user = await UserModel.findOne({
     $or: [
       { rollNo: identifier.toUpperCase() },
       { email: identifier.toLowerCase() },
@@ -413,8 +434,8 @@ exports.login = catchAsync(async (req, res, next) => {
         .populate("teacher", "name email")
         .populate("tas", "name rollNo")
         .populate("students", "name rollNo registrationNo"),
-      User.find({ role: "PENDING_TEACHER" }).select("-password"),
-      User.find().select("-password")
+      UserModel.find({ role: "PENDING_TEACHER" }).select("-password"),
+      UserModel.find().select("-password")
     ]);
 
     dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
@@ -449,8 +470,9 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
+  const UserModel = getUserModel();
 
-  const user = await User.findOne({
+  const user = await UserModel.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -501,8 +523,9 @@ exports.resetPasswordWithOTP = catchAsync(async (req, res, next) => {
   }
 
   const identifier = email.trim().toLowerCase();
+  const UserModel = getUserModel();
 
-  const user = await User.findOne({
+  const user = await UserModel.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -543,7 +566,8 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("New password must be at least 6 characters long!", 400));
   }
 
-  const user = await User.findById(req.user._id).select("+password");
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id).select("+password");
   if (!(await user.correctPassword(currentPassword, user.password))) {
     return next(new AppError("Your current password is incorrect!", 401));
   }
@@ -563,7 +587,8 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
 exports.updateProfile = catchAsync(async (req, res, next) => {
   const { name, password, personalNotificationEmail, rollNo, registrationNo } = req.body;
 
-  const user = await User.findById(req.user._id);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id);
   if (!user) return next(new AppError("User not found.", 404));
 
   if (name) user.name = name.trim();
@@ -571,7 +596,7 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
     user.password = password.trim();
   }
 
-  if (rollNo && (TEMP_PREFIX_REGEX.test(user.rollNo) || user.rollNo.startsWith('FRESHER_'))) {
+  if (rollNo && (TEMP_PREFIX_REGEX.test(user.rollNo) || user.rollNo.startsWith('FRESHER_') || user.rollNo.startsWith('TEMP_'))) {
     const newRoll = rollNo.trim().toUpperCase();
     if (FULL_ROLL_NO_REGEX.test(newRoll)) {
       user.rollNo = newRoll;
@@ -618,7 +643,8 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
   const { universityEmail } = req.body;
-  const user = await User.findById(req.user._id);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id);
 
   const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
 
@@ -657,7 +683,8 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code is required!", 400));
   }
 
-  const user = await User.findById(req.user._id);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id);
 
   if (
     !user.otpCode ||
@@ -701,7 +728,8 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
     return next(new AppError("Password must be at least 6 characters long!", 400));
   }
 
-  const student = await User.findById(targetId);
+  const UserModel = getUserModel();
+  const student = await UserModel.findById(targetId);
   if (!student || student.role !== "STUDENT") {
     return next(new AppError("Student record not found!", 404));
   }
@@ -719,7 +747,8 @@ exports.resetStudentPasswordByStaff = catchAsync(async (req, res, next) => {
 // 12. ADMIN: GET PENDING TEACHERS
 // =============================================================================
 exports.getPendingTeachers = catchAsync(async (req, res, next) => {
-  const pendingTeachers = await User.find({ role: "PENDING_TEACHER" }).select("-password");
+  const UserModel = getUserModel();
+  const pendingTeachers = await UserModel.find({ role: "PENDING_TEACHER" }).select("-password");
   res.status(200).json({
     status: "success",
     results: pendingTeachers.length,
@@ -732,7 +761,8 @@ exports.getPendingTeachers = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const user = await User.findById(userId);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(userId);
 
   if (!user) return next(new AppError("User account not found.", 404));
   if (user.role !== "PENDING_TEACHER") {
@@ -768,7 +798,8 @@ exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.rejectTeacher = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.body.userId;
-  const user = await User.findById(userId);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(userId);
 
   if (!user) {
     return next(new AppError("Teacher registration request not found.", 404));
@@ -794,7 +825,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
     }
   }
 
-  await User.findByIdAndDelete(userId);
+  await UserModel.findByIdAndDelete(userId);
 
   res.status(200).json({
     status: "success",
@@ -806,6 +837,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 // 15. ADMIN ANALYTICS & BREAKDOWNS (Optimized via Concurrent Promise.all)
 // =============================================================================
 exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
+  const UserModel = getUserModel();
   const [
     totalUsers,
     studentsCount,
@@ -815,11 +847,11 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
     activeClassroomsCount,
     activeLabroomsCount
   ] = await Promise.all([
-    User.countDocuments(),
-    User.countDocuments({ role: "STUDENT" }),
-    User.countDocuments({ role: "TEACHER" }),
-    User.countDocuments({ role: "ADMIN" }),
-    User.countDocuments({ role: "PENDING_TEACHER" }),
+    UserModel.countDocuments(),
+    UserModel.countDocuments({ role: "STUDENT" }),
+    UserModel.countDocuments({ role: "TEACHER" }),
+    UserModel.countDocuments({ role: "ADMIN" }),
+    UserModel.countDocuments({ role: "PENDING_TEACHER" }),
     Classroom.countDocuments({ isActive: true }),
     Labroom.countDocuments({ isActive: true })
   ]);
@@ -849,7 +881,8 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
 // 16. ADMIN: GET ALL USERS FOR ANALYTICS VAULT
 // =============================================================================
 exports.getAllUsersAdmin = catchAsync(async (req, res, next) => {
-  const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
+  const UserModel = getUserModel();
+  const users = await UserModel.find().select("-password").sort({ createdAt: -1 }).lean();
   
   res.status(200).json({
     status: "success",
@@ -872,8 +905,9 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 
   const identifier = email.trim().toLowerCase();
   const cleanOtp = otp.trim();
+  const UserModel = getUserModel();
 
-  const user = await User.findOne({
+  const user = await UserModel.findOne({
     $or: [
       { email: identifier },
       { rollNo: identifier.toUpperCase() },
@@ -900,14 +934,15 @@ exports.verifyRecoveryOtp = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
   const { rollNo } = req.body;
-  const user = await User.findById(req.user._id);
+  const UserModel = getUserModel();
+  const user = await UserModel.findById(req.user._id);
 
   if (!user) {
     return next(new AppError("User record not found.", 404));
   }
 
   const currentRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
-  const isTempOrFresher = TEMP_PREFIX_REGEX.test(currentRoll) || currentRoll.startsWith('FRESHER_');
+  const isTempOrFresher = TEMP_PREFIX_REGEX.test(currentRoll) || currentRoll.startsWith('FRESHER_') || currentRoll.startsWith('TEMP_');
 
   if (!isTempOrFresher && FULL_ROLL_NO_REGEX.test(currentRoll)) {
     return next(new AppError("You already have an official PUCIT Roll Number assigned.", 400));
@@ -919,7 +954,7 @@ exports.updateFresherRollNo = catchAsync(async (req, res, next) => {
     return next(new AppError("Please provide a valid official PUCIT Roll Number (e.g., BITF26A001).", 400));
   }
 
-  const existingUserWithRoll = await User.findOne({ rollNo: newRoll, _id: { $ne: user._id } }).select('_id');
+  const existingUserWithRoll = await UserModel.findOne({ rollNo: newRoll, _id: { $ne: user._id } }).select('_id');
   if (existingUserWithRoll) {
     return next(new AppError("This Roll Number is already registered to another account.", 400));
   }
@@ -970,7 +1005,8 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     return next(new AppError('Security Restriction: You cannot delete your own admin account while logged in.', 400));
   }
 
-  const targetUser = await User.findById(userId);
+  const UserModel = getUserModel();
+  const targetUser = await UserModel.findById(userId);
   if (!targetUser) {
     return next(new AppError('User account not found.', 404));
   }
@@ -995,7 +1031,7 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     }
   }
 
-  await User.findByIdAndDelete(userId);
+  await UserModel.findByIdAndDelete(userId);
 
   await Promise.all([
     Mark.deleteMany({ student: userId }),
