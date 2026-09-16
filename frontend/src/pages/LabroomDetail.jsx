@@ -801,6 +801,28 @@ const LabroomDetail = () => {
     return graded;
   };
 
+  const getCategoryClassAverage = (targetKey, act) => {
+    const ca = labAnalytics?.classAverages || {};
+    const directKey = targetKey + 'Percentage';
+    if (ca[directKey] !== undefined && ca[directKey] !== null) return Number(ca[directKey]);
+
+    const normKey = (act?.category || '').toLowerCase().replace(/\s+/g, '') + 'Percentage';
+    if (ca[normKey] !== undefined && ca[normKey] !== null) return Number(ca[normKey]);
+
+    const rankings = labAnalytics?.rankings || [];
+    if (rankings.length === 0) return 0;
+    let sum = 0;
+    let count = 0;
+    rankings.forEach(r => {
+      const v = r[directKey] ?? r[normKey];
+      if (v !== undefined && v !== null && !isNaN(Number(v))) {
+        sum += Number(v);
+        count++;
+      }
+    });
+    return count > 0 ? Number((sum / count).toFixed(2)) : 0;
+  };
+
   const getStudentRankInfo = () => {
     const rankings = labAnalytics?.rankings || [];
     if (rankings.length === 0 || !user?._id) {
@@ -1145,7 +1167,7 @@ const LabroomDetail = () => {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
                       {sessionalActivitiesList.map((act, i) => {
                         const targetKey = getCategoryTargetKey(act.category);
-                        const avgVal = labAnalytics?.classAverages?.[targetKey + 'Percentage'] || labAnalytics?.classAverages?.[act.category.toLowerCase().replace(/\s+/g, '') + 'Percentage'] || labAnalytics?.[targetKey + 'Average'] || 0;
+                        const avgVal = getCategoryClassAverage(targetKey, act);
                         return (
                           <div key={i} className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
                             <span className="text-[10px] text-slate-400 block uppercase">{act.category} Avg</span>

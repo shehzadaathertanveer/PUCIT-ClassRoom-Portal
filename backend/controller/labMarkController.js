@@ -355,6 +355,15 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
     overallLabPercentage: Number((sumOverall / validDocs.length).toFixed(2))
   };
 
+  // Per-category class averages (e.g. classAverages['labTasksPercentage'])
+  VALID_STANDARD_CATEGORIES.forEach(targetKey => {
+    let catSum = 0;
+    rankings.forEach(r => {
+      catSum += Number(r[targetKey + 'Percentage'] || 0);
+    });
+    classAverages[targetKey + 'Percentage'] = Number((catSum / rankings.length).toFixed(2));
+  });
+
   res.status(200).json({
     status: 'success',
     data: {
@@ -539,6 +548,9 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const studentIdStr = entry.studentId.toString();
     const rawVal = String(entry.obtainedMarks).trim();
     const isAbsent = rawVal.toUpperCase() === 'A';
+    if (!isAbsent && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
+      continue;
+    }
     const parsedObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
     const fileData = entry.file || {};
 
@@ -591,6 +603,17 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   }
 
   await Promise.all(docsToSave.map(d => d.save()));
+
+  // Neutralize students left at -99 (ungraded) for this lab evaluation so cleared boxes truly unmark them.
+  const submittedIds = new Set(validEntries.map(e => e.studentId.toString()));
+  const enrolledIds = (labroom.students || []).map(s => (s && s._id ? s._id : s).toString());
+  const excludedIds = enrolledIds.filter(id => !submittedIds.has(id));
+  if (excludedIds.length > 0) {
+    await LabMark.updateMany(
+      { labroom: labroomId, student: { $in: excludedIds }, [standardKey]: { $elemMatch: { title: cleanTitle } } },
+      { $pull: { [standardKey]: { title: cleanTitle } } }
+    );
+  }
 
   await Promise.all(
     emailList.map(async (m) => {

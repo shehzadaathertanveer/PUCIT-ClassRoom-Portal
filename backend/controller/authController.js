@@ -1133,6 +1133,14 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
     Labroom.updateMany(
       { teacher: userId },
       { $set: { teacher: null, placeholderTeacherName: 'Faculty / TBD' } }
+    ),
+    Classroom.updateMany(
+      { taRollNumbers: targetUser.rollNo },
+      { $pull: { taRollNumbers: targetUser.rollNo, approvedRollNumbers: targetUser.rollNo } }
+    ),
+    Labroom.updateMany(
+      { taRollNumbers: targetUser.rollNo },
+      { $pull: { taRollNumbers: targetUser.rollNo, approvedRollNumbers: targetUser.rollNo } }
     )
   ]);
 

@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
+
+const UNGRADED_MARK = '-99';
 
 const CATEGORY_MAP = {
   quiz: 'quizzes',
@@ -63,6 +65,8 @@ const MarksSheet = () => {
   
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
+  const [errorStudentIds, setErrorStudentIds] = useState(new Set());
+  const inputRefs = useRef({});
   
   // Safely extract totalMarks from router state if available, otherwise default to 10
   const passedTotalMarks = location.state?.totalMarks;
@@ -168,7 +172,7 @@ const MarksSheet = () => {
         const studentId = student._id.toString();
         const markDoc = marksMap.get(studentId);
         
-        let obtained = '';
+        let obtained = UNGRADED_MARK;
         let isAbsent = false;
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
@@ -188,7 +192,9 @@ const MarksSheet = () => {
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
           );
           if (item) {
-            obtained = item.isAbsent ? 'A' : (item.obtainedMarks ?? '');
+            const rawStored = item.obtainedMarks;
+            const hasStored = rawStored !== undefined && rawStored !== null && String(rawStored).trim() !== '';
+            obtained = item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK);
             isAbsent = !!item.isAbsent;
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
@@ -220,6 +226,12 @@ const MarksSheet = () => {
 
   const handleInputChange = (studentId, value) => {
     const isAbs = value.trim().toUpperCase() === 'A';
+    setErrorStudentIds(prev => {
+      if (!prev.size || !prev.has(studentId)) return prev;
+      const next = new Set(prev);
+      next.delete(studentId);
+      return next;
+    });
     setMarkInputs(prev => ({
       ...prev,
       [studentId]: {
@@ -228,6 +240,35 @@ const MarksSheet = () => {
         isAbsent: isAbs
       }
     }));
+  };
+
+  // Clicking the marks field clears the -99 ungraded placeholder so a score can be typed.
+  const handleMarkFocus = (studentId) => {
+    setMarkInputs(prev => {
+      const current = prev[studentId] || {};
+      if (String(current.obtainedMarks ?? '').trim() === UNGRADED_MARK) {
+        return {
+          ...prev,
+          [studentId]: { ...current, obtainedMarks: '', isAbsent: false }
+        };
+      }
+      return prev;
+    });
+  };
+
+  // Leaving the field empty restores -99 so ungraded stays visually distinct from a real 0.
+  const handleMarkBlur = (studentId) => {
+    setMarkInputs(prev => {
+      const current = prev[studentId] || {};
+      const val = String(current.obtainedMarks ?? '').trim();
+      if (val === '' || val === UNGRADED_MARK) {
+        return {
+          ...prev,
+          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false }
+        };
+      }
+      return prev;
+    });
   };
 
   const handleFileUpload = async (studentId, e) => {
@@ -270,8 +311,31 @@ const MarksSheet = () => {
         return;
       }
 
+      // Per-box validation: highlight any invalid marks before saving so they can be fixed.
+      const invalidIds = new Set();
+      Object.entries(markInputs).forEach(([studentId, data]) => {
+        const rawVal = String(data.obtainedMarks ?? '').trim();
+        if (rawVal === '' || rawVal === UNGRADED_MARK) return; // ungraded is allowed
+        if (rawVal.toUpperCase() === 'A') return; // absent is allowed
+        const num = Number(rawVal);
+        if (isNaN(num) || num < 0 || num > parsedTotalMarks) {
+          invalidIds.add(studentId);
+        }
+      });
+      if (invalidIds.size > 0) {
+        setErrorStudentIds(invalidIds);
+        showToast(`Invalid marks in ${invalidIds.size} highlighted box(es) — fix them and save again.`);
+        const firstRef = inputRefs.current[[...invalidIds][0]];
+        if (firstRef) firstRef.focus();
+        setSaving(false);
+        return;
+      }
+
       const marksData = Object.entries(markInputs)
-        .filter(([_key, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
+        .filter(([_key, data]) => {
+          const v = String(data.obtainedMarks ?? '').trim();
+          return v !== '' && v !== UNGRADED_MARK;
+        })
         .map(([studentId, data]) => {
           const rawVal = String(data.obtainedMarks).trim();
           const isAbs = data.isAbsent || rawVal.toUpperCase() === 'A';
@@ -342,8 +406,10 @@ const MarksSheet = () => {
         const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false };
         const roll = student.rollNo || 'N/A';
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
-        const score = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks ?? '');
-        const status = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks !== '' ? 'Graded' : 'Pending');
+        const rawMark = String(inputData.obtainedMarks ?? '').trim();
+        const isUngraded = rawMark === '' || rawMark === UNGRADED_MARK;
+        const score = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : rawMark);
+        const status = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : 'Graded');
 
         csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
@@ -477,6 +543,14 @@ const MarksSheet = () => {
               </div>
             </div>
 
+            {/* Legend + validation hints */}
+            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-mono text-slate-400 pb-1">
+              <span className="border border-dashed border-amber-500/40 text-amber-500/90 rounded-lg px-2 py-1">-99 = Ungraded</span>
+              <span className="border border-red-500/40 text-red-400/90 rounded-lg px-2 py-1">A = Absent</span>
+              <span className="text-slate-500">0 = Scored zero</span>
+              <span className="border border-red-500/60 text-red-400 rounded-lg px-2 py-1">Red glow = Fix this box</span>
+            </div>
+
             {/* Student Roster Table */}
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -497,7 +571,8 @@ const MarksSheet = () => {
                   ) : (
                     displayedStudents.map((student, idx) => {
                       const studentId = student._id.toString();
-                      const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
+                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, file: {} };
+                      const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
 
                       return (
                         <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
@@ -508,9 +583,12 @@ const MarksSheet = () => {
                             <input 
                               type="text" 
                               value={inputData.obtainedMarks} 
+                              onFocus={() => handleMarkFocus(studentId)}
+                              onBlur={() => handleMarkBlur(studentId)}
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
-                              placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                              placeholder={UNGRADED_MARK} 
+                              ref={(el) => { inputRefs.current[studentId] = el; }} 
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : isUngradedDisplay ? 'border-amber-500/50 text-amber-500/80 bg-amber-950/10 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/30 ring-2 ring-red-500/50 shadow-[0_0_14px_rgba(239,68,68,0.45)] animate-pulse' : 'border-slate-700'}`}
                             />
                           </td>
                           <td className="py-3.5 px-3">

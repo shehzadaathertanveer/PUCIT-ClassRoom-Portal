@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
@@ -17,6 +17,8 @@ const LabMarksSheet = () => {
   
   // Spreadsheet input state
   const [markInputs, setMarkInputs] = useState({});
+  const [errorStudentIds, setErrorStudentIds] = useState(new Set());
+  const inputRefs = useRef({});
   
   // Safely extract totalMarks from router state if available, otherwise default to 10 for labs
   const passedTotalMarks = location.state?.totalMarks;
@@ -124,7 +126,9 @@ const LabMarksSheet = () => {
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
           );
           if (item) {
-            obtained = item.isAbsent ? 'A' : (item.obtainedMarks ?? '');
+            const rawStored = item.obtainedMarks;
+            const hasStored = rawStored !== undefined && rawStored !== null && String(rawStored).trim() !== '';
+            obtained = item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK);
             isAbsent = !!item.isAbsent;
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
@@ -156,6 +160,13 @@ const LabMarksSheet = () => {
 
   const handleInputChange = (studentId, value) => {
     const isAbs = value.trim().toUpperCase() === 'A';
+
+    setErrorStudentIds(prev => {
+      if (!prev.size || !prev.has(studentId)) return prev;
+      const next = new Set(prev);
+      next.delete(studentId);
+      return next;
+    });
 
     setMarkInputs(prev => ({
       ...prev,
@@ -232,6 +243,26 @@ const LabMarksSheet = () => {
       const parsedTotalMarks = Number(totalMarks);
       if (isNaN(parsedTotalMarks) || parsedTotalMarks <= 0) {
         showToast('Please specify valid total marks greater than 0.');
+        setSaving(false);
+        return;
+      }
+
+      // Per-box validation: highlight any invalid marks before saving so they can be fixed.
+      const invalidIds = new Set();
+      Object.entries(markInputs).forEach(([studentId, data]) => {
+        const rawVal = String(data.obtainedMarks ?? '').trim();
+        if (rawVal === '' || rawVal === UNGRADED_MARK) return; // ungraded is allowed
+        if (rawVal.toUpperCase() === 'A') return; // absent is allowed
+        const num = Number(rawVal);
+        if (isNaN(num) || num < 0 || num > parsedTotalMarks) {
+          invalidIds.add(studentId);
+        }
+      });
+      if (invalidIds.size > 0) {
+        setErrorStudentIds(invalidIds);
+        showToast(`Invalid marks in ${invalidIds.size} highlighted box(es) — fix them and save again.`);
+        const firstRef = inputRefs.current[[...invalidIds][0]];
+        if (firstRef) firstRef.focus();
         setSaving(false);
         return;
       }
@@ -452,6 +483,7 @@ const LabMarksSheet = () => {
               <span className="border border-dashed border-amber-500/40 text-amber-500/90 rounded-lg px-2 py-1">-99 = Ungraded</span>
               <span className="border border-red-500/40 text-red-400/90 rounded-lg px-2 py-1">A = Absent</span>
               <span className="text-slate-500">0 = Scored zero</span>
+              <span className="border border-red-500/60 text-red-400 rounded-lg px-2 py-1">Red glow = Fix this box</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -489,7 +521,8 @@ const LabMarksSheet = () => {
                               onBlur={() => handleMarkBlur(studentId)}
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
                               placeholder={UNGRADED_MARK} 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : isUngradedDisplay ? 'border-amber-500/50 text-amber-500/80 bg-amber-950/10 italic' : 'border-slate-700'}`}
+                              ref={(el) => { inputRefs.current[studentId] = el; }} 
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : isUngradedDisplay ? 'border-amber-500/50 text-amber-500/80 bg-amber-950/10 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/30 ring-2 ring-red-500/50 shadow-[0_0_14px_rgba(239,68,68,0.45)] animate-pulse' : 'border-slate-700'}`}
                             />
                           </td>
                           <td className="py-3.5 px-3">

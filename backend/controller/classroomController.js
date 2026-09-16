@@ -756,69 +756,10 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
   }
   await classroom.save();
 
-  let targetStudents = classroom.students || [];
-  const hasRange = rangeStart !== undefined && rangeStart !== null && rangeEnd !== undefined && rangeEnd !== null && rangeStart !== '' && rangeEnd !== '';
-
-  if (hasRange && !['mids', 'finals', 'finalProject'].includes(targetKey)) {
-    const startIdx = parseInt(rangeStart, 10) - 1;
-    const endIdx = parseInt(rangeEnd, 10);
-    
-    if (isNaN(startIdx) || isNaN(endIdx) || startIdx < 0 || startIdx >= endIdx) {
-      return next(new AppError('Invalid student range specified for marksheet creation.', 400));
-    }
-
-    const sortedStudents = [...targetStudents].sort((a, b) => {
-      const rollA = (a.rollNo || '').toLowerCase();
-      const rollB = (b.rollNo || '').toLowerCase();
-      return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
-    });
-
-    targetStudents = sortedStudents.slice(startIdx, endIdx);
-  }
-
-  const studentIdsToInitialize = targetStudents.map(st => st._id);
-  for (const studId of studentIdsToInitialize) {
-    let markDoc = await Mark.findOne({ classroom: classroomId, student: studId });
-    if (!markDoc) {
-      markDoc = new Mark({
-        classroom: classroomId,
-        student: studId,
-        quizzes: [],
-        assignments: [],
-        presentations: [],
-        projects: [],
-        homework: [],
-        classActivities: [],
-        classParticipation: [],
-        vivas: [],
-        specialMarks: [],
-        customActivities: []
-      });
-    }
-
-    if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-      if (!markDoc[targetKey]) {
-        markDoc[targetKey] = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: 0, isAbsent: false };
-      } else {
-        markDoc[targetKey].totalMarks = parsedTotal;
-        markDoc[targetKey].title = cleanTitle;
-      }
-    } else {
-      if (!Array.isArray(markDoc[targetKey])) markDoc[targetKey] = [];
-      const itemIdx = markDoc[targetKey].findIndex(i => i.title && i.title.trim().toLowerCase() === cleanTitle.toLowerCase());
-      if (itemIdx > -1) {
-        markDoc[targetKey][itemIdx].totalMarks = parsedTotal;
-      } else {
-        markDoc[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: undefined, isAbsent: false });
-      }
-    }
-    await markDoc.save();
-  }
-
   res.status(201).json({
     status: 'success',
     message: 'Graded category item created successfully!',
-    data: { targetedCount: targetStudents.length },
+    data: { targetedCount: classroom.students?.length || 0 },
   });
 });
 

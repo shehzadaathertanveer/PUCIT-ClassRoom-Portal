@@ -500,7 +500,7 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const studentSheet = (classroom.students || []).map(st => {
     const studentId = st._id.toString();
     const markDoc = markMap[studentId];
-    let obtainedMarks = 0;
+    let obtainedMarks = undefined;
     let isAbsent = false;
     let file = null;
 
@@ -764,7 +764,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     .filter(item => {
       if (!item.studentId) return false;
       const val = item.obtainedMarks;
-      return (val !== undefined && val !== null && String(val).trim() !== '') || item.isAbsent;
+      const strVal = val !== undefined && val !== null ? String(val).trim() : '';
+      // -99 is the UI sentinel for "ungraded" - never persist it as a real mark.
+      if (strVal !== '' && Number(strVal) === -99) return false;
+      return strVal !== '' || item.isAbsent;
     });
 
   if (validEntries.length === 0) {
@@ -836,6 +839,9 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     const studentIdStr = studentId.toString();
     const rawVal = String(obtainedMarks).trim();
     const absentFlag = isAbsent || rawVal.toUpperCase() === 'A';
+    if (!absentFlag && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
+      continue;
+    }
     const parsedObtained = absentFlag ? 0 : Math.max(0, Number(rawVal) || 0);
 
     let markDoc = docMap.get(studentIdStr);
@@ -929,6 +935,43 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   }
 
   await Promise.all(docsToSave.map((doc) => doc.save()));
+
+  // Neutralize students left at -99 (ungraded) for this evaluation so cleared boxes truly unmark them.
+  const submittedIds = new Set(validEntries.map(e => e.studentId.toString()));
+  const enrolledIds = (classroom.students || []).map(s => (s && s._id ? s._id : s).toString());
+  const excludedIds = enrolledIds.filter(id => !submittedIds.has(id));
+  if (excludedIds.length > 0) {
+    if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+      await Mark.updateMany(
+        { classroom: classroomId, student: { $in: excludedIds } },
+        { $set: { [`${resolvedCategory}.totalMarks`]: 0, [`${resolvedCategory}.obtainedMarks`]: null, [`${resolvedCategory}.isAbsent`]: false } }
+      );
+    } else if (isStandard) {
+      await Mark.updateMany(
+        { classroom: classroomId, student: { $in: excludedIds }, [resolvedCategory]: { $elemMatch: { title: cleanTitle } } },
+        { $pull: { [resolvedCategory]: { title: cleanTitle } } }
+      );
+    } else {
+      const neutralDocs = await Mark.find({
+        classroom: classroomId,
+        student: { $in: excludedIds },
+        customActivities: { $elemMatch: { items: { $elemMatch: { title: cleanTitle } } } }
+      });
+      let changed = false;
+      for (const doc of neutralDocs) {
+        const cat = (doc.customActivities || []).find(c =>
+          c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+          c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+        );
+        if (cat && Array.isArray(cat.items)) {
+          const before = cat.items.length;
+          cat.items = cat.items.filter(i => i.title?.trim().toLowerCase() !== cleanTitle.toLowerCase());
+          if (cat.items.length !== before) changed = true;
+        }
+      }
+      if (changed) await Promise.all(neutralDocs.map(d => d.save()));
+    }
+  }
 
   await Promise.all(
     emailDispatchList.map(async (mail) => {
@@ -1171,6 +1214,25 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   }
 
   await Promise.all(savePromises);
+
+  // Also remove the classroom-level item definition so the cancelled assessment disappears from the list/columns.
+  const classroom = await Classroom.findById(classroomId);
+  if (classroom) {
+    if (isStandard && Array.isArray(classroom[resolvedCategory])) {
+      classroom[resolvedCategory] = classroom[resolvedCategory].filter(
+        (item) => !item.title || item.title.trim().toLowerCase() !== cleanTitle
+      );
+      await classroom.save();
+    } else if (!isStandard && Array.isArray(classroom.customActivities)) {
+      classroom.customActivities.forEach((cat) => {
+        if (cat.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+            cat.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()) {
+          cat.items = (cat.items || []).filter(i => i.title?.trim().toLowerCase() !== cleanTitle);
+        }
+      });
+      await classroom.save();
+    }
+  }
 
   res.status(200).json({
     status: 'success',
