@@ -1357,23 +1357,66 @@ exports.getAvailableStudentsByPrefix = catchAsync(async (req, res, next) => {
   }).select('name rollNo registrationNo email personalNotificationEmail');
 
   const enrolledStudentIds = new Set(classroom.students.map(id => id.toString()));
+  const rejectedRolls = new Set((classroom.smartSearchRejectedRolls || []).map(r => r.toUpperCase()));
 
-  const availableStudents = matchingStudents.map(student => ({
-    _id: student._id,
-    name: student.name,
-    rollNo: student.rollNo,
-    registrationNo: student.registrationNo || 'N/A',
-    email: student.email,
-    personalNotificationEmail: student.personalNotificationEmail,
-    isAlreadyEnrolled: enrolledStudentIds.has(student._id.toString())
-  }));
+  const availableStudents = matchingStudents
+    .filter(student => !rejectedRolls.has((student.rollNo || '').toUpperCase()))
+    .map(student => ({
+      _id: student._id,
+      name: student.name,
+      rollNo: student.rollNo,
+      registrationNo: student.registrationNo || 'N/A',
+      email: student.email,
+      personalNotificationEmail: student.personalNotificationEmail,
+      isAlreadyEnrolled: enrolledStudentIds.has(student._id.toString()),
+      isRejected: false
+    }));
 
   res.status(200).json({
     status: 'success',
     results: availableStudents.length,
     data: {
       sectionPrefix: prefix,
+      rejectedRolls: classroom.smartSearchRejectedRolls || [],
       students: availableStudents
+    }
+  });
+});
+
+// =============================================================================
+// 19b. TOGGLE SMART SEARCH REJECTION FOR A STUDENT
+// =============================================================================
+exports.toggleSmartSearchRejection = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { rollNo } = req.body;
+
+  if (!rollNo || typeof rollNo !== 'string') {
+    return next(new AppError('A roll number is required!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const cleanRoll = rollNo.trim().toUpperCase();
+  const rejected = classroom.smartSearchRejectedRolls || [];
+  const alreadyRejected = rejected.includes(cleanRoll);
+
+  if (alreadyRejected) {
+    classroom.smartSearchRejectedRolls = rejected.filter(r => r !== cleanRoll);
+  } else {
+    classroom.smartSearchRejectedRolls = [...rejected, cleanRoll];
+  }
+
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: alreadyRejected
+      ? `${cleanRoll} restored into Smart Detect search (not rejected anymore).`
+      : `${cleanRoll} won't appear in Smart Detect anymore. Manual enrollment is still available.`,
+    data: {
+      rejectedRolls: classroom.smartSearchRejectedRolls,
+      isRejected: !alreadyRejected
     }
   });
 });

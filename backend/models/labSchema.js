@@ -75,6 +75,10 @@ const labRoomSchema = new mongoose.Schema(
       type: [String], 
       default: [] 
     },
+    smartSearchRejectedRolls: {
+      type: [String],
+      default: []
+    },
 
     // NOTICE BOARD FOR LAB ANNOUNCEMENTS
     notices: [{

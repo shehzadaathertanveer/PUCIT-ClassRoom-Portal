@@ -707,23 +707,66 @@ exports.getAvailableLabStudentsByPrefix = catchAsync(async (req, res, next) => {
   }).select('name rollNo registrationNo email personalNotificationEmail');
 
   const enrolledStudentIds = new Set(labroom.students.map(id => id.toString()));
+  const rejectedRolls = new Set((labroom.smartSearchRejectedRolls || []).map(r => r.toUpperCase()));
 
-  const availableStudents = matchingStudents.map(student => ({
-    _id: student._id,
-    name: student.name,
-    rollNo: student.rollNo,
-    registrationNo: student.registrationNo || 'N/A',
-    email: student.email,
-    personalNotificationEmail: student.personalNotificationEmail,
-    isAlreadyEnrolled: enrolledStudentIds.has(student._id.toString())
-  }));
+  const availableStudents = matchingStudents
+    .filter(student => !rejectedRolls.has((student.rollNo || '').toUpperCase()))
+    .map(student => ({
+      _id: student._id,
+      name: student.name,
+      rollNo: student.rollNo,
+      registrationNo: student.registrationNo || 'N/A',
+      email: student.email,
+      personalNotificationEmail: student.personalNotificationEmail,
+      isAlreadyEnrolled: enrolledStudentIds.has(student._id.toString()),
+      isRejected: false
+    }));
 
   res.status(200).json({
     status: 'success',
     results: availableStudents.length,
     data: {
       sectionPrefix: prefix,
+      rejectedRolls: labroom.smartSearchRejectedRolls || [],
       students: availableStudents
+    }
+  });
+});
+
+// =============================================================================
+// 11b. TOGGLE SMART SEARCH REJECTION FOR A STUDENT
+// =============================================================================
+exports.toggleSmartSearchRejection = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const { rollNo } = req.body;
+
+  if (!rollNo || typeof rollNo !== 'string') {
+    return next(new AppError('A roll number is required!', 400));
+  }
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const cleanRoll = rollNo.trim().toUpperCase();
+  const rejected = labroom.smartSearchRejectedRolls || [];
+  const alreadyRejected = rejected.includes(cleanRoll);
+
+  if (alreadyRejected) {
+    labroom.smartSearchRejectedRolls = rejected.filter(r => r !== cleanRoll);
+  } else {
+    labroom.smartSearchRejectedRolls = [...rejected, cleanRoll];
+  }
+
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: alreadyRejected
+      ? `${cleanRoll} restored into Smart Detect search (not rejected anymore).`
+      : `${cleanRoll} won't appear in Smart Detect anymore. Manual enrollment is still available.`,
+    data: {
+      rejectedRolls: labroom.smartSearchRejectedRolls,
+      isRejected: !alreadyRejected
     }
   });
 });

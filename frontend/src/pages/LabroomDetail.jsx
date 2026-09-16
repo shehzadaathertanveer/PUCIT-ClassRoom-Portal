@@ -93,9 +93,15 @@ const LabroomDetail = () => {
   const [classDirectoryStudents, setClassDirectoryStudents] = useState([]);
   const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [selectedDirectoryRolls, setSelectedDirectoryRolls] = useState([]);
+  const [rejectedRolls, setRejectedRolls] = useState([]);
+  const [rejectingRoll, setRejectingRoll] = useState('');
 
   // Lab Roster / Members Overview Modal
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
+
+  // Student Profile Popup State
+  const [profileStudent, setProfileStudent] = useState(null);
+  const [isStudentProfileModalOpen, setIsStudentProfileModalOpen] = useState(false);
 
   // Lab Settings & Weights modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -199,11 +205,28 @@ const LabroomDetail = () => {
       setLoadingDirectory(true);
       const res = await API.get(`/labrooms/${labroomId}/available-students`);
       setClassDirectoryStudents(res.data?.data?.students || res.data?.students || []);
+      setRejectedRolls(res.data?.data?.rejectedRolls || []);
     } catch (err) {
       console.warn('Could not load class prefix directory:', err);
       setClassDirectoryStudents([]);
     } finally {
       setLoadingDirectory(false);
+    }
+  };
+
+  const handleToggleRejectStudent = async (rollNo) => {
+    try {
+      setRejectingRoll(rollNo);
+      await API.patch(`/labrooms/${labroomId}/smart-reject`, { rollNo });
+      const res = await API.get(`/labrooms/${labroomId}/available-students`);
+      setClassDirectoryStudents(res.data?.data?.students || []);
+      setRejectedRolls(res.data?.data?.rejectedRolls || []);
+      setSelectedDirectoryRolls(prev => prev.filter(r => r !== rollNo));
+      showToast(rollNo + ' updated in Smart Detect.', 'success');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update Smart Detect.', 'error');
+    } finally {
+      setRejectingRoll('');
     }
   };
 
@@ -865,6 +888,42 @@ const LabroomDetail = () => {
     });
   };
 
+  const openStudentProfile = (student) => {
+    const rankings = labAnalytics?.rankings || [];
+    const studentId = student?._id;
+
+    const sortedRankings = [...rankings].sort((a, b) => {
+      const docA = a.marksDoc || a;
+      const docB = b.marksDoc || b;
+      const calcA = Number(a.overallPercentage || a.percentage || calculateStudentPercentages(docA).overall || 0);
+      const calcB = Number(b.overallPercentage || b.percentage || calculateStudentPercentages(docB).overall || 0);
+      return calcB - calcA;
+    });
+
+    const foundIdx = sortedRankings.findIndex(r => {
+      const rid = r.student?._id || r.student || r.studentId;
+      return rid?.toString() === studentId?.toString();
+    });
+
+    const found = foundIdx >= 0 ? sortedRankings[foundIdx] : null;
+    const marksDoc = found?.marksDoc || found || {};
+
+    const studentsInLab = activeStudents.find(s => (s._id || s)?.toString() === studentId?.toString());
+
+    const categPcts = calculateStudentPercentages(marksDoc);
+    setProfileStudent({
+      _id: student?._id || studentId,
+      name: student?.name || studentsInLab?.name || 'Unknown Student',
+      rollNo: student?.rollNo || studentsInLab?.rollNo || 'N/A',
+      email: student?.email || studentsInLab?.email || '',
+      rank: foundIdx >= 0 ? `#${foundIdx + 1}` : 'Pending',
+      overall: Number(found?.overallPercentage || found?.percentage || categPcts.overall || 0).toFixed(2),
+      categories: categPcts.categories,
+      marksDoc
+    });
+    setIsStudentProfileModalOpen(true);
+  };
+
   const getTotalPendingGradingCount = () => {
     let totalItemsCount = 0;
     let totalExpectedGrades = 0;
@@ -1235,7 +1294,14 @@ const LabroomDetail = () => {
                             {idx === 0 ? '👑 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
                           </td>
                           <td className="py-3.5 px-3 font-mono text-cyan-400 font-bold">{studentRoll}</td>
-                          <td className="py-3.5 px-3 text-white font-medium">{studentName}</td>
+                          <td className="py-3.5 px-3 text-white font-medium">
+                            <div className="flex items-center gap-2.5">
+                              <span className="truncate">{studentName}</span>
+                              {isStaffOrAdmin && (
+                                <button type="button" onClick={() => openStudentProfile(studentObj)} className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 rounded-lg text-[9px] font-bold uppercase tracking-wider cursor-pointer shrink-0">👁 Profile</button>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400 text-right">
                             {Number(currentScore || 0).toFixed(2)}%
                           </td>
@@ -1437,6 +1503,7 @@ const LabroomDetail = () => {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {isStaffOrAdmin && (
                         <>
+                          <button onClick={() => openStudentProfile(st)} title="View Profile" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer">👁 Profile</button>
                           <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">🔑 Reset</button>
                           <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" className="px-2.5 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">✕</button>
                         </>
@@ -1448,6 +1515,77 @@ const LabroomDetail = () => {
             </div>
 
             <button onClick={() => setIsMembersModalOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close Roster</button>
+          </div>
+        </div>
+      )}
+
+      {/* STUDENT PROFILE POPUP (LAB) */}
+      {isStudentProfileModalOpen && profileStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
+          <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2">👁 Student Profile</h3>
+              <button type="button" onClick={() => setIsStudentProfileModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center text-2xl font-black text-black shadow-lg shadow-blue-500/30">
+                {(profileStudent.name || '?').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-white font-bold text-lg truncate">{profileStudent.name}</h4>
+                <p className="text-slate-400 font-mono text-xs">Roll: <span className="text-cyan-300">{profileStudent.rollNo}</span></p>
+                {profileStudent.email && <p className="text-slate-500 font-mono text-[10px] truncate">{profileStudent.email}</p>}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-blue-400 uppercase font-extrabold tracking-wider">Lab Rank</p>
+                <p className="text-white font-black text-lg font-mono">{profileStudent.rank}</p>
+              </div>
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">Overall</p>
+                <p className="text-emerald-400 font-black text-lg font-mono">{profileStudent.overall}%</p>
+              </div>
+            </div>
+
+            <div>
+              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">📝 Marks in All Activities</h5>
+              <div className="space-y-3 max-h-[32vh] overflow-y-auto pr-1">
+                {sessionalActivitiesList.map((act) => {
+                  const targetKey = getCategoryTargetKey(act.category);
+                  const itemsList = labroom[targetKey] || [];
+                  if (itemsList.length === 0) return null;
+                  const mdoc = profileStudent.marksDoc || {};
+                  const catScores = mdoc[targetKey] || [];
+                  const catPct = profileStudent.categories?.[act.category];
+                  return (
+                    <div key={act.category} className="bg-[#080507] border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400">{act.category}</p>
+                        {catPct !== undefined && (
+                          <span className="text-[10px] font-mono font-bold text-cyan-300">{catPct}%</span>
+                        )}
+                      </div>
+                      {itemsList.map((item, idx) => {
+                        const score = (Array.isArray(catScores) ? catScores : []).find(s => s.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
+                        const obtained = score && !score.isAbsent ? score.obtainedMarks : null;
+                        const total = Number(item.totalMarks || 0);
+                        return (
+                          <div key={idx} className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 truncate">{item.title}</span>
+                            <span className={`font-mono font-bold shrink-0 ml-2 ${obtained === null ? 'text-slate-600' : score.isAbsent ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              {score && score.isAbsent ? 'ABSENT' : obtained === null ? 'Ungraded' : `${obtained} / ${total}`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1597,7 +1735,7 @@ const LabroomDetail = () => {
               <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Shorthand</button>
               <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
               <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Full Roll</button>
-              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Add</button>
+              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Add<span className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-black/25 text-black' : 'bg-slate-700 text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span></button>
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
@@ -1653,20 +1791,24 @@ const LabroomDetail = () => {
 
               {addModeType === 'smartDetect' && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
                     <span>Matching Prefix: <strong className="text-blue-400 font-mono">{labroom?.sectionPrefix}</strong></span>
-                    <button 
-                      type="button" 
-                      onClick={() => {
-                        const unenrolled = classDirectoryStudents
-                          .filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString()))
-                          .map(st => st.rollNo);
-                        setSelectedDirectoryRolls(unenrolled);
-                      }} 
-                      className="text-blue-400 underline font-bold cursor-pointer hover:text-blue-300"
-                    >
-                      Select All Unenrolled
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-950/70 border border-emerald-500/40 text-emerald-300">✅ Enrolled <b className="font-mono">{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-blue-950/70 border border-blue-500/40 text-blue-300">🟢 Available <b className="font-mono">{classDirectoryStudents.filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const unenrolled = classDirectoryStudents
+                            .filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString()))
+                            .map(st => st.rollNo);
+                          setSelectedDirectoryRolls(unenrolled);
+                        }} 
+                        className="text-blue-400 underline font-bold cursor-pointer hover:text-blue-300"
+                      >
+                        Select All Unenrolled
+                      </button>
+                    </div>
                   </div>
 
                   <div className="max-h-56 overflow-y-auto space-y-2 bg-[#080507] border border-slate-800 p-3 rounded-2xl">
@@ -1675,7 +1817,13 @@ const LabroomDetail = () => {
                     ) : classDirectoryStudents.length === 0 ? (
                       <p className="text-center text-xs text-slate-500 py-6 italic">No registered user accounts found matching prefix {labroom?.sectionPrefix}. Try shorthand or range mode.</p>
                     ) : (
-                      classDirectoryStudents.map((st, i) => {
+                      [...classDirectoryStudents]
+                        .sort((a, b) => {
+                          const aEnr = activeStudents.some(as => as._id?.toString() === a._id?.toString());
+                          const bEnr = activeStudents.some(as => as._id?.toString() === b._id?.toString());
+                          return Number(aEnr) - Number(bEnr);
+                        })
+                        .map((st, i) => {
                         const alreadyEnrolled = activeStudents.some(as => as._id?.toString() === st._id?.toString());
                         const isSelected = selectedDirectoryRolls.includes(st.rollNo);
 
@@ -1711,18 +1859,51 @@ const LabroomDetail = () => {
                                 <p className="font-mono text-cyan-400 text-[11px]">{st.rollNo}</p>
                               </div>
                             </div>
-                            <span className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                              alreadyEnrolled 
-                                ? 'bg-slate-900 text-slate-500 border border-slate-800' 
-                                : 'bg-slate-800 text-slate-400'
-                            }`}>
-                              {alreadyEnrolled ? 'Enrolled' : 'Available'}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
+                                alreadyEnrolled 
+                                  ? 'bg-slate-900 text-slate-500 border border-slate-800' 
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {alreadyEnrolled ? 'Enrolled' : 'Available'}
+                              </span>
+                              {!alreadyEnrolled && (
+                                <button 
+                                  type="button"
+                                  disabled={rejectingRoll === st.rollNo}
+                                  onClick={(e) => { e.stopPropagation(); handleToggleRejectStudent(st.rollNo); }}
+                                  title="Hide from Smart Add (manual enrollment still available)"
+                                  className="px-2 py-0.5 bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 rounded-lg text-[9px] font-bold uppercase cursor-pointer disabled:opacity-50 transition-all"
+                                >
+                                  {rejectingRoll === st.rollNo ? '…' : '✕ Reject'}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         );
                       })
                     )}
                   </div>
+
+                  {rejectedRolls.length > 0 && (
+                    <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-2.5 space-y-1.5">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-red-300">⚠ Hidden from Smart Add ({rejectedRolls.length}) — add these manually if needed</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {rejectedRolls.map((roll, i) => (
+                          <button 
+                            key={i} 
+                            type="button" 
+                            disabled={rejectingRoll === roll}
+                            onClick={() => handleToggleRejectStudent(roll)}
+                            title="Restore into Smart Add"
+                            className="px-2 py-0.5 bg-[#080507] hover:bg-slate-800 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-mono cursor-pointer disabled:opacity-50 transition-all"
+                          >
+                            {rejectingRoll === roll ? '…' : `↺ ${roll}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <p className="text-[10px] text-slate-500">Selected: <strong className="text-emerald-400 font-mono">{selectedDirectoryRolls.length}</strong> new students ready to enroll.</p>
                 </div>
               )}

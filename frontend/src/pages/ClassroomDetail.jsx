@@ -99,12 +99,18 @@ const ClassroomDetail = () => {
   const [availableAutoStudents, setAvailableAutoStudents] = useState([]);
   const [loadingAutoStudents, setLoadingAutoStudents] = useState(false);
   const [selectedAutoStudentIds, setSelectedAutoStudentIds] = useState([]);
+  const [rejectedRolls, setRejectedRolls] = useState([]);
+  const [rejectingRoll, setRejectingRoll] = useState('');
 
   const [addingStudent, setAddingStudent] = useState(false);
   const [addStudentError, setAddStudentError] = useState('');
 
   // Class Roster / Members Overview Modal
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
+
+  // Student Profile Popup State
+  const [profileStudent, setProfileStudent] = useState(null);
+  const [isStudentProfileModalOpen, setIsStudentProfileModalOpen] = useState(false);
 
   // Class Settings & Weights modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -233,10 +239,27 @@ const ClassroomDetail = () => {
       const res = await API.get(`/classrooms/${classroomId}/available-students`);
       const students = res.data?.data?.students || [];
       setAvailableAutoStudents(students);
+      setRejectedRolls(res.data?.data?.rejectedRolls || []);
     } catch (err) {
       console.warn('Could not fetch auto-detect students:', err);
     } finally {
       setLoadingAutoStudents(false);
+    }
+  };
+
+  const handleToggleRejectStudent = async (student) => {
+    try {
+      setRejectingRoll(student.rollNo);
+      await API.patch(`/classrooms/${classroomId}/smart-reject`, { rollNo: student.rollNo });
+      const res = await API.get(`/classrooms/${classroomId}/available-students`);
+      setAvailableAutoStudents(res.data?.data?.students || []);
+      setRejectedRolls(res.data?.data?.rejectedRolls || []);
+      setSelectedAutoStudentIds(prev => prev.filter(id => id !== student._id));
+      showToast(student.rollNo + ' updated in Smart Detect.', 'success');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update Smart Detect.', 'error');
+    } finally {
+      setRejectingRoll('');
     }
   };
 
@@ -891,6 +914,37 @@ const ClassroomDetail = () => {
     };
   };
 
+  const openStudentProfile = (student) => {
+    const rankings = classAnalytics?.rankings || [];
+    const studentId = student?._id;
+    const foundIdx = [...rankings]
+      .slice()
+      .sort((a, b) => (b.overallPercentage || 0) - (a.overallPercentage || 0))
+      .findIndex(r => {
+        const rid = r.student?._id || r.student;
+        return rid?.toString() === studentId?.toString();
+      });
+
+    const found = foundIdx >= 0 ? rankings[foundIdx] : null;
+    const marksDoc = found?.marksDoc || found || {};
+
+    const studentsInClass = activeStudents.find(s => (s._id || s)?.toString() === studentId?.toString());
+    const profileStudentData = {
+      _id: student?._id || studentId,
+      name: student?.name || studentsInClass?.name || 'Unknown Student',
+      rollNo: student?.rollNo || studentsInClass?.rollNo || 'N/A',
+      email: student?.email || studentsInClass?.email || '',
+      rank: foundIdx >= 0 ? `#${foundIdx + 1}` : 'Pending',
+      overall: Number(found?.overallPercentage || 0).toFixed(2),
+      sessional: Number(found?.sessionalPercentage || 0).toFixed(2),
+      mids: Number(found?.midsPercentage || 0).toFixed(2),
+      finals: Number(found?.finalsPercentage || 0).toFixed(2),
+      marksDoc
+    };
+    setProfileStudent(profileStudentData);
+    setIsStudentProfileModalOpen(true);
+  };
+
   const getSortedLeaderboard = () => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return [];
@@ -1301,7 +1355,14 @@ const ClassroomDetail = () => {
                             {idx === 0 ? '👑 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
                           </td>
                           <td className="py-3.5 px-3 font-mono text-orange-400 font-bold">{studentRoll}</td>
-                          <td className="py-3.5 px-3 text-white font-medium">{studentName}</td>
+                          <td className="py-3.5 px-3 text-white font-medium">
+                            <div className="flex items-center gap-2.5">
+                              <span className="truncate">{studentName}</span>
+                              {isStaffOrAdmin && (
+                                <button type="button" onClick={() => openStudentProfile(studentObj)} className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 rounded-lg text-[9px] font-bold uppercase tracking-wider cursor-pointer shrink-0">👁 Profile</button>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400 text-right">
                             {Number(currentScore || 0).toFixed(2)}%
                           </td>
@@ -1511,6 +1572,7 @@ const ClassroomDetail = () => {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {isStaffOrAdmin && (
                         <>
+                          <button type="button" onClick={() => openStudentProfile(st)} title="View Profile" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer">👁 Profile</button>
                           <button type="button" onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">🔑 Reset</button>
                           <button type="button" onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" className="px-2.5 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">✕</button>
                         </>
@@ -1522,6 +1584,88 @@ const ClassroomDetail = () => {
             </div>
 
             <button type="button" onClick={() => setIsMembersModalOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close Roster</button>
+          </div>
+        </div>
+      )}
+
+      {/* STUDENT PROFILE POPUP */}
+      {isStudentProfileModalOpen && profileStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
+          <div className="w-full max-w-lg bg-[#130910] border border-orange-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-base font-extrabold text-orange-300 uppercase flex items-center gap-2">👁 Student Profile</h3>
+              <button type="button" onClick={() => setIsStudentProfileModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center text-2xl font-black text-black shadow-lg shadow-orange-500/30">
+                {(profileStudent.name || '?').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-white font-bold text-lg truncate">{profileStudent.name}</h4>
+                <p className="text-slate-400 font-mono text-xs">Roll: <span className="text-orange-300">{profileStudent.rollNo}</span></p>
+                {profileStudent.email && <p className="text-slate-500 font-mono text-[10px] truncate">{profileStudent.email}</p>}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-amber-400 uppercase font-extrabold tracking-wider">Class Rank</p>
+                <p className="text-white font-black text-lg font-mono">{profileStudent.rank}</p>
+              </div>
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">Overall</p>
+                <p className="text-emerald-400 font-black text-lg font-mono">{profileStudent.overall}%</p>
+              </div>
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">Sessional</p>
+                <p className="text-orange-400 font-black text-lg font-mono">{profileStudent.sessional}%</p>
+              </div>
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
+                <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">Mids</p>
+                <p className="text-sky-400 font-black text-lg font-mono">{profileStudent.mids}%</p>
+              </div>
+            </div>
+
+            <div>
+              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">📝 Marks in All Activities</h5>
+              <div className="space-y-3 max-h-[32vh] overflow-y-auto pr-1">
+                {sessionalActivitiesList.map((act) => {
+                  const targetKey = getCategoryTargetKey(act.category);
+                  const itemsList = getItemsForCategory(act.category);
+                  if (itemsList.length === 0) return null;
+                  const mdoc = profileStudent.marksDoc || {};
+                  const catScores = mdoc[targetKey] || [];
+                  return (
+                    <div key={act.category} className="bg-[#080507] border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-orange-400">{act.category}</p>
+                      {itemsList.map((item, idx) => {
+                        const score = (Array.isArray(catScores) ? catScores : []).find(s => s.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
+                        const obtained = score && !score.isAbsent ? score.obtainedMarks : null;
+                        const total = Number(item.totalMarks || 0);
+                        return (
+                          <div key={idx} className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 truncate">{item.title}</span>
+                            <span className={`font-mono font-bold shrink-0 ml-2 ${obtained === null ? 'text-slate-600' : score.isAbsent ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              {score && score.isAbsent ? 'ABSENT' : obtained === null ? 'Ungraded' : `${obtained} / ${total}`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                {profileStudent.finals !== undefined && studentMark && (
+                  <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-sky-400">Finals</p>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-300">Final Exam</span>
+                      <span className="font-mono font-bold text-emerald-400 shrink-0 ml-2">{profileStudent.finals}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1653,7 +1797,7 @@ const ClassroomDetail = () => {
               <button type="button" onClick={() => setAddModeType('suffix')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'suffix' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Suffix List</button>
               <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'range' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
               <button type="button" onClick={() => setAddModeType('addDrop')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'addDrop' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Add/Drop</button>
-              <button type="button" onClick={() => setAddModeType('autoDetect')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'autoDetect' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Detect</button>
+              <button type="button" onClick={() => setAddModeType('autoDetect')} className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer ${addModeType === 'autoDetect' ? 'bg-orange-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Detect<span className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono ${addModeType === 'autoDetect' ? 'bg-black/25 text-black' : 'bg-slate-700 text-emerald-300'}`}>{availableAutoStudents.filter(s => s.isAlreadyEnrolled).length}</span></button>
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
@@ -1738,15 +1882,19 @@ const ClassroomDetail = () => {
 
               {addModeType === 'autoDetect' && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="text-xs font-bold uppercase text-slate-400">Matching Prefix Students ({availableAutoStudents.length})</label>
-                    <button 
-                      type="button" 
-                      onClick={() => setSelectedAutoStudentIds(availableAutoStudents.filter(s => !s.isAlreadyEnrolled).map(s => s._id))}
-                      className="text-[10px] text-orange-400 underline font-bold cursor-pointer"
-                    >
-                      Select All Unenrolled
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-950/70 border border-emerald-500/40 text-emerald-300">✅ Enrolled <b className="font-mono">{availableAutoStudents.filter(s => s.isAlreadyEnrolled).length}</b></span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-orange-950/70 border border-orange-500/40 text-orange-300">🟢 Available <b className="font-mono">{availableAutoStudents.filter(s => !s.isAlreadyEnrolled).length}</b></span>
+                      <button 
+                        type="button" 
+                        onClick={() => setSelectedAutoStudentIds(availableAutoStudents.filter(s => !s.isAlreadyEnrolled).map(s => s._id))}
+                        className="text-[10px] text-orange-400 underline font-bold cursor-pointer"
+                      >
+                        Select All Unenrolled
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="max-h-48 overflow-y-auto space-y-2 bg-[#080507] p-2 rounded-2xl border border-slate-800">
@@ -1755,9 +1903,11 @@ const ClassroomDetail = () => {
                     ) : availableAutoStudents.length === 0 ? (
                       <p className="text-center text-xs text-slate-500 py-4 italic">No matching students found for prefix {classroom?.sectionPrefix}.</p>
                     ) : (
-                      availableAutoStudents.map(student => (
-                        <label key={student._id} className={`flex items-center justify-between p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                          student.isAlreadyEnrolled ? 'bg-slate-900/40 border-slate-800 opacity-60' : 'bg-[#130910] border-slate-800 hover:border-orange-500/40'
+                      [...availableAutoStudents]
+                        .sort((a, b) => Number(a.isAlreadyEnrolled) - Number(b.isAlreadyEnrolled))
+                        .map(student => (
+                        <div key={student._id} className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-all ${
+                          student.isAlreadyEnrolled ? 'bg-slate-900/40 border-slate-800 opacity-60 cursor-not-allowed select-none' : 'bg-[#130910] border-slate-800 hover:border-orange-500/40'
                         }`}>
                           <div className="flex items-center gap-2.5 truncate">
                             <input 
@@ -1778,13 +1928,46 @@ const ClassroomDetail = () => {
                               <p className="font-mono text-[10px] text-orange-400">{student.rollNo}</p>
                             </div>
                           </div>
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${student.isAlreadyEnrolled ? 'bg-slate-800 text-slate-400' : 'bg-emerald-950 text-emerald-300'}`}>
-                            {student.isAlreadyEnrolled ? 'Enrolled' : 'Available'}
-                          </span>
-                        </label>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${student.isAlreadyEnrolled ? 'bg-slate-800 text-slate-400' : 'bg-emerald-950 text-emerald-300'}`}>
+                              {student.isAlreadyEnrolled ? 'Enrolled' : 'Available'}
+                            </span>
+                            {!student.isAlreadyEnrolled && (
+                              <button 
+                                type="button"
+                                disabled={rejectingRoll === student.rollNo}
+                                onClick={() => handleToggleRejectStudent(student)}
+                                title="Hide from Smart Detect (manual enrollment still available)"
+                                className="px-2 py-0.5 bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 rounded-lg text-[9px] font-bold uppercase cursor-pointer disabled:opacity-50 transition-all"
+                              >
+                                {rejectingRoll === student.rollNo ? '…' : '✕ Reject'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       ))
                     )}
                   </div>
+
+                  {rejectedRolls.length > 0 && (
+                    <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-2.5 space-y-1.5">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-red-300">⚠ Hidden from Smart Detect ({rejectedRolls.length}) — add these manually if needed</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {rejectedRolls.map((roll, i) => (
+                          <button 
+                            key={i} 
+                            type="button" 
+                            disabled={rejectingRoll === roll}
+                            onClick={() => handleToggleRejectStudent({ _id: 'restore', rollNo: roll })}
+                            title="Restore into Smart Detect"
+                            className="px-2 py-0.5 bg-[#080507] hover:bg-slate-800 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-mono cursor-pointer disabled:opacity-50 transition-all"
+                          >
+                            {rejectingRoll === roll ? '…' : `↺ ${roll}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

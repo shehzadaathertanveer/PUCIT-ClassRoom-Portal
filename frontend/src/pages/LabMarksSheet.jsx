@@ -3,6 +3,8 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
+const UNGRADED_MARK = '-99';
+
 const LabMarksSheet = () => {
   const { labroomId, category, itemId } = useParams();
   const navigate = useNavigate();
@@ -111,7 +113,7 @@ const LabMarksSheet = () => {
         const studentId = student._id.toString();
         const markDoc = marksMap.get(studentId);
         
-        let obtained = '';
+        let obtained = UNGRADED_MARK;
         let isAbsent = false;
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
@@ -165,6 +167,35 @@ const LabMarksSheet = () => {
     }));
   };
 
+  // Clicking the marks field clears the -99 ungraded placeholder so a score can be typed.
+  const handleMarkFocus = (studentId) => {
+    setMarkInputs(prev => {
+      const current = prev[studentId] || {};
+      if (String(current.obtainedMarks ?? '').trim() === UNGRADED_MARK) {
+        return {
+          ...prev,
+          [studentId]: { ...current, obtainedMarks: '', isAbsent: false }
+        };
+      }
+      return prev;
+    });
+  };
+
+  // Leaving the field empty restores -99 so ungraded stays visually distinct from a real 0.
+  const handleMarkBlur = (studentId) => {
+    setMarkInputs(prev => {
+      const current = prev[studentId] || {};
+      const val = String(current.obtainedMarks ?? '').trim();
+      if (val === '' || val === UNGRADED_MARK) {
+        return {
+          ...prev,
+          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false }
+        };
+      }
+      return prev;
+    });
+  };
+
   const handleFileUpload = async (studentId, e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -206,7 +237,10 @@ const LabMarksSheet = () => {
       }
 
       const marksData = Object.entries(markInputs)
-        .filter(([_key, data]) => data.obtainedMarks !== '' && data.obtainedMarks !== undefined && data.obtainedMarks !== null)
+        .filter(([_key, data]) => {
+          const v = String(data.obtainedMarks ?? '').trim();
+          return v !== '' && v !== UNGRADED_MARK;
+        })
         .map(([studentId, data]) => ({
           studentId,
           obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),
@@ -276,8 +310,10 @@ const LabMarksSheet = () => {
         const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false };
         const roll = student.rollNo || 'N/A';
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
-        const score = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks ?? '');
-        const status = inputData.isAbsent ? 'Absent' : (inputData.obtainedMarks !== '' ? 'Graded' : 'Pending');
+        const rawMark = String(inputData.obtainedMarks ?? '').trim();
+        const isUngraded = rawMark === '' || rawMark === UNGRADED_MARK;
+        const score = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : rawMark);
+        const status = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : 'Graded');
 
         csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
@@ -412,6 +448,11 @@ const LabMarksSheet = () => {
             </div>
 
             {/* Student Roster Table */}
+            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-mono text-slate-400 pb-1">
+              <span className="border border-dashed border-amber-500/40 text-amber-500/90 rounded-lg px-2 py-1">-99 = Ungraded</span>
+              <span className="border border-red-500/40 text-red-400/90 rounded-lg px-2 py-1">A = Absent</span>
+              <span className="text-slate-500">0 = Scored zero</span>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -433,6 +474,8 @@ const LabMarksSheet = () => {
                       const studentId = student._id.toString();
                       const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
 
+                      const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
+
                       return (
                         <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
                           <td className="py-3.5 px-3 font-mono text-slate-500">{idx + 1}</td>
@@ -442,9 +485,11 @@ const LabMarksSheet = () => {
                             <input 
                               type="text" 
                               value={inputData.obtainedMarks} 
+                              onFocus={() => handleMarkFocus(studentId)}
+                              onBlur={() => handleMarkBlur(studentId)}
                               onChange={(e) => handleInputChange(studentId, e.target.value)} 
-                              placeholder="Score or A" 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : 'border-slate-700'}`}
+                              placeholder={UNGRADED_MARK} 
+                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-blue-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : isUngradedDisplay ? 'border-amber-500/50 text-amber-500/80 bg-amber-950/10 italic' : 'border-slate-700'}`}
                             />
                           </td>
                           <td className="py-3.5 px-3">

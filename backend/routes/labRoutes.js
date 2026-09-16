@@ -87,6 +87,10 @@ router
   .route("/:labroomId/bulk-approve")
   .post(restrictToLabStaff, labController.bulkApproveAvailableLabStudents);
 
+router
+  .route("/:labroomId/smart-reject")
+  .patch(restrictToLabStaff, labController.toggleSmartSearchRejection);
+
 // =============================================================================
 // EXCEL EXPORT & SYNC ROUTES
 // =============================================================================

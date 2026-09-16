@@ -50,6 +50,7 @@ router.post('/:classroomId/add-students-by-suffix', restrictToClassStaff, classr
 // Feature 4: Auto-Detect Available Students (Matching Section Prefix / Freshers)
 router.get('/:classroomId/available-students', restrictToClassStaff, classroomController.getAvailableStudentsByPrefix);
 router.post('/:classroomId/bulk-approve-students', restrictToClassStaff, classroomController.bulkApproveAvailableStudents);
+router.patch('/:classroomId/smart-reject', restrictToClassStaff, classroomController.toggleSmartSearchRejection);
 
 // Anonymous Complaints & Feedback Box
 router.post('/:classroomId/complaints', classroomController.submitComplaint); 

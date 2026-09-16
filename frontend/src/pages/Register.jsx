@@ -108,12 +108,13 @@ const Register = () => {
     setHelperText('Communicating with security gateway...');
 
     try {
-      const identifierRoll = rollNo.trim() ? rollNo.trim().toUpperCase() : email.trim().split('@')[0].toUpperCase();
+      const teacherMode = isRollNoDisabled;
+      const registerRoll = !teacherMode ? rollNo.trim().toUpperCase() : '';
 
       const payload = {
         name: name.trim(),
         password,
-        rollNo: identifierRoll,
+        ...(registerRoll && { rollNo: registerRoll }),
         ...(email.trim() && { email: email.trim().toLowerCase() }),
         ...(isFresherPrefixOnly && {
           registrationNo: registrationNo.trim().toUpperCase(),
@@ -134,7 +135,7 @@ const Register = () => {
           state: { 
             email: responseData.email, 
             name: name.trim(), 
-            rollNo: identifierRoll, 
+            rollNo: registerRoll, 
             password,
             registrationNo: registrationNo.trim().toUpperCase(),
             personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()

@@ -516,6 +516,8 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const rawVal = item.obtainedMarks;
     if (rawVal === undefined || rawVal === null) return false;
     const str = String(rawVal).trim();
+    // -99 is the UI sentinel for "ungraded" - never persist it as a real mark.
+    if (Number(str) === -99) return false;
     return str !== '' || str.toUpperCase() === 'A';
   });
 

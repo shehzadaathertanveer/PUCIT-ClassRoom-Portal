@@ -13,7 +13,10 @@ const Dashboard = () => {
   const [isAnalyticsModalOpen, setIsAnalyticsModalOpen] = useState(false);
   const [selectedAnalyticsTab, setSelectedAnalyticsTab] = useState('users'); // 'users' | 'classrooms' | 'labrooms' | 'pending'
   const [userRoleFilter, setUserRoleFilter] = useState('ALL'); // 'ALL' | 'STUDENT' | 'TEACHER' | 'TA' | 'ADMIN'
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [detailedAnalyticsData, setDetailedAnalyticsData] = useState({ users: [], teachers: [] });
+  const [viewingUser, setViewingUser] = useState(null);
+  const [isViewUserModalOpen, setIsViewUserModalOpen] = useState(false);
 
   // Delete User Confirmation State
   const [userToDelete, setUserToDelete] = useState(null);
@@ -70,11 +73,14 @@ const Dashboard = () => {
   const [profileData, setProfileData] = useState({
     name: user?.name || '',
     password: '',
+    currentPassword: '',
     personalNotificationEmail: user?.personalNotificationEmail || ''
   });
   const [updatingProfile, setUpdatingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 
   // Roll Number & Official Email Missing Check States
   const [isRollNoModalOpen, setIsRollNoModalOpen] = useState(false);
@@ -334,7 +340,13 @@ const Dashboard = () => {
       }
 
       if (profileData.password.trim().length > 0) {
+        if (profileData.currentPassword.trim().length === 0) {
+          setProfileError('Current password is required to set a new password.');
+          setUpdatingProfile(false);
+          return;
+        }
         payload.password = profileData.password.trim();
+        payload.currentPassword = profileData.currentPassword.trim();
       }
 
       const res = await API.patch('/auth/update-profile', payload);
@@ -507,8 +519,15 @@ const Dashboard = () => {
   const assignedTeacherCourses = classroomsList.filter(c => (c.teacher?._id || c.teacher) === user?._id || c.tas?.some(ta => (ta._id || ta) === user?._id));
 
   const filteredAnalyticsUsers = detailedAnalyticsData.users.filter(u => {
-    if (userRoleFilter === 'ALL') return true;
-    return u.role === userRoleFilter;
+    if (userRoleFilter !== 'ALL' && u.role !== userRoleFilter) return false;
+    if (userSearchQuery.trim()) {
+      const q = userSearchQuery.trim().toLowerCase();
+      return (u.name || '').toLowerCase().includes(q)
+        || (u.email || '').toLowerCase().includes(q)
+        || (u.rollNo || '').toLowerCase().includes(q)
+        || (u.registrationNo || '').toLowerCase().includes(q);
+    }
+    return true;
   });
 
   return (
@@ -545,7 +564,7 @@ const Dashboard = () => {
             </div>
           </div>
           <button
-            onClick={() => { setProfileData({ name: user?.name || '', password: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
+            onClick={() => { setProfileData({ name: user?.name || '', password: '', currentPassword: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
             className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer whitespace-nowrap shadow-md text-center"
           >
             Verify Email Now →
@@ -623,7 +642,7 @@ const Dashboard = () => {
 
         <div className="flex flex-wrap items-center justify-center gap-2 w-full lg:w-auto">
           <button
-            onClick={() => { setProfileData({ name: user?.name || '', password: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
+            onClick={() => { setProfileData({ name: user?.name || '', password: '', currentPassword: '', personalNotificationEmail: user?.personalNotificationEmail || '' }); setIsProfileModalOpen(true); }}
             className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-extrabold uppercase tracking-wide rounded-xl transition-all cursor-pointer flex-grow sm:flex-grow-0 text-center shadow"
           >
             ⚙️ Profile
@@ -983,6 +1002,24 @@ const Dashboard = () => {
               </div>
             )}
 
+            {selectedAnalyticsTab === 'users' && (
+              <div className="relative">
+                <input 
+                  type="text"
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  placeholder="🔍 Search students by name, email, roll no or registration no..."
+                  className="w-full px-4 py-2.5 pr-10 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                {userSearchQuery && (
+                  <button 
+                    onClick={() => setUserSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold cursor-pointer"
+                  >✕</button>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
               {selectedAnalyticsTab === 'users' && (
                 filteredAnalyticsUsers.length === 0 ? (
@@ -998,7 +1035,14 @@ const Dashboard = () => {
                         <span className="text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300">
                           {u.role}
                         </span>
-                        {u._id !== user?._id && (
+                        <button 
+                          onClick={() => { setViewingUser(u); setIsViewUserModalOpen(true); }}
+                          className="px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-wide cursor-pointer transition-all"
+                          title="View User Profile"
+                        >
+                          👁 Profile
+                        </button>
+                        {u._id && u._id !== user?._id && (
                           <button 
                             onClick={() => { setUserToDelete(u); setIsDeleteUserModalOpen(true); }}
                             className="p-2 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-300 rounded-xl text-xs cursor-pointer transition-all"
@@ -1091,6 +1135,100 @@ const Dashboard = () => {
                   ))
                 )
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW USER PROFILE POPUP (ADMIN) */}
+      {isViewUserModalOpen && viewingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-3 sm:px-4 overflow-y-auto py-6">
+          <div className="w-full max-w-lg bg-[#130910] border border-purple-500/40 rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-base font-extrabold text-white uppercase tracking-wide flex items-center gap-2">
+                👁 User Profile
+              </h3>
+              <button onClick={() => setIsViewUserModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer p-1">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-purple-500 to-rose-500 flex items-center justify-center text-2xl font-black text-black shadow-lg shadow-purple-500/30">
+                  {(viewingUser.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-white font-bold text-lg truncate">{viewingUser.name}</h4>
+                  <p className="text-slate-400 font-mono text-xs truncate">{viewingUser.email}</p>
+                </div>
+              </div>
+
+              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-4 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">Role</span>
+                  <span className="font-mono font-bold px-2.5 py-0.5 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 uppercase">{viewingUser.role}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">Roll No</span>
+                  <span className="font-mono text-orange-300">{viewingUser.rollNo || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">Registration No</span>
+                  <span className="font-mono text-orange-300">{viewingUser.registrationNo || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">University Email</span>
+                  <span className={viewingUser.isUniversityEmailVerified ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>{viewingUser.isUniversityEmailVerified ? '✓ Verified' : 'Not Linked'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">Email Verified</span>
+                  <span className={viewingUser.isEmailVerified ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>{viewingUser.isEmailVerified ? '✓ Yes' : 'No'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">Personal Email</span>
+                  <span className="font-mono text-slate-300 truncate ml-3 text-right">{viewingUser.personalNotificationEmail || '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 uppercase tracking-wider font-bold">User Since</span>
+                  <span className="font-mono text-slate-300">{viewingUser.createdAt ? new Date(viewingUser.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+                </div>
+              </div>
+
+              <div>
+                <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">📚 Enrollments & Assignments</h5>
+                {(() => {
+                  const uid = String(viewingUser._id || '');
+                  const enrollments = classroomsList.filter(c => {
+                    const isStudent = (c.students || []).some(s => String(s._id || s) === uid);
+                    const isTeacher = String(c.teacher?._id || c.teacher || '') === uid;
+                    const isTA = (c.tas || []).some(t => String(t._id || t) === uid);
+                    return isStudent || isTeacher || isTA;
+                  });
+                  if (enrollments.length === 0) {
+                    return <p className="text-slate-500 text-xs italic py-3 text-center bg-[#080507] border border-slate-800 rounded-xl">No classroom or lab enrollments found.</p>;
+                  }
+                  return (
+                    <div className="space-y-2 max-h-[24vh] overflow-y-auto pr-1">
+                      {enrollments.map((c, i) => {
+                        const uidStr = String(viewingUser._id || '');
+                        const roleTag = String(c.teacher?._id || c.teacher || '') === uidStr
+                          ? 'Teacher'
+                          : (c.tas || []).some(t => String(t._id || t) === uidStr)
+                            ? 'TA'
+                            : 'Student';
+                        return (
+                          <div key={i} className="flex items-center justify-between gap-2 bg-[#080507] border border-slate-800 rounded-xl px-3 py-2.5">
+                            <div className="min-w-0">
+                              <p className="text-white text-xs font-bold truncate">{c.className}</p>
+                              <p className="text-[10px] text-slate-400 font-mono">Section {c.sectionPrefix} • {c.courseType === 'LAB' ? 'Lab Room' : 'Classroom'}</p>
+                            </div>
+                            <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-lg shrink-0 ${roleTag === 'Teacher' ? 'bg-orange-500/10 text-orange-300 border border-orange-500/30' : roleTag === 'TA' ? 'bg-sky-500/10 text-sky-300 border border-sky-500/30' : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'}`}>{roleTag}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>
@@ -1260,14 +1398,35 @@ const Dashboard = () => {
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
                   New Password (Optional)
                 </label>
-                <input 
-                  type="password" 
-                  value={profileData.password}
-                  onChange={(e) => setProfileData({ ...profileData, password: e.target.value })}
-                  placeholder="Leave blank to keep current password"
-                  className="w-full px-4 py-3 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                />
+                <div className="relative">
+                  <input 
+                    type={showNewPassword ? 'text' : 'password'} 
+                    value={profileData.password}
+                    onChange={(e) => setProfileData({ ...profileData, password: e.target.value })}
+                    placeholder="Leave blank to keep current password"
+                    className="w-full px-4 py-3 pr-14 bg-[#080507] border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  />
+                  <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-orange-400 transition-colors cursor-pointer">{showNewPassword ? 'Hide' : 'Show'}</button>
+                </div>
               </div>
+
+              {profileData.password.trim().length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-amber-400 mb-1.5">
+                    Current Password (Required to change)
+                  </label>
+                  <div className="relative">
+                    <input 
+                      type={showCurrentPassword ? 'text' : 'password'} 
+                      value={profileData.currentPassword}
+                      onChange={(e) => setProfileData({ ...profileData, currentPassword: e.target.value })}
+                      placeholder="Enter current password"
+                      className="w-full px-4 py-3 pr-14 bg-[#080507] border border-amber-500/40 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                    <button type="button" onClick={() => setShowCurrentPassword(!showCurrentPassword)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-wider text-amber-500/80 hover:text-amber-400 transition-colors cursor-pointer">{showCurrentPassword ? 'Hide' : 'Show'}</button>
+                  </div>
+                </div>
+              )}
 
               <button
                 type="submit"

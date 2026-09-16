@@ -84,6 +84,10 @@ const classroomSchema = new mongoose.Schema(
       type: [String], 
       default: [] 
     },
+    smartSearchRejectedRolls: {
+      type: [String],
+      default: []
+    },
 
     // NOTICE BOARD FOR ANNOUNCEMENTS
     notices: [{

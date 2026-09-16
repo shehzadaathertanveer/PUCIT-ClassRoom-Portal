@@ -171,9 +171,28 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
 
   let assignedRole = "STUDENT";
 
-  if (!formattedRollNo && cleanEmail && !cleanEmail.endsWith('@pucit.edu.pk')) {
-    assignedRole = "PENDING_TEACHER";
-    formattedRollNo = cleanEmail.split('@')[0].toUpperCase();
+  const emailPrefix = cleanEmail ? cleanEmail.split('@')[0].toUpperCase() : "";
+  const isPucitEmail = Boolean(cleanEmail && cleanEmail.endsWith('@pucit.edu.pk'));
+  const looksLikeStudentRoll =
+    FULL_ROLL_NO_REGEX.test(formattedRollNo) ||
+    TEMP_PREFIX_REGEX.test(formattedRollNo) ||
+    formattedRollNo.startsWith('TEMP_');
+
+  // TEACHER DETECTION
+  // (a) Email-driven registration whose prefix is NOT a student roll/prefix → Teacher.
+  //     This now covers official faculty emails like nida.raees@pucit.edu.pk
+  //     and single-name emails like ather@pucit.edu.pk (previously rejected).
+  // (b) Students who type a real roll number/section-prefix are never misrouted,
+  //     even if their @pucit.edu.pk email prefix matches a student format (e.g. BITF26A001).
+  if (cleanEmail && !looksLikeStudentRoll) {
+    const emailPrefixLooksLikeStudent =
+      isPucitEmail &&
+      (FULL_ROLL_NO_REGEX.test(emailPrefix) || TEMP_PREFIX_REGEX.test(emailPrefix));
+
+    if (!emailPrefixLooksLikeStudent) {
+      assignedRole = "PENDING_TEACHER";
+      formattedRollNo = formattedRollNo || emailPrefix;
+    }
   } else if (!formattedRollNo && formattedRegNo) {
     formattedRollNo = `TEMP_${formattedRegNo}`;
   }
@@ -204,7 +223,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const hashedOtp = hashOtp(otp);
   const otpExpiry = Date.now() + 10 * 60 * 1000;
 
-  const destinationEmail = cleanPersonalEmail || (cleanEmail && cleanEmail.endsWith('@pucit.edu.pk') ? cleanEmail : null) || cleanPersonalEmail;
+  const destinationEmail = cleanPersonalEmail || cleanEmail;
 
   if (!destinationEmail) {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
@@ -233,6 +252,12 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   });
 
   if (user) {
+    // Protect verified accounts from being overwritten by a new registration
+    // attempt that happens to match on email/rollNo/personalEmail.
+    if ((user.isEmailVerified || user.isUniversityEmailVerified) && user.role !== "PENDING_TEACHER") {
+      return next(new AppError("An active account already exists with this email or roll number. Please log in or reset your password.", 400));
+    }
+
     user.name = name;
     user.rollNo = formattedRollNo;
     if (formattedRegNo) user.registrationNo = formattedRegNo;
@@ -579,13 +604,16 @@ exports.updatePasswordInProfile = catchAsync(async (req, res, next) => {
 // 8. UPDATE USER PROFILE (Allows upgrading temporary roll number to official roll number)
 // =============================================================================
 exports.updateProfile = catchAsync(async (req, res, next) => {
-  const { name, password, personalNotificationEmail, rollNo, registrationNo } = req.body;
+  const { name, password, currentPassword, personalNotificationEmail, rollNo, registrationNo } = req.body;
 
-  const user = await User.findById(req.user._id);
+  const user = await User.findById(req.user._id).select('+password');
   if (!user) return next(new AppError("User not found.", 404));
 
   if (name) user.name = name.trim();
   if (password && password.trim().length >= 6) {
+    if (!currentPassword || !(await user.correctPassword(currentPassword, user.password))) {
+      return next(new AppError("Current password is incorrect!", 401));
+    }
     user.password = password.trim();
   }
 
@@ -790,6 +818,10 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
 
   if (!user) {
     return next(new AppError("Teacher registration request not found.", 404));
+  }
+
+  if (user.role !== "PENDING_TEACHER") {
+    return next(new AppError("Can only reject pending teacher registrations.", 400));
   }
 
   const teacherEmail = user.email;
