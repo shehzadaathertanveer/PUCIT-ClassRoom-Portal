@@ -205,16 +205,6 @@ const labRoomSchema = new mongoose.Schema(
   }
 );
 
-// Post-query middleware to fix legacy URLs returned to client
-labRoomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
-  if (!docs) return;
-  if (Array.isArray(docs)) {
-    docs.forEach(doc => normalizeNoticeAttachments(doc));
-  } else {
-    normalizeNoticeAttachments(docs);
-  }
-});
-
 // Performance Indexes for Roster Lookups
 labRoomSchema.index({ isActive: 1, sectionPrefix: 1 });
 labRoomSchema.index({ isActive: 1, approvedRollNumbers: 1 });

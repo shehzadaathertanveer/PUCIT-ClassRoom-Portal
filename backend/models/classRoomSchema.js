@@ -156,16 +156,6 @@ const classroomSchema = new mongoose.Schema(
   }
 );
 
-// Post-query middleware to fix legacy URLs returned to the client
-classroomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
-  if (!docs) return;
-  if (Array.isArray(docs)) {
-    docs.forEach(doc => normalizeNoticeAttachments(doc));
-  } else {
-    normalizeNoticeAttachments(docs);
-  }
-});
-
 // Performance Indexes for Roster Lookups and Auto-Enrollment Sync
 classroomSchema.index({ isActive: 1, sectionPrefix: 1 });
 classroomSchema.index({ isActive: 1, approvedRollNumbers: 1 });
