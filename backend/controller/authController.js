@@ -86,25 +86,46 @@ const syncStudentEnrollment = async (user) => {
 // =============================================================================
 // SYSTEM MAINTENANCE MODE MIDDLEWARE & CONTROLLERS
 // =============================================================================
-exports.checkMaintenanceMode = (req, res, next) => {
-  if (systemMaintenance.isUnderMaintenance) {
-    if (
-      req.path.includes('/maintenance') ||
-      req.path.includes('/auth/login') ||
-      req.path.includes('/auth/me') ||
-      (req.user && req.user.role === 'ADMIN')
-    ) {
-      return next();
-    }
-    return res.status(503).json({
-      status: "maintenance",
-      message: systemMaintenance.message,
-      retryAfter: systemMaintenance.retryAfter,
-      isUnderMaintenance: true
-    });
+exports.checkMaintenanceMode = catchAsync(async (req, res, next) => {
+  if (!systemMaintenance.isUnderMaintenance) {
+    return next();
   }
-  next();
-};
+
+  if (
+    req.path.includes('/maintenance') ||
+    req.path.includes('/auth/login') ||
+    req.path.includes('/auth/me')
+  ) {
+    return next();
+  }
+
+  // Allow ADMINS through during maintenance. The request's own JWT is verified
+  // here because the global protect() middleware hasn't run yet at this point.
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer')
+    ? authHeader.split(' ')[1]
+    : null;
+
+  if (token && token !== 'null' && token !== 'undefined') {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      if (user && user.role === 'ADMIN') {
+        req.user = user;
+        return next();
+      }
+    } catch (err) {
+      // Invalid, expired, or tampered token: fall through and keep blocking.
+    }
+  }
+
+  return res.status(503).json({
+    status: "maintenance",
+    message: systemMaintenance.message,
+    retryAfter: systemMaintenance.retryAfter,
+    isUnderMaintenance: true
+  });
+});
 
 exports.getMaintenanceStatus = catchAsync(async (req, res, next) => {
   res.status(200).json({

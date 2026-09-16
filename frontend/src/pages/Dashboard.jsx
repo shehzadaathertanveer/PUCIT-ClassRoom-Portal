@@ -103,12 +103,27 @@ const Dashboard = () => {
       setFetchError('');
       
       const [classRes, labRes] = await Promise.all([
-        API.get('/classrooms').catch(() => ({ data: { classrooms: [] } })),
-        API.get('/labrooms').catch(() => ({ data: { labrooms: [] } }))
+        API.get('/classrooms').catch((e) => ({ __failed: true, error: e })),
+        API.get('/labrooms').catch((e) => ({ __failed: true, error: e }))
       ]);
 
-      const classrooms = classRes.data?.data?.classrooms || classRes.data?.classrooms || [];
-      const labrooms = labRes.data?.data?.labrooms || labRes.data?.labrooms || [];
+      const failedReq = classRes.__failed ? classRes.error : (labRes.__failed ? labRes.error : null);
+      if (failedReq) {
+        const resp = failedReq.response;
+        const isMaint = resp?.status === 503 || resp?.data?.isUnderMaintenance;
+        if (isMaint) {
+          setMaintenance({
+            isUnderMaintenance: true,
+            message: resp?.data?.message || maintenance?.message || 'Portal is currently undergoing scheduled maintenance.',
+            retryAfter: resp?.data?.retryAfter
+          });
+        } else {
+          setFetchError('Could not load your courses from the server right now. Please try again.');
+        }
+      }
+
+      const classrooms = classRes.__failed ? [] : (classRes.data?.data?.classrooms || classRes.data?.classrooms || []);
+      const labrooms = labRes.__failed ? [] : (labRes.data?.data?.labrooms || labRes.data?.data?.labrooms || []);
 
       const formattedLabs = labrooms.map(lab => ({
         ...lab,
