@@ -266,32 +266,49 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   });
 
   if (user) {
-    // Protect verified accounts from being overwritten by a new registration
-    // attempt that happens to match on email/rollNo/personalEmail.
-    if ((user.isEmailVerified || user.isUniversityEmailVerified) && user.role !== "PENDING_TEACHER") {
-      const linkedRole =
-        user.role === "STUDENT" ? "a student"
-        : user.role === "ADMIN" ? "an administrator"
-        : user.role === "TEACHER" ? "a teacher"
-        : user.role === "TA" ? "a teaching assistant"
-        : "an active";
-      return next(new AppError(`This email or roll number is already linked to ${linkedRole} account. Please log in, or use Forgot Password if you cannot remember your credentials.`, 400));
-    }
+    const verified = user.isEmailVerified || user.isUniversityEmailVerified;
+    const isExactIdentity =
+      (user.role === "STUDENT" && formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) && user.rollNo === formattedRollNo) ||
+      (user.email && officialEmail && user.email.toLowerCase() === officialEmail.toLowerCase());
 
-    user.name = name;
-    user.rollNo = formattedRollNo;
-    if (formattedRegNo) user.registrationNo = formattedRegNo;
-    if (!user.isUniversityEmailVerified) user.email = officialEmail;
-    user.password = password;
-    user.role = assignedRole;
-    user.personalNotificationEmail = cleanPersonalEmail;
-    user.requiresEmail = true;
-    user.isEmailVerified = false;
-    user.isUniversityEmailVerified = false;
-    user.otpCode = hashedOtp;
-    user.otpExpiresAt = otpExpiry;
-    await user.save();
-  } else {
+    if (verified && user.role !== "PENDING_TEACHER") {
+      if (isExactIdentity) {
+        // The SAME verified account already exists (same roll number or same
+        // official email). Never overwrite it; guide the user to recover it.
+        const linkedRole =
+          user.role === "STUDENT" ? "a student"
+          : user.role === "ADMIN" ? "an administrator"
+          : user.role === "TEACHER" ? "a teacher"
+          : user.role === "TA" ? "a teaching assistant"
+          : "an active";
+        return next(new AppError(`This email or roll number is already linked to ${linkedRole} account. Please log in, or use Forgot Password if you cannot remember your credentials.`, 400));
+      }
+      // Matched ONLY on a shared/derived identifier (personal notification email,
+      // registration number, or a coincidental derived email). That is NOT the
+      // same person — do NOT destroy the existing verified account, but DO NOT
+      // block a genuine new registration either. Fall through to create a fresh
+      // pending record below.
+      user = null;
+    } else {
+      // Incomplete / unverified / pending-teacher record: safely refresh it with
+      // the latest attempt so the user can re-verify.
+      user.name = name;
+      user.rollNo = formattedRollNo;
+      if (formattedRegNo) user.registrationNo = formattedRegNo;
+      if (!user.isUniversityEmailVerified) user.email = officialEmail;
+      user.password = password;
+      user.role = assignedRole;
+      if (cleanPersonalEmail) user.personalNotificationEmail = cleanPersonalEmail;
+      user.requiresEmail = true;
+      user.isEmailVerified = false;
+      user.isUniversityEmailVerified = false;
+      user.otpCode = hashedOtp;
+      user.otpExpiresAt = otpExpiry;
+      await user.save();
+    }
+  }
+
+  if (!user) {
     user = await User.create({
       name,
       email: officialEmail,
