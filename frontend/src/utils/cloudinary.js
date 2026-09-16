@@ -30,14 +30,12 @@ export const uploadToCloudinary = async (file) => {
     // Check if it's a true browser-renderable image type
     const isImage = resourceType === 'image' && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(format);
 
-    // Ensure raw URLs (like PDFs) point correctly to Cloudinary's secure delivery path
-    let secureUrl = res.data.secure_url;
-    if (!isImage && resourceType === 'raw' && !secureUrl.includes('/raw/upload/')) {
-      secureUrl = secureUrl.replace('/image/upload/', '/raw/upload/');
-    }
-
+    // IMPORTANT: Use Cloudinary's secure_url verbatim. Cloudinary already returns
+    // the correct resource-type segment (/image/upload/ vs /raw/upload/). Rewriting
+    // it here broke PDF URLs (a /auto/upload PDF is often stored as image type, so
+    // forcing /raw/upload/ produced 404 "broken landing page" links).
     return {
-      url: secureUrl,
+      url: res.data.secure_url,
       public_id: res.data.public_id || '',
       fileType: isImage ? 'image' : 'raw', 
       fileName: file.name,

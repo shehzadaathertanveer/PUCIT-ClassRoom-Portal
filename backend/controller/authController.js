@@ -19,9 +19,11 @@ let systemMaintenance = {
   retryAfter: "15 minutes"
 };
 
-// RegEx to validate official PUCIT roll number structures or temporary fresher prefixes
-const FULL_ROLL_NO_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]\d{3}$/i;
-const TEMP_PREFIX_REGEX = /^[A-Z]{2,5}[FS]\d{2}[A-Z]?$/i;
+// RegEx to validate official PUCIT roll number structures or temporary fresher prefixes.
+// Flexible to support all format variants: BSEF23M030, BITF26A001, BSFS23M030,
+// BSSEF23S020, BSES23M030, BCSF26M030, etc. (B + dept letters + F/S + batch + sec + digits).
+const FULL_ROLL_NO_REGEX = /^[A-Z]{1,8}[FS]\d{2,4}[A-Z]{1,4}\d{2,4}$/i;
+const TEMP_PREFIX_REGEX = /^[A-Z]{1,8}[FS]\d{2,4}[A-Z]{0,4}$/i;
 const REG_NO_REGEX = /^[a-zA-Z0-9-]{6,15}$/;
 
 // Helper: Generates signed JWT authentication token
@@ -197,6 +199,12 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     formattedRollNo = `TEMP_${formattedRegNo}`;
   }
 
+  // (c) Derive the roll number from the official university email prefix when no
+  //     field was typed (e.g. bsef23m030@pucit.edu.pk -> BSEF23M030).
+  if (assignedRole === "STUDENT" && !formattedRollNo && FULL_ROLL_NO_REGEX.test(emailPrefix)) {
+    formattedRollNo = emailPrefix;
+  }
+
   const isValidStudentFormat = 
     FULL_ROLL_NO_REGEX.test(formattedRollNo) || 
     TEMP_PREFIX_REGEX.test(formattedRollNo) || 
@@ -242,20 +250,32 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     ],
   });
 
-  let user = await User.findOne({ 
+  // IMPORTANT: The personalNotificationEmail clause is only included when a real
+  // personal email was provided. When it is null/absent (teachers never provide it),
+  // { field: null } would match EVERY user missing that field and a teacher could
+  // never register (random users surfaced as "already exists" or, before the guard
+  // below, silently overwritten/destroyed). This was the root cause of blocked
+  // teacher registrations even after changing the email.
+  let user = await User.findOne({
     $or: [
-      { email: officialEmail }, 
-      { personalNotificationEmail: cleanPersonalEmail },
+      { email: officialEmail },
+      ...(cleanPersonalEmail ? [{ personalNotificationEmail: cleanPersonalEmail }] : []),
       ...(formattedRegNo && REG_NO_REGEX.test(formattedRegNo) ? [{ registrationNo: formattedRegNo }] : []),
       ...(formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) ? [{ rollNo: formattedRollNo }] : [])
-    ] 
+    ]
   });
 
   if (user) {
     // Protect verified accounts from being overwritten by a new registration
     // attempt that happens to match on email/rollNo/personalEmail.
     if ((user.isEmailVerified || user.isUniversityEmailVerified) && user.role !== "PENDING_TEACHER") {
-      return next(new AppError("An active account already exists with this email or roll number. Please log in or reset your password.", 400));
+      const linkedRole =
+        user.role === "STUDENT" ? "a student"
+        : user.role === "ADMIN" ? "an administrator"
+        : user.role === "TEACHER" ? "a teacher"
+        : user.role === "TA" ? "a teaching assistant"
+        : "an active";
+      return next(new AppError(`This email or roll number is already linked to ${linkedRole} account. Please log in, or use Forgot Password if you cannot remember your credentials.`, 400));
     }
 
     user.name = name;
@@ -332,7 +352,18 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code has expired!", 400));
   }
 
+  // If the user verified their official university email, mark it so the login
+  // guard no longer blocks them and isUniversityEmailVerified is set correctly.
+  // Also auto-derive the roll number from the email prefix when applicable.
+  const verifiedViaUniversityEmail = cleanEmail.endsWith('@pucit.edu.pk');
+
   user.isEmailVerified = true;
+  if (verifiedViaUniversityEmail) {
+    user.isUniversityEmailVerified = true;
+    if (user.role === "STUDENT" && !user.rollNo && FULL_ROLL_NO_REGEX.test(prefixFromEmail)) {
+      user.rollNo = prefixFromEmail;
+    }
+  }
   user.otpCode = undefined;
   user.otpExpiresAt = undefined;
   await user.save();

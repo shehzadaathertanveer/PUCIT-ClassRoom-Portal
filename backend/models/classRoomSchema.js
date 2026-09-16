@@ -156,28 +156,6 @@ const classroomSchema = new mongoose.Schema(
   }
 );
 
-// Helper function to normalize Cloudinary raw resource URLs (e.g. PDFs)
-const normalizeNoticeAttachments = (doc) => {
-  if (doc && doc.notices && Array.isArray(doc.notices)) {
-    doc.notices.forEach(notice => {
-      if (notice.attachment && notice.attachment.url) {
-        const isRaw = notice.attachment.fileType === 'raw' || 
-                    notice.attachment.fileName?.toLowerCase().match(/\.(pdf|docx?|xlsx?|zip|rar|txt)$/);
-        
-        if (isRaw && notice.attachment.url.includes('/image/upload/')) {
-          notice.attachment.url = notice.attachment.url.replace('/image/upload/', '/raw/upload/');
-          notice.attachment.fileType = 'raw';
-        }
-      }
-    });
-  }
-};
-
-// Pre-save hook using async/await
-classroomSchema.pre('save', async function () {
-  normalizeNoticeAttachments(this);
-});
-
 // Post-query middleware to fix legacy URLs returned to the client
 classroomSchema.post(['find', 'findOne', 'findOneAndUpdate'], function (docs) {
   if (!docs) return;

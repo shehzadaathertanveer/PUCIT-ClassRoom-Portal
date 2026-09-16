@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
+import NoticeAttachment from '../components/NoticeAttachment';
 
 const LabroomDetail = () => {
   const { labroomId } = useParams();
@@ -1045,15 +1046,7 @@ const LabroomDetail = () => {
                   <p className="text-slate-300 text-xs leading-relaxed">{n?.content}</p>
                   {n?.attachment && n.attachment.url && (
                     <div className="pt-2">
-                      {n.attachment.fileType === 'image' || n.attachment.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
-                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer">
-                          <img src={n.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
-                        </a>
-                      ) : (
-                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono underline text-blue-300">
-                          📄 Download {n.attachment.fileName || 'Attachment'}
-                        </a>
-                      )}
+                      <NoticeAttachment attachment={n.attachment} />
                     </div>
                   )}
                 </div>
@@ -1064,15 +1057,7 @@ const LabroomDetail = () => {
                 <p className="text-slate-300 text-xs leading-relaxed">{latestNotice?.content}</p>
                 {latestNotice?.attachment && latestNotice.attachment.url && (
                   <div className="pt-2">
-                    {latestNotice.attachment.fileType === 'image' || latestNotice.attachment.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
-                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer">
-                        <img src={latestNotice.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
-                      </a>
-                    ) : (
-                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer" className="text-xs font-mono underline text-blue-300">
-                        📄 Download {latestNotice.attachment.fileName || 'Attachment'}
-                      </a>
-                    )}
+                    <NoticeAttachment attachment={latestNotice.attachment} />
                   </div>
                 )}
               </div>

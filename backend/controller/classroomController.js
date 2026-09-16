@@ -550,14 +550,31 @@ exports.lookupStudentForAddDrop = catchAsync(async (req, res, next) => {
     }
   }
 
-  const student = await User.findOne({
+  let student = await User.findOne({
     role: 'STUDENT',
     $or: [
       { rollNo: targetRollNo },
       { rollNo: cleanInput },
-      { registrationNo: rollInput.trim() }
+      { registrationNo: rollInput.trim().toUpperCase() }
     ]
   }).select('name rollNo registrationNo email personalNotificationEmail');
+
+  // Tolerant fallback: rolls come in many prefix variants (BSEF23M030, BSFS23M030,
+  // BSSEF23S020, BCSF26M030...). If the exact match fails, try prefix / suffix /
+  // contains matches on the roll number or registration so staff can always find
+  // and add a student.
+  if (!student) {
+    const escapedInput = cleanInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    student = await User.findOne({
+      role: 'STUDENT',
+      $or: [
+        { rollNo: { $regex: `^${escapedInput}` } },
+        { rollNo: { $regex: `${escapedInput}$` } },
+        { rollNo: { $regex: escapedInput } },
+        { registrationNo: { $regex: `^${escapedInput}` } }
+      ]
+    }).select('name rollNo registrationNo email personalNotificationEmail');
+  }
 
   if (!student) {
     return res.status(404).json({

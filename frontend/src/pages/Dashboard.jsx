@@ -241,7 +241,7 @@ const Dashboard = () => {
         finalsWeight: fWeight
       },
       sessionalActivities: sessionalActivities.map(act => ({
-        category: act.category === 'Other' ? (act.customCategory.trim() || 'Custom Activity') : act.category,
+        category: act.category,
         allocatedMarks: Number(act.allocatedMarks) || 0
       }))
     };
@@ -1794,7 +1794,6 @@ const Dashboard = () => {
                               <option value="Class Participation">Class Participation</option>
                               <option value="Viva">Viva</option>
                               <option value="Special Marks">Special Marks</option>
-                              <option value="Other">Other (Custom)</option>
                             </select>
                             <input 
                               type="number" 
@@ -1815,16 +1814,6 @@ const Dashboard = () => {
                               </button>
                             )}
                           </div>
-                          {act.category === 'Other' && (
-                            <input 
-                              type="text" 
-                              required
-                              placeholder="Enter custom activity name"
-                              value={act.customCategory}
-                              onChange={(e) => handleActivityChange(idx, 'customCategory', e.target.value, 'CLASSROOM')}
-                              className="w-full px-3 py-1.5 bg-[#080507] border border-orange-500/40 rounded-xl text-white text-xs"
-                            />
-                          )}
                         </div>
                       ))}
                     </div>

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
+import NoticeAttachment from '../components/NoticeAttachment';
 
 const ClassroomDetail = () => {
   const { classroomId } = useParams();
@@ -139,17 +140,21 @@ const ClassroomDetail = () => {
     if (clean.includes('assign')) return 'assignments';
     if (clean.includes('mid')) return 'mids';
     if (clean.includes('final')) return 'finals';
-    if (clean.includes('task')) return 'labTasks';
     if (clean.includes('viva')) return 'vivas';
-    if (clean.includes('test')) return 'labTests';
     if (clean.includes('project')) return 'projects';
     if (clean.includes('present')) return 'presentations';
-    if (clean.includes('lab')) return 'labs';
-    
-    const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'labtasks', 'vivas', 'labtests', 'projects', 'presentations', 'labs'];
+    if (clean.includes('homework') || clean.includes('home')) return 'homework';
+    if (clean.includes('class activity') || clean.includes('classactiv')) return 'classActivities';
+    if (clean.includes('participation')) return 'classParticipation';
+    if (clean.includes('special') || clean.includes('specialmarks')) return 'specialMarks';
+
+    // Classroom schema keys: only these arrays exist on a classroom document.
+    // Never fall back to lab keys (labTasks/labTests/labs) or unrecognized ones,
+    // otherwise items get silently dropped or lumped under "quizzes".
+    const standardKeys = ['quizzes', 'assignments', 'mids', 'finals', 'vivas', 'projects', 'presentations', 'homework', 'classactivities', 'classparticipation', 'specialmarks'];
     const potentialKey = clean.endsWith('s') ? clean : clean + 's';
     if (standardKeys.includes(potentialKey)) return potentialKey;
-    
+
     return 'quizzes';
   };
 
@@ -1103,15 +1108,7 @@ const ClassroomDetail = () => {
                   <p className="text-slate-300 text-xs leading-relaxed">{n.content}</p>
                   {n.attachment && n.attachment.url && (
                     <div className="pt-2">
-                      {n.attachment.fileType === 'image' ? (
-                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer">
-                          <img src={n.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
-                        </a>
-                      ) : (
-                        <a href={n.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
-                          <span>📄</span> Open {n.attachment.fileName || 'Document / PDF'}
-                        </a>
-                      )}
+                      <NoticeAttachment attachment={n.attachment} />
                     </div>
                   )}
                 </div>
@@ -1122,15 +1119,7 @@ const ClassroomDetail = () => {
                 <p className="text-slate-300 text-xs leading-relaxed">{latestNotice.content}</p>
                 {latestNotice.attachment && latestNotice.attachment.url && (
                   <div className="pt-2">
-                    {latestNotice.attachment.fileType === 'image' ? (
-                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer">
-                        <img src={latestNotice.attachment.url} alt="Attachment" className="max-h-40 rounded-xl border border-slate-800 object-cover" />
-                      </a>
-                    ) : (
-                      <a href={latestNotice.attachment.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-mono text-orange-300 bg-orange-950/40 px-3 py-2 rounded-xl border border-orange-500/30 hover:underline">
-                        <span>📄</span> Open {latestNotice.attachment.fileName || 'Document / PDF'}
-                      </a>
-                    )}
+                    <NoticeAttachment attachment={latestNotice.attachment} />
                   </div>
                 )}
               </div>
@@ -2107,7 +2096,7 @@ const ClassroomDetail = () => {
                 
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                   {editSessionalActivities.map((act, index) => {
-                    const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Labs', 'Lab Tasks', 'Vivas', 'Lab Tests'];
+                    const presetOptions = ['Quizzes', 'Assignments', 'Presentations', 'Projects', 'Homework', 'Class Activity', 'Class Participation', 'Vivas', 'Special Marks'];
 
                     return (
                       <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
@@ -2121,6 +2110,9 @@ const ClassroomDetail = () => {
                           }}
                           className="flex-1 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs uppercase font-mono"
                         >
+                          {(act.category && !presetOptions.includes(act.category)) && (
+                            <option value={act.category}>{act.category}</option>
+                          )}
                           {presetOptions.map(opt => (
                             <option key={opt} value={opt}>{opt}</option>
                           ))}
