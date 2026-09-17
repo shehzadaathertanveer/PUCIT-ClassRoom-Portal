@@ -20,6 +20,7 @@ const Register = () => {
   // Differentiate fresher states accurately
   const [isFresherPrefixOnly, setIsFresherPrefixOnly] = useState(false); // Triggers BOTH RegNo & Personal Email (e.g. BITF26A)
   const [isFresherWithRoll, setIsFresherWithRoll] = useState(false);       // Triggers ONLY Personal Email (e.g. BITF26A004)
+  const [isSenior, setIsSenior] = useState(false);                         // Senior student -> optional personal notification email
 
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
@@ -47,6 +48,7 @@ const Register = () => {
         const hasNumberSuffix = /\d{2,3}$/.test(trimmedRoll);
 
         setEmail('');
+        setIsSenior(false);
         if (!hasNumberSuffix) {
           // Case 1: Prefix only (e.g. BITF26A) -> Needs Reg No AND Personal Email
           setIsFresherPrefixOnly(true);
@@ -63,18 +65,21 @@ const Register = () => {
         setEmail(`${trimmedRoll}@pucit.edu.pk`);
         setIsFresherPrefixOnly(false);
         setIsFresherWithRoll(false);
+        setIsSenior(true);
         setHelperText(`Senior student profile linked to: ${trimmedRoll.toUpperCase()}@pucit.edu.pk`);
       }
     } else if (email.trim().length > 0 && !isEmailDisabled) {
       setIsRollNoDisabled(true);
       setIsFresherPrefixOnly(false);
       setIsFresherWithRoll(false);
+      setIsSenior(false);
       setHelperText('Faculty profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
       setIsFresherPrefixOnly(false);
       setIsFresherWithRoll(false);
+      setIsSenior(false);
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
   }, [rollNo, email, fresherBatchCode, isErrorState]);
@@ -121,6 +126,9 @@ const Register = () => {
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         }),
         ...(isFresherWithRoll && {
+          personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
+        }),
+        ...(isSenior && personalNotificationEmail.trim() && {
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         })
       };
@@ -318,6 +326,34 @@ const Register = () => {
                   required
                   autoCapitalize="none"
                   className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase" 
+                  placeholder="your.personal@gmail.com" 
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Conditional Senior Students Optional Personal Email (Official inbox may not be active yet) */}
+          {isSenior && (
+            <div className="bg-sky-950/20 border border-sky-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-sky-300 mb-1.5">
+                  Personal Notification Email <span className="text-slate-500 font-normal lowercase">(optional)</span>
+                </label>
+                <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                  If you cannot access your official @pucit.edu.pk inbox yet, enter a personal email here — your
+                  verification code will be sent to that inbox instead, and future update notifications will use it too.
+                </p>
+                <input 
+                  type="email" 
+                  value={personalNotificationEmail} 
+                  onChange={(e) => {
+                    setPersonalNotificationEmail(e.target.value);
+                    if (isErrorState) setIsErrorState(false);
+                  }} 
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  className="w-full px-4 py-3 bg-[#080507]/80 border border-sky-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-400 text-sm transition-all lowercase" 
                   placeholder="your.personal@gmail.com" 
                 />
               </div>

@@ -263,7 +263,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
   }
 
-  await sendStyledEmail({
+  const emailSent = await sendStyledEmail({
     to: destinationEmail,
     subject: "Account Registration OTP",
     title: "Complete Your Registration",
@@ -275,6 +275,10 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
       { label: "Notification Email", value: destinationEmail }
     ],
   });
+
+  if (!emailSent) {
+    return next(new AppError("We could not send the verification code to your email right now. Please double-check your email address and try again in a moment.", 500));
+  }
 
   // IMPORTANT: The personalNotificationEmail clause is only included when a real
   // personal email was provided. When it is null/absent (teachers never provide it),
@@ -583,7 +587,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const targetEmail = user.personalNotificationEmail || user.email;
 
-  await sendStyledEmail({
+  const emailSent = await sendStyledEmail({
     to: targetEmail,
     subject: "Password Recovery OTP",
     title: "Password Reset Request",
@@ -591,6 +595,10 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     otpCode: otp,
     details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
   });
+
+  if (!emailSent) {
+    return next(new AppError("We could not send the recovery code to your email right now. Please try again in a moment.", 500));
+  }
 
   user.otpCode = hashOtp(otp);
   user.otpExpiresAt = Date.now() + 10 * 60 * 1000;
@@ -748,7 +756,7 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  await sendStyledEmail({
+  const emailSent = await sendStyledEmail({
     to: targetEmail,
     subject: "Official Inbox Activation OTP",
     title: "Activate Official University Inbox",
@@ -756,6 +764,10 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
     otpCode: otp,
     details: [{ label: "Official Email", value: targetEmail }],
   });
+
+  if (!emailSent) {
+    return next(new AppError("We could not send the activation code to the specified email right now. Please try again in a moment.", 500));
+  }
 
   user.otpCode = hashOtp(otp);
   user.otpExpiresAt = Date.now() + 10 * 60 * 1000;

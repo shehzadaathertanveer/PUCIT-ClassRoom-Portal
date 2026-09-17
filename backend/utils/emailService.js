@@ -1,24 +1,20 @@
 const https = require("https");
+const nodemailer = require("nodemailer");
 
-const sendStyledEmail = async ({
-  to,
-  subject,
-  title,
-  bodyText,
-  details = [],
-  otpCode = null,
-}) => {
-  if (!to) return;
+// ---------------------------------------------------------------------------
+// Multi-provider styled email utility.
+//
+// Delivery order (first success wins):
+//   1. Brevo Transactional API (api.brevo.com)  — used when a Brevo API key is
+//      configured. `family: 4` forces IPv4, fixing Render's ENETUNREACH issue.
+//   2. Gmail SMTP via nodemailer                — uses EMAIL_USER + EMAIL_PASS
+//      (A Gmail App Password). `family: 4` is forced here too.
+//
+// Never throws. Returns true if ANY provider delivered the email, otherwise
+// logs every failure loudly and returns false so callers can surface the issue.
+// ---------------------------------------------------------------------------
 
-  // This will check both environment variable names so it never misses your key
-  const brevoApiKey = process.env.BREVO_API_KEY || process.env.BREVO_SMTP_PASS;
-  const senderEmail = process.env.EMAIL_USER;
-
-  if (!brevoApiKey || !senderEmail) {
-    console.error("Missing Brevo API/SMTP Key or EMAIL_USER in environment variables.");
-    return;
-  }
-
+const buildHtml = ({ subject, title, bodyText, details = [], otpCode = null }) => {
   const timestamp = new Date().toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -78,7 +74,7 @@ const sendStyledEmail = async ({
         <tr>
           <td align="center">
             <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #121215; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
-              
+
               <!-- Header Bar -->
               <tr>
                 <td style="padding: 28px 32px 20px 32px; border-bottom: 1px solid #27272a;">
@@ -136,27 +132,23 @@ const sendStyledEmail = async ({
     </html>
   `;
 
-  const payload = JSON.stringify({
-    sender: {
-      name: "PUCIT Portal System",
-      email: senderEmail,
-    },
-    to: [{ email: to }],
-    subject: `[PUCIT Portal] ${subject}`,
-    htmlContent: htmlContent,
-  });
+  return htmlContent;
+};
 
+// Single Brevo Transactional API request (api.brevo.com/v3/smtp/email)
+const brevoRequest = (apiKey, payload) => {
   const options = {
     hostname: "api.brevo.com",
     path: "/v3/smtp/email",
     method: "POST",
+    family: 4, // Force IPv4: fixes Render ENETUNREACH / IPv6 resolution issues
     headers: {
       "accept": "application/json",
-      "api-key": brevoApiKey,
+      "api-key": apiKey,
       "content-type": "application/json",
       "content-length": Buffer.byteLength(payload),
     },
-    timeout: 15000,
+    timeout: 12000,
   };
 
   return new Promise((resolve) => {
@@ -167,28 +159,137 @@ const sendStyledEmail = async ({
       });
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(true);
+          resolve({ ok: true, statusCode: res.statusCode });
         } else {
-          console.error("Brevo API Error Response:", data);
-          resolve(false);
+          resolve({ ok: false, statusCode: res.statusCode, responseBody: data });
         }
       });
     });
 
     req.on("error", (err) => {
-      console.error("Failed to send styled email notification:", err.message);
-      resolve(false);
+      resolve({ ok: false, statusCode: 0, errorMessage: err.message });
     });
 
     req.on("timeout", () => {
-      console.error("Failed to send styled email notification: Connection timeout");
       req.destroy();
-      resolve(false);
+      resolve({ ok: false, statusCode: 0, errorMessage: "connection timed out" });
     });
 
     req.write(payload);
     req.end();
   });
+};
+
+// Brevo Transactional Email API (api.brevo.com/v3/smtp/email)
+const sendViaBrevo = async (to, subject, htmlContent) => {
+  // Accept either env var name for backward compatibility. We attempt each
+  // candidate that is present; invalid keys fail fast with 401 and we fall back.
+  const apiKeyCandidates = [
+    process.env.BREVO_API_KEY,
+    process.env.BREVO_SMTP_PASS,
+  ].filter(Boolean);
+  const senderEmail = process.env.EMAIL_USER;
+
+  if (apiKeyCandidates.length === 0) {
+    return { ok: false, reason: "No BREVO_API_KEY/BREVO_SMTP_PASS configured" };
+  }
+  if (!senderEmail) {
+    return { ok: false, reason: "No EMAIL_USER configured" };
+  }
+
+  const payload = JSON.stringify({
+    sender: {
+      name: "PUCIT Portal System",
+      email: senderEmail,
+    },
+    to: [{ email: to }],
+    subject: `[PUCIT Portal] ${subject}`,
+    htmlContent: htmlContent,
+  });
+
+  let lastDetail = null;
+  for (const apiKey of apiKeyCandidates) {
+    const result = await brevoRequest(apiKey, payload);
+    if (result.ok) {
+      return { ok: true, via: "Brevo API" };
+    }
+    lastDetail = result.responseBody || result.errorMessage || `HTTP ${result.statusCode}`;
+  }
+
+  return {
+    ok: false,
+    reason: "Brevo API request failed for all configured keys",
+    responseBody: lastDetail,
+  };
+};
+
+// Gmail SMTP via nodemailer (works with a Gmail App Password)
+const sendViaGmail = async (to, subject, htmlContent) => {
+  const user = process.env.EMAIL_USER;
+  const pass = process.env.EMAIL_PASS;
+
+  if (!user || !pass) {
+    return { ok: false, reason: "No EMAIL_USER/EMAIL_PASS configured" };
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: "Gmail",
+    family: 4,
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    socketTimeout: 12000,
+  });
+
+  await transporter.sendMail({
+    from: `"PUCIT Portal System" <${user}>`,
+    to,
+    subject: `[PUCIT Portal] ${subject}`,
+    html: htmlContent,
+  });
+
+  return { ok: true, via: "Gmail SMTP" };
+};
+
+const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode }) => {
+  if (!to) return false;
+
+  const htmlContent = buildHtml({ subject, title, bodyText, details, otpCode });
+  const failures = [];
+
+  // Attempt 1: Brevo API
+  try {
+    const brevoResult = await sendViaBrevo(to, subject, htmlContent);
+    if (brevoResult.ok) {
+      console.log(`[emailService] Delivered "${subject}" to ${to} via ${brevoResult.via}.`);
+      return true;
+    }
+    if (brevoResult.responseBody) {
+      console.error(`[emailService] Brevo error for "${subject}" -> ${to}:`, brevoResult.responseBody);
+    } else {
+      console.error(`[emailService] Brevo attempt failed for "${subject}" -> ${to}: ${brevoResult.reason}`);
+    }
+    failures.push(`Brevo: ${brevoResult.reason}`);
+  } catch (err) {
+    console.error(`[emailService] Brevo attempt threw for "${subject}" -> ${to}:`, err.message);
+    failures.push(`Brevo: ${err.message}`);
+  }
+
+  // Attempt 2: Gmail SMTP fallback
+  try {
+    const gmailResult = await sendViaGmail(to, subject, htmlContent);
+    if (gmailResult.ok) {
+      console.log(`[emailService] Delivered "${subject}" to ${to} via ${gmailResult.via}.`);
+      return true;
+    }
+    console.error(`[emailService] Gmail SMTP attempt failed for "${subject}" -> ${to}: ${gmailResult.reason}`);
+    failures.push(`Gmail SMTP: ${gmailResult.reason}`);
+  } catch (err) {
+    console.error(`[emailService] Gmail SMTP attempt threw for "${subject}" -> ${to}:`, err.message);
+    failures.push(`Gmail SMTP: ${err.message}`);
+  }
+
+  console.error(`[emailService] ALL senders FAILED for "${subject}" -> ${to}. ${failures.join(" | ")}`);
+  return false;
 };
 
 module.exports = sendStyledEmail;
