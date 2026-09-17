@@ -466,9 +466,179 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     overallPercentage: overallCount > 0 ? Number((sumOverall / overallCount).toFixed(2)) : 0,
   };
 
+  // ===========================================================================
+  // DEEP CLASS METRICS: per-category class averages & grading progress so staff
+  // can see how the whole class is performing on every sessional activity and
+  // exam (Quizzes, Assignments, Mids, Finals, etc.) at a glance.
+  // ===========================================================================
+  const CATEGORY_LABELS = {
+    quizzes: 'Quizzes',
+    assignments: 'Assignments',
+    presentations: 'Presentations',
+    projects: 'Projects',
+    homework: 'Homework',
+    classActivities: 'Class Activities',
+    classParticipation: 'Class Participation',
+    vivas: 'Vivas',
+    specialMarks: 'Special Marks',
+    mids: 'Mids',
+    finals: 'Finals',
+    finalProject: 'Final Project',
+  };
+
+  const SESSIONAL_CATEGORY_KEYS = [
+    'quizzes', 'assignments', 'presentations', 'projects',
+    'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks',
+  ];
+  const EXAM_CATEGORY_KEYS = ['mids', 'finals', 'finalProject'];
+
+  const buildCategoryMetric = (catKey, labelOverride) => {
+    const isExam = EXAM_CATEGORY_KEYS.includes(catKey);
+    const classroomItems = isExam
+      ? (classroom[catKey] && classroom[catKey].totalMarks > 0 ? [classroom[catKey]] : [])
+      : (Array.isArray(classroom[catKey]) ? classroom[catKey] : []);
+
+    let sumObtained = 0;
+    let sumTotal = 0;
+    let gradedStudents = 0;
+    const gradedStudentIds = new Set();
+
+    activeStudents.forEach(st => {
+      const doc = markMap.get(st._id.toString());
+      if (!doc) return;
+
+      let catObtained = 0;
+      let catTotal = 0;
+      let catGraded = false;
+
+      if (isExam) {
+        const exam = doc[catKey];
+        if (exam && exam.totalMarks > 0) {
+          catObtained = exam.isAbsent ? 0 : (Number(exam.obtainedMarks) || 0);
+          catTotal = Number(exam.totalMarks) || 0;
+          catGraded = true;
+        }
+      } else if (Array.isArray(doc[catKey])) {
+        doc[catKey].forEach(item => {
+          if (!item || !item.title) return;
+          catTotal += Number(item.totalMarks) || 0;
+          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
+            catObtained += Number(item.obtainedMarks) || 0;
+            catGraded = true;
+          } else if (item.isAbsent) {
+            catGraded = true;
+          }
+        });
+      }
+
+      if (catGraded) {
+        gradedStudents++;
+        gradedStudentIds.add(st._id.toString());
+        sumObtained += catObtained;
+        sumTotal += catTotal;
+      }
+    });
+
+    return {
+      category: catKey,
+      label: labelOverride || CATEGORY_LABELS[catKey] || (catKey.charAt(0).toUpperCase() + catKey.slice(1)),
+      averagePercentage: sumTotal > 0 ? Number(((sumObtained / sumTotal) * 100).toFixed(2)) : 0,
+      totalObtained: Number(sumObtained.toFixed(2)),
+      totalPossible: Number(sumTotal.toFixed(2)),
+      gradedCount: gradedStudents,
+      totalCount: activeStudents.length,
+      progressPercentage: activeStudents.length > 0 ? Number(((gradedStudents / activeStudents.length) * 100).toFixed(2)) : 0,
+      totalItems: classroomItems.length,
+    };
+  };
+
+  const categoryMetrics = [];
+
+  SESSIONAL_CATEGORY_KEYS.forEach(catKey => {
+    const totalItems = Array.isArray(classroom[catKey]) ? classroom[catKey].length : 0;
+    const hasScores = markDocs.some(doc => Array.isArray(doc[catKey]) && doc[catKey].length > 0);
+    if (totalItems > 0 || hasScores) {
+      categoryMetrics.push(buildCategoryMetric(catKey));
+    }
+  });
+
+  EXAM_CATEGORY_KEYS.forEach(catKey => {
+    const examDefined = classroom[catKey] && classroom[catKey].totalMarks > 0;
+    const hasScores = markDocs.some(doc => doc[catKey] && doc[catKey].totalMarks > 0);
+    if (examDefined || hasScores) {
+      categoryMetrics.push(buildCategoryMetric(catKey));
+    }
+  });
+
+  // Custom / teacher-defined activity categories
+  const customCategoryKeys = [];
+  markDocs.forEach(doc => {
+    (doc.customActivities || []).forEach(ca => {
+      if (ca && ca.categoryName) {
+        const key = ca.categoryName.trim().toLowerCase();
+        if (!customCategoryKeys.includes(key)) customCategoryKeys.push(key);
+      }
+    });
+  });
+  (classroom.customActivities || []).forEach(ca => {
+    if (ca && ca.categoryName) {
+      const key = ca.categoryName.trim().toLowerCase();
+      if (!customCategoryKeys.includes(key)) customCategoryKeys.push(key);
+    }
+  });
+
+  customCategoryKeys.forEach(key => {
+    let sumObtained = 0;
+    let sumTotal = 0;
+    let gradedStudents = 0;
+
+    activeStudents.forEach(st => {
+      const doc = markMap.get(st._id.toString());
+      if (!doc) return;
+
+      let catObtained = 0;
+      let catTotal = 0;
+      let catGraded = false;
+
+      (doc.customActivities || []).forEach(ca => {
+        if (!ca || !ca.categoryName || ca.categoryName.trim().toLowerCase() !== key) return;
+        (ca.items || []).forEach(item => {
+          if (!item || !item.title) return;
+          catTotal += Number(item.totalMarks) || 0;
+          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
+            catObtained += Number(item.obtainedMarks) || 0;
+            catGraded = true;
+          } else if (item.isAbsent) {
+            catGraded = true;
+          }
+        });
+      });
+
+      if (catGraded) {
+        gradedStudents++;
+        sumObtained += catObtained;
+        sumTotal += catTotal;
+      }
+    });
+
+    const definedCat = (classroom.customActivities || []).find(ca => ca && ca.categoryName && ca.categoryName.trim().toLowerCase() === key);
+
+    categoryMetrics.push({
+      category: key,
+      label: definedCat ? definedCat.categoryName : (key.charAt(0).toUpperCase() + key.slice(1)),
+      averagePercentage: sumTotal > 0 ? Number(((sumObtained / sumTotal) * 100).toFixed(2)) : 0,
+      totalObtained: Number(sumObtained.toFixed(2)),
+      totalPossible: Number(sumTotal.toFixed(2)),
+      gradedCount: gradedStudents,
+      totalCount: activeStudents.length,
+      progressPercentage: activeStudents.length > 0 ? Number(((gradedStudents / activeStudents.length) * 100).toFixed(2)) : 0,
+      totalItems: definedCat && Array.isArray(definedCat.items) ? definedCat.items.length : 0,
+    });
+  });
+
   res.status(200).json({
     status: 'success',
-    data: { classAverages, rankings, performanceTiers: tiers }
+    data: { classAverages, rankings, performanceTiers: tiers, categoryMetrics }
   });
 });
 

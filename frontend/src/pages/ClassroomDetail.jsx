@@ -1010,6 +1010,34 @@ const ClassroomDetail = () => {
   const studentRankInfo = getStudentRankInfo();
   const studentAnalyticsData = getStudentAnalyticsData();
   const totalPendingCount = getTotalPendingGradingCount();
+
+  // Deep Class Metrics helpers (staff overview: per-category averages + progress)
+  const getCategoryMetric = (catKey) => {
+    const list = classAnalytics?.categoryMetrics || [];
+    return list.find(m => (m.category || '').toLowerCase() === String(catKey).toLowerCase()) || null;
+  };
+
+  const getMetricAverage = (metric) => {
+    if (!metric) return '0.00';
+    return Number(metric.averagePercentage || 0).toFixed(2);
+  };
+
+  const getMetricProgress = (metric) => {
+    if (!metric) return { graded: 0, total: totalStudentsCount, pct: '0.0' };
+    return {
+      graded: metric.gradedCount || 0,
+      total: metric.totalCount || totalStudentsCount,
+      pct: Number(metric.progressPercentage || 0).toFixed(1),
+    };
+  };
+
+  const getAvgColor = (pct) => {
+    const v = Number(pct) || 0;
+    if (v >= 70) return 'text-emerald-400';
+    if (v >= 50) return 'text-amber-400';
+    return 'text-rose-400';
+  };
+
   const themeColorClass = 'border-orange-500/30';
   const badgeColorClass = 'bg-orange-500/10 border-orange-500/30 text-orange-400';
 
@@ -1209,12 +1237,83 @@ const ClassroomDetail = () => {
                       <p className="text-2xl sm:text-3xl font-black text-rose-400 font-mono">{totalPendingCount}</p>
                     </div>
                   </div>
-                  <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
-                    <p className="text-xs font-bold uppercase text-slate-300">Deep Class Metrics Overview</p>
-                    <div className="bg-[#130910] p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                      <span className="text-xs text-slate-400 uppercase font-bold">Overall Class Average</span>
-                      <span className="font-mono font-black text-amber-400 text-sm">{classAnalytics?.classAverages?.overallPercentage ?? 0}%</span>
+                  <div className="bg-[#080507] border border-slate-800 p-5 rounded-2xl space-y-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-bold uppercase text-slate-300">Deep Class Metrics Overview</p>
+                      <span className="font-mono font-black text-amber-400 text-base">Ø {classAnalytics?.classAverages?.overallPercentage ?? 0}%</span>
                     </div>
+
+                    {/* Per-component class averages */}
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {[
+                        { key: 'Sessional', value: classAnalytics?.classAverages?.sessionalPercentage, color: 'text-amber-300' },
+                        { key: 'Mids', value: classAnalytics?.classAverages?.midsPercentage, color: 'text-orange-400' },
+                        { key: 'Finals', value: classAnalytics?.classAverages?.finalsPercentage, color: 'text-rose-300' },
+                      ].map(c => (
+                        <div key={c.key} className="bg-[#130910] p-2.5 rounded-xl border border-slate-800 text-center">
+                          <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">{c.key}</p>
+                          <p className={`font-mono font-black text-sm ${c.color}`}>{Number(c.value || 0).toFixed(2)}%</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Sessional activity breakdown */}
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase font-extrabold tracking-widest mb-2">Sessional Activities</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {sessionalActivitiesList.map(act => {
+                          const catKey = getCategoryTargetKey(act.category);
+                          const metric = getCategoryMetric(catKey);
+                          const avg = getMetricAverage(metric);
+                          const prog = getMetricProgress(metric);
+                          return (
+                            <div key={act.category} className="bg-[#130910] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-slate-400 uppercase font-extrabold truncate">{act.category}</span>
+                                <span className={`font-mono font-black text-sm ${getAvgColor(avg)}`}>{avg}%</span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                                <span>{prog.graded}/{prog.total} graded</span>
+                                <span>{prog.pct}% progress</span>
+                              </div>
+                              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-orange-400 to-amber-300 rounded-full transition-all" style={{ width: `${prog.pct}%` }}></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Examinations breakdown (Mids / Finals / Final Project) */}
+                    {['mids', 'finals', 'finalProject'].some(k => getCategoryMetric(k)) && (
+                      <div>
+                        <p className="text-[10px] text-slate-500 uppercase font-extrabold tracking-widest mb-2">Examinations</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          {['mids', 'finals', 'finalProject'].map(catKey => {
+                            const metric = getCategoryMetric(catKey);
+                            if (!metric) return null;
+                            const avg = getMetricAverage(metric);
+                            const prog = getMetricProgress(metric);
+                            return (
+                              <div key={catKey} className="bg-[#130910] p-3 rounded-xl border border-orange-500/20 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] text-orange-300 uppercase font-extrabold truncate">{metric.label}</span>
+                                  <span className={`font-mono font-black text-sm ${getAvgColor(avg)}`}>{avg}%</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                                  <span>{prog.graded}/{prog.total} graded</span>
+                                  <span>{prog.pct}% progress</span>
+                                </div>
+                                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                  <div className="h-full bg-gradient-to-r from-orange-400 to-rose-400 rounded-full transition-all" style={{ width: `${prog.pct}%` }}></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
