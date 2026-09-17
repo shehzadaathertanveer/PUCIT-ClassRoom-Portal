@@ -555,6 +555,24 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const fileData = entry.file || {};
 
     let markDoc = docMap.get(studentIdStr);
+    let marksChanged = !markDoc;
+
+    if (markDoc) {
+      const existingItems = markDoc[standardKey];
+      const existingItem = Array.isArray(existingItems)
+        ? existingItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
+        : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
+
+      if (!existingItem) {
+        marksChanged = true;
+      } else {
+        const oldObtained = Number(existingItem.obtainedMarks) || 0;
+        const oldAbsent = existingItem.isAbsent === true;
+        const oldTotal = Number(existingItem.totalMarks) || 0;
+        marksChanged = oldObtained !== parsedObtained || oldAbsent !== isAbsent || oldTotal !== parsedTotal;
+      }
+    }
+
     if (!markDoc) {
       markDoc = new LabMark({
         labroom: labroomId,
@@ -580,6 +598,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     }
 
     docsToSave.push(markDoc);
+
+    // Only notify students whose grade actually changed (avoids duplicate emails
+    // when the same marksheet is re-submitted or ungraded entries are added).
+    if (!marksChanged) continue;
+
     successfullyGradedStudentIds.push(studentIdStr);
 
     const studentUser = studentMap.get(studentIdStr);
@@ -675,6 +698,20 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   const currentObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
   const fileData = file || {};
 
+  // Only notify the student when their grade actually changes.
+  const existingItems = markDoc[standardKey];
+  const existingItem = Array.isArray(existingItems)
+    ? existingItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
+    : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
+
+  let marksChanged = !existingItem;
+  if (existingItem) {
+    const oldObtained = Number(existingItem.obtainedMarks) || 0;
+    const oldAbsent = existingItem.isAbsent === true;
+    const oldTotal = Number(existingItem.totalMarks) || 0;
+    marksChanged = oldObtained !== currentObtained || oldAbsent !== isAbsent || oldTotal !== currentTotal;
+  }
+
   const itemPayload = { title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent, file: fileData };
 
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
@@ -692,7 +729,7 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   await markDoc.save();
 
   const studentEmail = student.personalNotificationEmail || student.email;
-  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+  if (marksChanged && studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     try {
       await sendStyledEmail({
         to: studentEmail,

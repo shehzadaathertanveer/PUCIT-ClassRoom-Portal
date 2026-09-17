@@ -202,15 +202,15 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     formattedRollNo.startsWith('TEMP_');
 
   // TEACHER DETECTION
-  // (a) Email-driven registration whose prefix is NOT a student roll/prefix → Teacher.
-  //     This now covers official faculty emails like nida.raees@pucit.edu.pk
-  //     and single-name emails like ather@pucit.edu.pk (previously rejected).
+  // (a) Email-driven registration whose prefix is NOT a student roll/prefix AND
+  //     uses an official @pucit.edu.pk email → Teacher.
+  //     Personal / non-university emails (gmail, outlook, etc.) can NEVER create
+  //     teacher accounts — students were able to bypass this by typing any email.
   // (b) Students who type a real roll number/section-prefix are never misrouted,
   //     even if their @pucit.edu.pk email prefix matches a student format (e.g. BITF26A001).
-  if (cleanEmail && !looksLikeStudentRoll) {
+  if (cleanEmail && !looksLikeStudentRoll && isPucitEmail) {
     const emailPrefixLooksLikeStudent =
-      isPucitEmail &&
-      (FULL_ROLL_NO_REGEX.test(emailPrefix) || TEMP_PREFIX_REGEX.test(emailPrefix));
+      FULL_ROLL_NO_REGEX.test(emailPrefix) || TEMP_PREFIX_REGEX.test(emailPrefix);
 
     if (!emailPrefixLooksLikeStudent) {
       assignedRole = "PENDING_TEACHER";
@@ -218,6 +218,11 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     }
   } else if (!formattedRollNo && formattedRegNo) {
     formattedRollNo = `TEMP_${formattedRegNo}`;
+  }
+
+  // Explicitly block non-university emails from creating teacher accounts.
+  if (cleanEmail && !isPucitEmail && !formattedRollNo && !formattedRegNo) {
+    return next(new AppError("Teacher registration requires an official @pucit.edu.pk email address (e.g., name@pucit.edu.pk). Students must register using their Roll Number or Section Prefix.", 400));
   }
 
   // (c) Derive the roll number from the official university email prefix when no

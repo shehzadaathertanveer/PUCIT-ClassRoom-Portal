@@ -643,6 +643,37 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       const obtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
       const fileData = parseCloudinaryFile(m);
 
+      // Only notify students whose grade actually changed (avoids duplicate emails
+      // when the same sheet is re-saved or ungraded entries are added).
+      let marksChanged = !markDoc;
+      if (markDoc) {
+        if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
+          const exam = markDoc[targetCategory];
+          if (!exam) marksChanged = true;
+          else marksChanged = (Number(exam.obtainedMarks) || 0) !== obtained ||
+                              (exam.isAbsent === true) !== isAbsent ||
+                              (Number(exam.totalMarks) || 0) !== parsedTotal;
+        } else if (isStandard) {
+          const existingItem = (Array.isArray(markDoc[targetCategory]) ? markDoc[targetCategory] : [])
+            .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+          if (!existingItem) marksChanged = true;
+          else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== obtained ||
+                              (existingItem.isAbsent === true) !== isAbsent ||
+                              (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+        } else {
+          const customCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
+            .find(c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+                       c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase());
+          const existingItem = customCat && Array.isArray(customCat.items)
+            ? customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase())
+            : null;
+          if (!existingItem) marksChanged = true;
+          else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== obtained ||
+                              (existingItem.isAbsent === true) !== isAbsent ||
+                              (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+        }
+      }
+
       if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
         markDoc[targetCategory] = {
           title: cleanTitle || 'Exam',
@@ -698,7 +729,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       }
 
       await markDoc.save();
-      updatedStudentIds.push(studentId);
+      if (marksChanged) updatedStudentIds.push(studentId);
     }
   }
 
@@ -845,6 +876,36 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     const parsedObtained = absentFlag ? 0 : Math.max(0, Number(rawVal) || 0);
 
     let markDoc = docMap.get(studentIdStr);
+    let marksChanged = !markDoc;
+
+    if (markDoc) {
+      if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+        const exam = markDoc[resolvedCategory];
+        if (!exam) marksChanged = true;
+        else marksChanged = (Number(exam.obtainedMarks) || 0) !== parsedObtained ||
+                            (exam.isAbsent === true) !== absentFlag ||
+                            (Number(exam.totalMarks) || 0) !== parsedTotal;
+      } else if (isStandard) {
+        const existingItem = (Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [])
+          .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+        if (!existingItem) marksChanged = true;
+        else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
+                            (existingItem.isAbsent === true) !== absentFlag ||
+                            (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+      } else {
+        const customCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
+          .find(c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+                     c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase());
+        const existingItem = customCat && Array.isArray(customCat.items)
+          ? customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase())
+          : null;
+        if (!existingItem) marksChanged = true;
+        else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
+                            (existingItem.isAbsent === true) !== absentFlag ||
+                            (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+      }
+    }
+
     if (!markDoc) {
       markDoc = new Mark({
         classroom: classroomId,
@@ -911,6 +972,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     }
 
     docsToSave.push(markDoc);
+
+    // Only notify students whose grade actually changed (avoids duplicate emails
+    // when the same marksheet is re-submitted or ungraded entries are added).
+    if (!marksChanged) continue;
 
     const studentUser = studentMap.get(studentIdStr);
     if (studentUser) {
@@ -1042,6 +1107,9 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
 
   const fileData = parseCloudinaryFile(req.body);
 
+  // Only notify the student when their grade actually changes.
+  let marksChanged = true;
+
   if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
@@ -1052,6 +1120,12 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     if (!absentFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
+
+    const prevExam = markDoc[resolvedCategory];
+    marksChanged = !prevExam ||
+      (Number(prevExam.obtainedMarks) || 0) !== currentObtained ||
+      (Number(prevExam.totalMarks) || 0) !== currentTotal ||
+      (Boolean(prevExam.isAbsent)) !== absentFlag;
 
     markDoc[resolvedCategory] = {
       title: itemTitle || 'Exam',
@@ -1077,6 +1151,12 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     if (!absentFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
+
+    const prevItem = itemIdx > -1 ? markDoc[resolvedCategory][itemIdx] : null;
+    marksChanged = !prevItem ||
+      (Number(prevItem.obtainedMarks) || 0) !== currentObtained ||
+      (Number(prevItem.totalMarks) || 0) !== currentTotal ||
+      (Boolean(prevItem.isAbsent)) !== absentFlag;
 
     if (itemIdx > -1) {
       markDoc[resolvedCategory][itemIdx].totalMarks = currentTotal;
@@ -1120,6 +1200,12 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
       const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
 
+      const prevItem = itemIdx > -1 ? customCat.items[itemIdx] : null;
+      marksChanged = !prevItem ||
+        (Number(prevItem.obtainedMarks) || 0) !== currentObtained ||
+        (Number(prevItem.totalMarks) || 0) !== currentTotal ||
+        (Boolean(prevItem.isAbsent)) !== absentFlag;
+
       if (itemIdx > -1) {
         customCat.items[itemIdx].totalMarks = currentTotal;
         customCat.items[itemIdx].obtainedMarks = currentObtained;
@@ -1141,7 +1227,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
 
   const studentEmail = student.personalNotificationEmail || student.email;
   const displayTitle = itemTitle || resolvedCategory;
-  if (studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
+  if (marksChanged && studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
     try {
       const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
       await sendStyledEmail({
