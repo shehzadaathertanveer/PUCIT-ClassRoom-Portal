@@ -29,6 +29,14 @@ const FULL_ROLL_NO_REGEX = /^[A-Z]{1,8}[FS]\d{2,4}[A-Z]{1,4}\d{2,4}$/i;
 const TEMP_PREFIX_REGEX = /^[A-Z]{1,8}[FS]\d{2,4}[A-Z]{0,4}$/i;
 const REG_NO_REGEX = /^[a-zA-Z0-9-]{6,15}$/;
 
+// Current fresher batch segment (e.g. "F26" in BITF26A004). Personal email
+// registration is ONLY allowed for students who belong to this batch.
+const FRESHER_BATCH_CODE = (process.env.VITE_FRESHER_BATCH || 'f26').trim().toUpperCase();
+
+// Official inbox suffix of PUCIT. Used to prevent the official email from ever
+// being registered as a "personal notification email".
+const PUCIT_EMAIL_RE = /@pucit\.edu\.pk$/i;
+
 // Helper: Generates signed JWT authentication token
 const signToken = (id, role) => {
   return jwt.sign({ id, role }, process.env.JWT_SECRET, {
@@ -297,20 +305,60 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("Registration number must be a valid unique number!", 400));
   }
 
-  // Admin fresher-registration toggle: when DISABLED, prefix-only entries are
-  // rejected and students must provide a full roll number (senior-style).
+  // Admin fresher-registration toggle + fresher identity flags.
   const fresherRegistrationEnabled = await getFresherRegistrationMode();
-  if (
-    assignedRole === "STUDENT" &&
-    !fresherRegistrationEnabled &&
-    formattedRollNo &&
-    TEMP_PREFIX_REGEX.test(formattedRollNo) &&
-    !FULL_ROLL_NO_REGEX.test(formattedRollNo)
-  ) {
-    return next(new AppError("Fresher prefix-only registration is currently disabled by the administrator. Please register using your full Roll Number (e.g., BITF26A001).", 400));
+
+  const isPrefixOnly =
+    TEMP_PREFIX_REGEX.test(formattedRollNo) && !FULL_ROLL_NO_REGEX.test(formattedRollNo);
+
+  const isFresherRoll =
+    isPrefixOnly ||
+    (FULL_ROLL_NO_REGEX.test(formattedRollNo) &&
+      formattedRollNo.includes(FRESHER_BATCH_CODE));
+
+  // When the admin DISABLED fresher mode, prefix-only entries are rejected and
+  // every student must register with a full roll number (senior-style). The
+  // form must never let a bare prefix through while the toggle is OFF.
+  if (assignedRole === "STUDENT" && !fresherRegistrationEnabled && isPrefixOnly) {
+    return next(new AppError("Fresher prefix-only registration is currently disabled by the administrator. Please register using your full Roll Number (e.g., BITF26A004).", 400));
   }
 
-  const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
+  // Personal notification emails are a FRESHER-ONLY bypass and can only be used
+  // while the admin has fresher mode ENABLED:
+  //   1. Personal email submitted but mode OFF                  -> reject
+  //   2. Personal email submitted by a NON-fresher (senior)     -> reject
+  //   3. Official @pucit.edu.pk inbox used as the personal email -> reject
+  if (assignedRole === "STUDENT" && cleanPersonalEmail) {
+    if (!fresherRegistrationEnabled) {
+      return next(new AppError("Personal email registration is currently disabled by the administrator. You must register with your full Roll Number and verify your official @pucit.edu.pk inbox.", 400));
+    }
+    if (!isFresherRoll) {
+      return next(new AppError("Personal email registration is only available to freshers. Senior students must verify their official @pucit.edu.pk email using their full Roll Number.", 400));
+    }
+    if (PUCIT_EMAIL_RE.test(cleanPersonalEmail)) {
+      return next(new AppError("You cannot use your official @pucit.edu.pk email as the personal notification email. Please provide a personal (non-university) email address.", 400));
+    }
+  }
+
+  // Freshers with the personal-email route ENABLED always need a personal inbox.
+  if (
+    assignedRole === "STUDENT" &&
+    isFresherRoll &&
+    fresherRegistrationEnabled &&
+    !cleanPersonalEmail
+  ) {
+    return next(new AppError("A personal notification email is required for fresher registration. Please provide your personal (non-university) email address.", 400));
+  }
+
+  // A student's OFFICIAL email is derived from their roll number and can never
+  // be changed by the client. Only prefix-only freshers keep a temporary inbox
+  // until they upgrade their roll number / link their real email later.
+  const officialEmail =
+    assignedRole === "STUDENT"
+      ? FULL_ROLL_NO_REGEX.test(formattedRollNo)
+        ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk`
+        : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`
+      : cleanEmail;
 
   if (formattedRegNo) {
     const existingRegHolder = await User.findOne({ registrationNo: formattedRegNo, isEmailVerified: true }).select('_id');
@@ -323,10 +371,23 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const hashedOtp = hashOtp(otp);
   const otpExpiry = Date.now() + 10 * 60 * 1000;
 
-  const destinationEmail = cleanPersonalEmail || cleanEmail;
+  // The verification OTP is sent to the personal inbox ONLY for enabled-mode
+  // freshers. Everyone else verifies through their official email, so senior
+  // students can never bypass official-email verification with a side inbox.
+  const destinationEmail =
+    assignedRole === "STUDENT" && isFresherRoll && fresherRegistrationEnabled
+      ? cleanPersonalEmail
+      : officialEmail;
 
   if (!destinationEmail) {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
+  }
+
+  // DAILY EMAIL QUOTA GATE: when the daily sending limit is exhausted, block
+  // new registrations instead of silently failing at the mail provider.
+  const quota = await getEmailQuotaStatus();
+  if (quota.remaining <= 0) {
+    return next(new AppError("The daily email limit has been reached, so new registrations are paused. Please try again tomorrow.", 429));
   }
 
   const emailSent = await sendStyledEmail({
@@ -336,6 +397,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
     otpCode: otp,
     importance: "important",
+    critical: true,
     details: [
       { label: "Assigned Roll / Prefix", value: formattedRollNo },
       { label: "Registration / Form No", value: formattedRegNo || "N/A" },
@@ -449,10 +511,13 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
     return next(new AppError("OTP code has expired!", 400));
   }
 
-  // If the user verified their official university email, mark it so the login
-  // guard no longer blocks them and isUniversityEmailVerified is set correctly.
-  // Also auto-derive the roll number from the email prefix when applicable.
-  const verifiedViaUniversityEmail = cleanEmail.endsWith('@pucit.edu.pk');
+  // CRITICAL SECURITY: whether the official inbox was proven is decided by the
+  // address the OTP was actually DELIVERED to (pending.destinationEmail), NOT by
+  // the identifier string used to look up the pending record. The frontend reuses
+  // the account email as the lookup key, so checking `cleanEmail` here would
+  // falsely mark a fresher as official-verified when they only verified a Gmail.
+  const verifiedViaUniversityEmail =
+    Boolean(pending.destinationEmail) && /@pucit\.edu\.pk$/i.test(pending.destinationEmail);
 
   // Final conflict re-check (a verified account may have appeared while the
   // user sat on the OTP screen).
@@ -677,6 +742,13 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const targetEmail = user.personalNotificationEmail || user.email;
 
+  // DAILY EMAIL QUOTA GATE: block password-recovery emails when the daily limit
+  // is exhausted so users get a clear message instead of a silent mail failure.
+  const quota = await getEmailQuotaStatus();
+  if (quota.remaining <= 0) {
+    return next(new AppError("The daily email limit has been reached, so password recovery is paused. Please try again tomorrow.", 429));
+  }
+
   const emailSent = await sendStyledEmail({
     to: targetEmail,
     subject: "Password Recovery OTP",
@@ -684,6 +756,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
     otpCode: otp,
     importance: "important",
+    critical: true,
     details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
   });
 
@@ -805,6 +878,9 @@ exports.updateProfile = catchAsync(async (req, res, next) => {
   }
   
   if (personalNotificationEmail !== undefined && !user.isUniversityEmailVerified) {
+    if (personalNotificationEmail && PUCIT_EMAIL_RE.test(personalNotificationEmail.trim().toLowerCase())) {
+      return next(new AppError("You cannot use your official @pucit.edu.pk email as the personal notification email. Please provide a personal (non-university) email address.", 400));
+    }
     user.personalNotificationEmail = personalNotificationEmail ? personalNotificationEmail.trim().toLowerCase() : null;
   }
 
@@ -839,11 +915,19 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
   const { universityEmail } = req.body;
   const user = await User.findById(req.user._id);
 
-  const targetEmail = (universityEmail || `${user.rollNo || ''}@pucit.edu.pk`).trim().toLowerCase();
-
-  if (!targetEmail.endsWith('@pucit.edu.pk') || !FULL_ROLL_NO_REGEX.test(user.rollNo)) {
-    return next(new AppError("A valid official roll number and @pucit.edu.pk email address are required.", 400));
+  if (!FULL_ROLL_NO_REGEX.test(user.rollNo)) {
+    return next(new AppError("A valid official roll number is required.", 400));
   }
+
+  // The official inbox is derived from the roll number and can NEVER be chosen
+  // or changed by the user (security: keeps the official email unchangeable).
+  const officialEmail = `${user.rollNo.toLowerCase()}@pucit.edu.pk`;
+
+  if (universityEmail && universityEmail.trim().toLowerCase() !== officialEmail) {
+    return next(new AppError("Your official university email is tied to your roll number and cannot be changed.", 400));
+  }
+
+  const targetEmail = officialEmail;
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -854,6 +938,7 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
     bodyText: `Hello <strong>${user.name}</strong>, your official university inbox is now accessible. Use the secure verification code boxes below to link and lock your account permanently.`,
     otpCode: otp,
     importance: "important",
+    critical: true,
     details: [{ label: "Official Email", value: targetEmail }],
   });
 
@@ -875,7 +960,7 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
 // 10. VERIFY OFFICIAL EMAIL ACTIVATION OTP
 // =============================================================================
 exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
-  const { universityEmail, otp } = req.body;
+  const { otp } = req.body;
 
   if (!otp) {
     return next(new AppError("OTP code is required!", 400));
@@ -891,8 +976,9 @@ exports.verifyOfficialEmailActivation = catchAsync(async (req, res, next) => {
     return next(new AppError("Invalid or expired OTP code!", 400));
   }
 
-  if (universityEmail) {
-    user.email = universityEmail.trim().toLowerCase();
+  // Official email is always derived from the roll number (never client-editable).
+  if (FULL_ROLL_NO_REGEX.test(user.rollNo)) {
+    user.email = `${user.rollNo.toLowerCase()}@pucit.edu.pk`;
   }
 
   user.isUniversityEmailVerified = true;
@@ -1304,5 +1390,203 @@ exports.cleanupUnverifiedRegistrations = catchAsync(async (req, res, next) => {
     status: "success",
     message: `Cleaned up ${deleted.deletedCount} stale unverified registration record(s) and ${stalePending.deletedCount} pending registration attempt(s) older than 24 hours. Admins, teachers, verified and recent accounts were NOT touched.`,
     data: { deletedCount: deleted.deletedCount, deletedRecords: staleRecords, pendingRemoved: stalePending.deletedCount },
+  });
+});
+
+// =============================================================================
+// 21. STUDENT EMAIL / ROLL NUMBER INTEGRITY REPAIR
+//
+// The former registration flaw let students set their own official
+// @pucit.edu.pk inbox as their "personal notification email" and verify it with
+// OTP, which bypassed official-email verification. This repairs the database:
+//
+//   SCOPE: STUDENTS ONLY (admin / teacher / TA accounts are never touched).
+//
+//   A) FLAW-GROUP STUDENTS (personalNotificationEmail ends in @pucit.edu.pk)
+//      - If the personal email exactly equals their roll-derived official email
+//        (rollno@pucit.edu.pk) AND the account completed OTP verification, it is
+//        promoted to the main email, the personal email is cleared, and the
+//        university email is marked verified.
+//      - Otherwise (different official inbox / unverified / email owned by
+//        another account) -> registered through the flaw -> student is deleted.
+//
+//   B) DUPLICATE ROLL NUMBERS (the same full roll number held by several
+//      students): keep the verified holder and delete unverified duplicates.
+//      If two VERIFIED students claim the same roll number, never auto-delete;
+//      list them for the admin instead.
+//
+// Pass { dryRun: true } to preview every action without touching the database.
+// =============================================================================
+const purgeStudent = async (user) => {
+  await Promise.all([
+    Mark.deleteMany({ student: user._id }),
+    LabMark.deleteMany({ student: user._id }),
+    Classroom.updateMany({}, { $pull: { students: user._id, tas: user._id } }),
+    Labroom.updateMany({}, { $pull: { students: user._id, tas: user._id } }),
+    Classroom.updateMany(
+      { taRollNumbers: user.rollNo },
+      { $pull: { taRollNumbers: user.rollNo, approvedRollNumbers: user.rollNo } }
+    ),
+    Labroom.updateMany(
+      { taRollNumbers: user.rollNo },
+      { $pull: { taRollNumbers: user.rollNo, approvedRollNumbers: user.rollNo } }
+    ),
+  ]);
+  await User.findByIdAndDelete(user._id);
+};
+
+const deriveOfficialEmail = (rollNo) =>
+  rollNo && FULL_ROLL_NO_REGEX.test(rollNo)
+    ? `${String(rollNo).toLowerCase()}@pucit.edu.pk`
+    : null;
+
+const fixStudentEmailIntegrity = async ({ dryRun = false } = {}) => {
+  const report = {
+    scannedStudents: 0,
+    promoted: [],
+    deletedFlawGroup: [],
+    duplicateRolls: [],
+    conflicts: [],
+  };
+
+  // ---- Phase A: flaw-group students whose personal email is @pucit.edu.pk ----
+  const flawGroup = await User.find({
+    role: "STUDENT",
+    personalNotificationEmail: PUCIT_EMAIL_RE,
+  })
+    .select("-password")
+    .lean();
+
+  report.scannedStudents += flawGroup.length;
+
+  for (const student of flawGroup) {
+    const personal = student.personalNotificationEmail.toLowerCase();
+    const rollOfficial = deriveOfficialEmail(student.rollNo);
+
+    const emailConflict = await User.findOne({
+      _id: { $ne: student._id },
+      email: personal,
+      isEmailVerified: true,
+    })
+      .select("_id")
+      .lean();
+
+    const identityMatch =
+      !emailConflict &&
+      Boolean(rollOfficial) &&
+      rollOfficial === personal &&
+      student.isEmailVerified;
+
+    if (identityMatch) {
+      if (!dryRun) {
+        const setFields = {
+          email: personal,
+          personalNotificationEmail: null,
+          isUniversityEmailVerified: true,
+        };
+        if (!student.rollNo) {
+          const prefix = personal.split("@")[0].toUpperCase();
+          if (FULL_ROLL_NO_REGEX.test(prefix)) setFields.rollNo = prefix;
+        }
+        await User.updateOne({ _id: student._id }, { $set: setFields });
+      }
+      report.promoted.push({
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        email: personal,
+      });
+      continue;
+    }
+
+    // Personal email was an official inbox that is NOT their own roll inbox, or
+    // OTP verification never completed. They registered through the flaw.
+    if (dryRun) {
+      report.deletedFlawGroup.push({
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        email: personal,
+      });
+    } else {
+      await purgeStudent(student);
+      report.deletedFlawGroup.push({
+        _id: student._id,
+        name: student.name,
+        rollNo: student.rollNo,
+        email: personal,
+        action: "deleted",
+      });
+    }
+  }
+
+  // ---- Phase B: duplicate full roll numbers among students ----
+  const fullRollStudents = await User.find({
+    role: "STUDENT",
+    rollNo: { $exists: true, $ne: "" },
+  })
+    .select("-password")
+    .lean();
+
+  const byRoll = {};
+  for (const s of fullRollStudents) {
+    if (!s.rollNo || !FULL_ROLL_NO_REGEX.test(s.rollNo)) continue;
+    const key = s.rollNo.toUpperCase();
+    (byRoll[key] = byRoll[key] || []).push(s);
+  }
+
+  for (const [roll, holders] of Object.entries(byRoll)) {
+    if (holders.length < 2) continue;
+
+    const verified = holders.filter((h) => h.isEmailVerified || h.isUniversityEmailVerified);
+    const unverified = holders.filter((h) => !h.isEmailVerified && !h.isUniversityEmailVerified);
+
+    if (verified.length >= 2) {
+      report.conflicts.push({
+        rollNo: roll,
+        holders: verified.map((h) => ({ _id: h._id, name: h.name, email: h.email })),
+      });
+      continue;
+    }
+
+    const keep =
+      verified[0] ||
+      holders.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
+
+    const duplicates = holders.filter((h) => h._id.toString() !== keep._id.toString());
+
+    for (const dup of duplicates) {
+      const entry = {
+        rollNo: roll,
+        deleted: { _id: dup._id, name: dup.name, email: dup.email },
+        kept: { _id: keep._id },
+      };
+      if (!dryRun) {
+        await purgeStudent(dup);
+        entry.deleted.action = "deleted";
+      }
+      report.duplicateRolls.push(entry);
+    }
+  }
+
+  return report;
+};
+
+exports.fixStudentEmailIntegrity = fixStudentEmailIntegrity;
+
+// =============================================================================
+// 22. ADMIN: TRIGGER THE STUDENT EMAIL / ROLL INTEGRITY REPAIR
+// Accepts an optional { dryRun } flag to preview without committing changes.
+// =============================================================================
+exports.runStudentEmailIntegrityFix = catchAsync(async (req, res, next) => {
+  const dryRun = Boolean(req.body?.dryRun);
+  const report = await fixStudentEmailIntegrity({ dryRun });
+
+  res.status(200).json({
+    status: "success",
+    message: dryRun
+      ? "DRY RUN complete — no records were modified. Review the report, then re-run without dryRun to commit."
+      : `Student email/roll integrity repaired: ${report.promoted.length} promoted, ${report.deletedFlawGroup.length} flaw-group removed, ${report.duplicateRolls.length} duplicate roll(s) removed, ${report.conflicts.length} verified roll conflict(s) flagged.`,
+    data: { dryRun, report },
   });
 });

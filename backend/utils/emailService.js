@@ -10,12 +10,20 @@ const PlatformSetting = require("../models/platformSettingSchema");
 //                       (OTP codes, account termination, teacher decisions)
 //                       is delivered; routine notifications are silently
 //                       dropped for the rest of the day. (default 220)
+//   OTP_RESERVE_THRESHOLD once this many emails were sent, the remaining quota
+//                       is RESERVED for OTP flows only (registration,
+//                       forgot-password, official-inbox activation). Admin
+//                       notices such as account-termination / teacher-decision
+//                       emails are dropped so they can never exhaust the day's
+//                       allowance before users can register or recover
+//                       passwords. (default 250)
 //
 // The counter lives in the PlatformSetting collection so restarts do not
 // reset it. The window resets on the first send after `startedAt + 24h`.
 // ---------------------------------------------------------------------------
 const DAILY_QUOTA = Number(process.env.EMAIL_DAILY_QUOTA) || 300;
 const IMPORTANT_THRESHOLD = Number(process.env.EMAIL_IMPORTANT_THRESHOLD) || 220;
+const OTP_RESERVE_THRESHOLD = Number(process.env.EMAIL_OTP_RESERVE) || 250;
 const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const getEmailQuotaState = async () => {
@@ -50,8 +58,10 @@ const getEmailQuotaStatus = async () => {
     sent,
     dailyQuota: DAILY_QUOTA,
     importantThreshold: IMPORTANT_THRESHOLD,
+    otpReserveThreshold: OTP_RESERVE_THRESHOLD,
     remaining,
     importantOnly: sent >= IMPORTANT_THRESHOLD,
+    otpOnly: sent >= OTP_RESERVE_THRESHOLD,
     resetAt: new Date(startedAt + QUOTA_WINDOW_MS).toISOString(),
   };
 };
@@ -305,7 +315,7 @@ const sendViaGmail = async (to, subject, htmlContent) => {
   return { ok: true, via: "Gmail SMTP" };
 };
 
-const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode, importance = "normal" }) => {
+const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode, importance = "normal", critical = false }) => {
   if (!to) return false;
 
   const isImportant = importance === "important";
@@ -314,6 +324,11 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode,
   if (sent >= DAILY_QUOTA) {
     console.log(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${DAILY_QUOTA}). Blocked "${subject}" -> ${to}.`);
     return false;
+  }
+
+  if (!critical && sent >= OTP_RESERVE_THRESHOLD) {
+    console.log(`[emailService] Quota ${sent}/${DAILY_QUOTA} past OTP reserve (${OTP_RESERVE_THRESHOLD}); dropped non-OTP email "${subject}" -> ${to}.`);
+    return true;
   }
 
   if (!isImportant && sent >= IMPORTANT_THRESHOLD) {

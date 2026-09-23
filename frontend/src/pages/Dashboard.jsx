@@ -73,6 +73,10 @@ const Dashboard = () => {
   const [emailQuota, setEmailQuota] = useState(null);
   const [togglingFresherMode, setTogglingFresherMode] = useState(false);
 
+  // Student email/roll integrity repair (Admin only)
+  const [repairingStudents, setRepairingStudents] = useState(false);
+  const [repairMessage, setRepairMessage] = useState('');
+
   // Edit Profile / Password & Email Verification modal state
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -216,6 +220,31 @@ const Dashboard = () => {
       console.warn('Failed to toggle fresher registration mode:', err?.response?.data?.message || err.message);
     } finally {
       setTogglingFresherMode(false);
+    }
+  };
+
+  // Admin one-click repair: dry-run preview first, then a confirmation to commit
+  // (promotes verified roll@pucit emails, deletes flaw-group students, dedupes roll numbers).
+  const handleRepairStudents = async () => {
+    if (repairingStudents) return;
+    setRepairingStudents(true);
+    setRepairMessage('');
+    try {
+      const dryRunRes = await API.post('/auth/admin/fix-student-email-integrity', { dryRun: true });
+      const dryReport = dryRunRes.data?.data?.report || {};
+      const summary = `Preview: ${dryReport.promoted?.length || 0} to promote, ${dryReport.deletedFlawGroup?.length || 0} to delete (flaw group), ${dryReport.duplicateRolls?.length || 0} duplicate roll(s) to remove, ${dryReport.conflicts?.length || 0} conflicts.`;
+      alert(`Student repair (DRY RUN):\n\n${summary}\n\nThis will NOT modify anything in this preview.`);
+      if (!window.confirm('Commit the student email/roll integrity repair now? This promotes/fixes verified accounts and deletes flaw-group students.')) {
+        setRepairingStudents(false);
+        return;
+      }
+      const commitRes = await API.post('/auth/admin/fix-student-email-integrity', { dryRun: false });
+      setRepairMessage(commitRes.data?.message || 'Student repair completed.');
+    } catch (err) {
+      setRepairMessage(err.response?.data?.message || 'Student repair failed.');
+    } finally {
+      setRepairingStudents(false);
+      fetchDashboardData();
     }
   };
 
@@ -435,8 +464,10 @@ const Dashboard = () => {
     setEmailMessage('');
 
     try {
+      // Official email is always derived from the roll number — not changeable.
+      const officialEmail = user?.rollNo ? `${user.rollNo.toLowerCase()}@pucit.edu.pk` : pucitEmailInput.trim().toLowerCase();
       const res = await API.post('/auth/attach-email/initiate', {
-        universityEmail: pucitEmailInput.trim().toLowerCase()
+        universityEmail: officialEmail
       });
       setEmailMessage(res.data?.message || 'OTP sent to your PUCIT email!');
       setEmailStep('otp_sent');
@@ -453,8 +484,9 @@ const Dashboard = () => {
     setEmailMessage('');
 
     try {
+      const officialEmail = user?.rollNo ? `${user.rollNo.toLowerCase()}@pucit.edu.pk` : pucitEmailInput.trim().toLowerCase();
       const res = await API.post('/auth/attach-email/verify-otp', {
-        universityEmail: pucitEmailInput.trim().toLowerCase(),
+        universityEmail: officialEmail,
         otp: emailOtpInput.trim()
       });
       setEmailMessage(res.data?.message || 'PUCIT email verified successfully!');
@@ -718,6 +750,16 @@ const Dashboard = () => {
               >
                 Fresher Reg: {fresherMode === null ? '…' : fresherMode ? 'ON' : 'OFF'}
               </button>
+              <button
+                onClick={handleRepairStudents}
+                disabled={repairingStudents}
+                title={repairMessage || 'Dry-run preview, then confirm to fix student emails/roll numbers'}
+                className={`px-3.5 py-2.5 border text-xs font-extrabold uppercase tracking-wide rounded-xl transition-all cursor-pointer flex-grow sm:flex-grow-0 text-center shadow disabled:opacity-50 disabled:cursor-not-allowed ${
+                  repairingStudents ? 'bg-amber-950 border-amber-500 text-amber-300' : 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                }`}
+              >
+                {repairingStudents ? 'Repairing…' : 'Fix Student Emails'}
+              </button>
             </>
           )}
 
@@ -797,10 +839,12 @@ const Dashboard = () => {
                   <div>
                     <p className="text-[10px] font-mono uppercase text-slate-400">Daily Email Quota (Brevo)</p>
                     <p className="text-xs text-slate-300 leading-snug">
-                      <span className={`font-black ${emailQuota.sent >= emailQuota.dailyQuota ? 'text-red-400' : emailQuota.sent >= emailQuota.importantThreshold ? 'text-amber-400' : 'text-teal-300'}`}>{emailQuota.sent}</span>
+                      <span className={`font-black ${emailQuota.sent >= emailQuota.dailyQuota ? 'text-red-400' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'text-orange-400' : emailQuota.sent >= emailQuota.importantThreshold ? 'text-amber-400' : 'text-teal-300'}`}>{emailQuota.sent}</span>
                       <span className="text-slate-500"> / {emailQuota.dailyQuota}</span> sent in last 24h
                       {emailQuota.sent >= emailQuota.dailyQuota
                         ? <span className="text-red-400 font-bold"> • Quota reached — all mail paused until reset</span>
+                        : emailQuota.otpOnly
+                        ? <span className="text-orange-400 font-bold"> • OTPs only (registrations / password recovery)</span>
                         : emailQuota.importantOnly
                         ? <span className="text-amber-400 font-bold"> • Important emails only (OTP / critical)</span>
                         : <span className="text-teal-400 font-bold"> • All mail allowed</span>}
@@ -812,7 +856,7 @@ const Dashboard = () => {
                 </div>
                 <div className="w-full sm:w-48 h-2 bg-[#080507] rounded-full overflow-hidden border border-slate-800">
                   <div
-                    className={`h-full transition-all ${emailQuota.sent >= emailQuota.dailyQuota ? 'bg-red-500' : emailQuota.sent >= emailQuota.importantThreshold ? 'bg-amber-500' : 'bg-teal-500'}`}
+                    className={`h-full transition-all ${emailQuota.sent >= emailQuota.dailyQuota ? 'bg-red-500' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'bg-orange-500' : emailQuota.sent >= emailQuota.importantThreshold ? 'bg-amber-500' : 'bg-teal-500'}`}
                     style={{ width: `${Math.min(100, Math.round((emailQuota.sent / emailQuota.dailyQuota) * 100))}%` }}
                   />
                 </div>
@@ -1538,15 +1582,17 @@ const Dashboard = () => {
                     {emailStep === 'idle' ? (
                       <form onSubmit={handleInitiateEmailLink} className="space-y-3">
                         <div>
-                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Enter PUCIT Email</label>
+                          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">Official PUCIT Email (Locked)</label>
                           <input 
                             type="email"
                             required
-                            value={pucitEmailInput}
+                            readOnly
+                            value={user?.rollNo ? `${user.rollNo.toLowerCase()}@pucit.edu.pk` : pucitEmailInput}
                             onChange={(e) => setPucitEmailInput(e.target.value)}
                             placeholder="e.g. bitf26a047@pucit.edu.pk"
-                            className="w-full px-3.5 py-2.5 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono focus:ring-1 focus:ring-cyan-400"
+                            className="w-full px-3.5 py-2.5 bg-[#130910] border border-slate-700 rounded-xl text-emerald-300 text-xs font-mono cursor-not-allowed select-none"
                           />
+                          <p className="text-[10px] text-slate-500 mt-1">Your official inbox is tied to your roll number and cannot be changed.</p>
                         </div>
                         <button
                           type="submit"
@@ -1558,7 +1604,7 @@ const Dashboard = () => {
                       </form>
                     ) : (
                       <form onSubmit={handleVerifyEmailOtp} className="space-y-3">
-                        <p className="text-xs text-slate-300">Enter the 6-digit verification code sent to <span className="font-mono text-cyan-400">{pucitEmailInput}</span></p>
+                        <p className="text-xs text-slate-300">Enter the 6-digit verification code sent to <span className="font-mono text-cyan-400">{user?.rollNo ? `${user.rollNo.toLowerCase()}@pucit.edu.pk` : pucitEmailInput}</span></p>
                         <div>
                           <input 
                             type="text"

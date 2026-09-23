@@ -18,9 +18,10 @@ const Register = () => {
   const [isRollNoDisabled, setIsRollNoDisabled] = useState(false);
   
   // Differentiate fresher states accurately
-  const [isFresherPrefixOnly, setIsFresherPrefixOnly] = useState(false); // Triggers BOTH RegNo & Personal Email (e.g. BITF26A)
-  const [isFresherWithRoll, setIsFresherWithRoll] = useState(false);       // Triggers ONLY Personal Email (e.g. BITF26A004)
-  const [isSenior, setIsSenior] = useState(false);                         // Senior student -> optional personal notification email
+  const [isFresherPrefixOnly, setIsFresherPrefixOnly] = useState(false); // Triggers BOTH RegNo & Personal Email (e.g. BITF26A) - ONLY when mode ON
+  const [isFresherWithRoll, setIsFresherWithRoll] = useState(false);       // Triggers ONLY Personal Email (e.g. BITF26A004) - ONLY when mode ON
+  const [isSenior, setIsSenior] = useState(false);                         // Senior/disabled-mode -> official email auto-linked, NO personal email
+  const [fresherBlocked, setFresherBlocked] = useState(false);             // Prefix typed while fresher mode is OFF -> must enter full roll number
 
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
@@ -63,40 +64,73 @@ const Register = () => {
         setEmail('');
         setIsSenior(false);
         if (!hasNumberSuffix) {
-          // Case 1: Prefix only (e.g. BITF26A) -> Needs Reg No AND Personal Email
-          setIsFresherPrefixOnly(true);
+          // Prefix only (e.g. BITF26A): personal email is ONLY available when
+          // the admin has fresher mode ENABLED. When disabled the form MUST NOT
+          // let the prefix through — the user has to type a full roll number.
+          setIsFresherPrefixOnly(fresherRegistrationEnabled === true);
           setIsFresherWithRoll(false);
+          setFresherBlocked(fresherRegistrationEnabled !== true);
+          setRegistrationNo('');
+          setPersonalNotificationEmail('');
           if (fresherRegistrationEnabled === false) {
-            setHelperText(`Fresher prefix-only registration is currently disabled. Please enter your full Roll Number (e.g. BITF26A004) to continue. (${trimmedRoll.toUpperCase()})`);
-          } else {
+            setHelperText(`Fresher prefix-only registration is disabled by the administrator. Please enter your full Roll Number (e.g. BITF26A004) to continue. (${trimmedRoll.toUpperCase()})`);
+          } else if (fresherRegistrationEnabled === true) {
             setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+          } else {
+            setHelperText(`Checking registration mode... please enter your full Roll Number to continue. (${trimmedRoll.toUpperCase()})`);
           }
         } else {
-          // Case 2: Full roll number with index (e.g. BITF26A004) -> Needs ONLY Personal Email
+          // Full fresher roll number (e.g. BITF26A004). The personal-email
+          // option is available ONLY when the admin has confirmed fresher mode
+          // ON. Otherwise the roll number is auto-converted to the official
+          // inbox (rollno@pucit.edu.pk) and they verify it exactly like seniors.
           setIsFresherPrefixOnly(false);
-          setIsFresherWithRoll(true);
-          setHelperText(`Fresher roll number detected (${trimmedRoll.toUpperCase()}). Please enter your Personal Notification Email.`);
+          setFresherBlocked(false);
+          setRegistrationNo('');
+          setPersonalNotificationEmail('');
+          if (fresherRegistrationEnabled === true) {
+            setIsFresherWithRoll(true);
+            setIsSenior(false);
+            setHelperText(`Fresher roll number detected (${trimmedRoll.toUpperCase()}). Please enter your Personal Notification Email.`);
+          } else {
+            setIsFresherWithRoll(false);
+            setIsSenior(true);
+            setHelperText(
+              fresherRegistrationEnabled === false
+                ? `Fresher registration is disabled. Your official inbox (${trimmedRoll}@pucit.edu.pk) will be used for verification.`
+                : `Checking registration mode... please wait.`
+            );
+          }
         }
       } else {
-        // Senior student profile
+        // Senior student profile -> official email auto-linked, NO personal email
         setEmail(`${trimmedRoll}@pucit.edu.pk`);
         setIsFresherPrefixOnly(false);
         setIsFresherWithRoll(false);
+        setFresherBlocked(false);
         setIsSenior(true);
+        setPersonalNotificationEmail('');
+        setRegistrationNo('');
         setHelperText(`Senior student profile linked to: ${trimmedRoll.toUpperCase()}@pucit.edu.pk`);
       }
     } else if (email.trim().length > 0 && !isEmailDisabled) {
       setIsRollNoDisabled(true);
       setIsFresherPrefixOnly(false);
       setIsFresherWithRoll(false);
+      setFresherBlocked(false);
       setIsSenior(false);
+      setPersonalNotificationEmail('');
+      setRegistrationNo('');
       setHelperText('Faculty profile active: Roll number entry bypassed.');
     } else {
       setIsRollNoDisabled(false);
       setIsEmailDisabled(false);
       setIsFresherPrefixOnly(false);
       setIsFresherWithRoll(false);
+      setFresherBlocked(false);
       setIsSenior(false);
+      setPersonalNotificationEmail('');
+      setRegistrationNo('');
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
   }, [rollNo, email, fresherBatchCode, isErrorState, fresherRegistrationEnabled]);
@@ -109,9 +143,10 @@ const Register = () => {
   } else if (isFresherWithRoll) {
     fresherCheck = personalNotificationEmail.trim().length > 0;
   }
+  const personalEmailIsPucit = /@pucit\.edu\.pk$/i.test(personalNotificationEmail.trim());
   const passwordsMatch = password.length > 0 && password === confirmPassword;
-  const isFormValid = hasIdentifier && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch
-    && !(isFresherPrefixOnly && fresherRegistrationEnabled === false);
+  const isFormValid = hasIdentifier && !fresherBlocked && !personalEmailIsPucit
+    && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch;
 
   const handleRegister = async (e) => {
     if (e) {
@@ -122,6 +157,12 @@ const Register = () => {
 
     if (password !== confirmPassword) {
       setHelperText('Passwords do not match.');
+      setIsErrorState(true);
+      return;
+    }
+
+    if (personalEmailIsPucit) {
+      setHelperText('You cannot use your official @pucit.edu.pk email as the personal notification email.');
       setIsErrorState(true);
       return;
     }
@@ -144,9 +185,6 @@ const Register = () => {
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         }),
         ...(isFresherWithRoll && {
-          personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
-        }),
-        ...(isSenior && personalNotificationEmail.trim() && {
           personalNotificationEmail: personalNotificationEmail.trim().toLowerCase()
         })
       };
@@ -217,7 +255,7 @@ const Register = () => {
         <form onSubmit={handleRegister} className="space-y-4">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Roll Number / Section Prefix {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed for teacher)</span>}
+              Roll Number / Section Prefix {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed for teacher)</span>} {fresherBlocked && <span className="text-red-400 font-normal lowercase">(full roll number required)</span>}
             </label>
             <input 
               type="text" 
@@ -291,10 +329,25 @@ const Register = () => {
               <p className="text-xs sm:text-sm text-sky-100 font-mono break-all">
                 {rollNo.trim().toLowerCase()}@pucit.edu.pk
               </p>
+              <p className="text-[11px] text-slate-400 leading-snug mt-2">
+                Your verification code will be sent to this official inbox. It cannot be changed.
+              </p>
             </div>
           )}
 
-          {/* Conditional Freshers Registration Number & Personal Email Fields (Triggered only when section prefix only is typed, e.g. BITF26A) */}
+          {/* Prefix-only entry rejected while the admin has fresher mode OFF */}
+          {fresherBlocked && (
+            <div className="bg-red-950/40 border border-red-500/40 p-4 rounded-2xl animate-fadeIn">
+              <p className="text-[11px] text-red-300 font-bold uppercase tracking-wider mb-1">
+                Fresher Registration Disabled
+              </p>
+              <p className="text-xs text-red-200/80 leading-snug">
+                Prefix-only registration is currently off. Please enter your full Roll Number (e.g. BITF26A004) to register.
+              </p>
+            </div>
+          )}
+
+          {/* Conditional Freshers Registration Number & Personal Email Fields (Triggered only when section prefix only is typed AND fresher mode is ON, e.g. BITF26A) */}
           {isFresherPrefixOnly && (
             <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
               <div>
@@ -320,7 +373,7 @@ const Register = () => {
                   Personal Notification Email <span className="text-rose-400">*</span>
                 </label>
                 <p className="text-[11px] text-slate-400 leading-snug mb-2">
-                  Since your official university email isn't active yet, enter your personal email to receive classroom and lab announcements.
+                  Only for freshers (fresher registration is enabled). Must be a personal, non-university email — your official @pucit.edu.pk inbox cannot be used here.
                 </p>
                 <input 
                   type="email" 
@@ -331,14 +384,21 @@ const Register = () => {
                   }} 
                   required
                   autoCapitalize="none"
-                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase" 
+                  className={`w-full px-4 py-3 bg-[#080507] border rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase ${
+                    personalEmailIsPucit ? 'border-red-500' : 'border-orange-500/40'
+                  }`} 
                   placeholder="your.personal@gmail.com" 
                 />
+                {personalEmailIsPucit && (
+                  <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
+                    ⚠️ Official university emails cannot be used as your personal email.
+                  </p>
+                )}
               </div>
             </div>
           )}
 
-          {/* Conditional Freshers Personal Email ONLY Box (Triggered when full roll number is typed, e.g. BITF26A004) */}
+          {/* Conditional Freshers Personal Email ONLY Box (Triggered when full fresher roll number is typed AND fresher mode is ON, e.g. BITF26A004) */}
           {isFresherWithRoll && (
             <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
               <div>
@@ -346,7 +406,7 @@ const Register = () => {
                   Personal Notification Email <span className="text-rose-400">*</span>
                 </label>
                 <p className="text-[11px] text-slate-400 leading-snug mb-2">
-                  Since your official university email isn't active yet, enter your personal email to receive classroom and lab announcements.
+                  Only for freshers (fresher registration is enabled). Must be a personal, non-university email — your official @pucit.edu.pk inbox cannot be used here.
                 </p>
                 <input 
                   type="email" 
@@ -357,37 +417,16 @@ const Register = () => {
                   }} 
                   required
                   autoCapitalize="none"
-                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase" 
+                  className={`w-full px-4 py-3 bg-[#080507] border rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase ${
+                    personalEmailIsPucit ? 'border-red-500' : 'border-orange-500/40'
+                  }`} 
                   placeholder="your.personal@gmail.com" 
                 />
-              </div>
-            </div>
-          )}
-
-          {/* Conditional Senior Students Optional Personal Email (Official inbox may not be active yet) */}
-          {isSenior && (
-            <div className="bg-sky-950/20 border border-sky-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-sky-300 mb-1.5">
-                  Personal Notification Email <span className="text-slate-500 font-normal lowercase">(optional)</span>
-                </label>
-                <p className="text-[11px] text-slate-400 leading-snug mb-2">
-                  If you cannot access your official @pucit.edu.pk inbox yet, enter a personal email here — your
-                  verification code will be sent to that inbox instead, and future update notifications will use it too.
-                </p>
-                <input 
-                  type="email" 
-                  value={personalNotificationEmail} 
-                  onChange={(e) => {
-                    setPersonalNotificationEmail(e.target.value);
-                    if (isErrorState) setIsErrorState(false);
-                  }} 
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck="false"
-                  className="w-full px-4 py-3 bg-[#080507]/80 border border-sky-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-400 text-sm transition-all lowercase" 
-                  placeholder="your.personal@gmail.com" 
-                />
+                {personalEmailIsPucit && (
+                  <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
+                    ⚠️ Official university emails cannot be used as your personal email.
+                  </p>
+                )}
               </div>
             </div>
           )}
