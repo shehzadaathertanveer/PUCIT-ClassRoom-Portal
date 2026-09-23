@@ -742,7 +742,22 @@ const ClassroomDetail = () => {
     );
   }
 
-  const activeStudents = (classroom.students || []).filter(s => s && (s._id || s.name));
+  const activeStudents = (classroom.students || [])
+    .filter(s => s && (s._id || s.name))
+    .sort((a, b) => {
+      const prefix = (classroom.sectionPrefix || '').toUpperCase();
+      const ra = String(a.rollNo || '').toUpperCase();
+      const rb = String(b.rollNo || '').toUpperCase();
+      const pa = ra.startsWith(prefix);
+      const pb = rb.startsWith(prefix);
+      if (pa !== pb) return pb ? 0 : -1;
+      if (pa && pb) {
+        const da = parseInt((ra.replace(/\D/g, '') || '').slice(-3), 10) || 99999;
+        const db = parseInt((rb.replace(/\D/g, '') || '').slice(-3), 10) || 99999;
+        return da - db;
+      }
+      return ra.localeCompare(rb);
+    });
   const totalStudentsCount = activeStudents.length;
   const reversedNotices = [...(classroom.notices || [])].reverse();
   const latestNotice = reversedNotices[0];

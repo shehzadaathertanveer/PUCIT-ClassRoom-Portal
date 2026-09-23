@@ -3,6 +3,8 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
 const User = require("../models/userSchema");
+const PendingRegistration = require("../models/pendingRegistrationSchema");
+const PlatformSetting = require("../models/platformSettingSchema");
 
 const Classroom = require("../models/classRoomSchema");
 const Labroom = require("../models/labSchema");
@@ -11,6 +13,7 @@ const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
+const { getEmailQuotaStatus } = require("../utils/emailService");
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -35,6 +38,12 @@ const signToken = (id, role) => {
 
 // Helper: SHA-256 OTP hashing for secure database storage
 const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
+
+// Helper: Admin-controlled fresher prefix registration mode (persisted, default ON)
+const getFresherRegistrationMode = async () => {
+  const doc = await PlatformSetting.findOne({ key: "fresherRegistrationEnabled" }).lean();
+  return doc && doc.value !== undefined ? Boolean(doc.value) : true;
+};
 
 // SECURE SYNC: Enrolls student if their exact roll number or temporary prefix matches approved lists
 const syncStudentEnrollment = async (user) => {
@@ -151,6 +160,50 @@ exports.toggleMaintenanceMode = catchAsync(async (req, res, next) => {
 });
 
 // =============================================================================
+// SYSTEM FRESHER REGISTRATION MODE (Public read / Admin toggle)
+// =============================================================================
+exports.getRegistrationMode = catchAsync(async (req, res, next) => {
+  const fresherRegistrationEnabled = await getFresherRegistrationMode();
+
+  res.status(200).json({
+    status: "success",
+    data: { fresherRegistrationEnabled }
+  });
+});
+
+exports.toggleRegistrationMode = catchAsync(async (req, res, next) => {
+  const { fresherRegistrationEnabled } = req.body;
+
+  if (typeof fresherRegistrationEnabled !== "boolean") {
+    return next(new AppError("fresherRegistrationEnabled must be a boolean!", 400));
+  }
+
+  await PlatformSetting.findOneAndUpdate(
+    { key: "fresherRegistrationEnabled" },
+    { value: fresherRegistrationEnabled, updatedBy: req.user._id },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: `Fresher prefix registration is now ${fresherRegistrationEnabled ? 'ENABLED' : 'DISABLED'}.`,
+    data: { fresherRegistrationEnabled }
+  });
+});
+
+// =============================================================================
+// EMAIL QUOTA STATUS (Admin dashboard box)
+// =============================================================================
+exports.getEmailQuota = catchAsync(async (req, res, next) => {
+  const emailQuota = await getEmailQuotaStatus();
+
+  res.status(200).json({
+    status: "success",
+    data: { emailQuota }
+  });
+});
+
+// =============================================================================
 // 1. GET ME PROFILE
 // =============================================================================
 exports.getMe = catchAsync(async (req, res, next) => {
@@ -244,6 +297,19 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("Registration number must be a valid unique number!", 400));
   }
 
+  // Admin fresher-registration toggle: when DISABLED, prefix-only entries are
+  // rejected and students must provide a full roll number (senior-style).
+  const fresherRegistrationEnabled = await getFresherRegistrationMode();
+  if (
+    assignedRole === "STUDENT" &&
+    !fresherRegistrationEnabled &&
+    formattedRollNo &&
+    TEMP_PREFIX_REGEX.test(formattedRollNo) &&
+    !FULL_ROLL_NO_REGEX.test(formattedRollNo)
+  ) {
+    return next(new AppError("Fresher prefix-only registration is currently disabled by the administrator. Please register using your full Roll Number (e.g., BITF26A001).", 400));
+  }
+
   const officialEmail = cleanEmail || (FULL_ROLL_NO_REGEX.test(formattedRollNo) ? `${formattedRollNo.toLowerCase()}@pucit.edu.pk` : `${formattedRegNo || Math.random().toString(36).substring(7)}@temp.pucit.edu.pk`);
 
   if (formattedRegNo) {
@@ -269,6 +335,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     title: "Complete Your Registration",
     bodyText: `Hello <strong>${name}</strong>, welcome to the PUCIT Classroom Portal. Use the secure verification code boxes below to activate your account.`,
     otpCode: otp,
+    importance: "important",
     details: [
       { label: "Assigned Roll / Prefix", value: formattedRollNo },
       { label: "Registration / Form No", value: formattedRegNo || "N/A" },
@@ -280,66 +347,50 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("We could not send the verification code to your email right now. Please double-check your email address and try again in a moment.", 500));
   }
 
-  // IMPORTANT: The personalNotificationEmail clause is only included when a real
-  // personal email was provided. When it is null/absent (teachers never provide it),
-  // { field: null } would match EVERY user missing that field and a teacher could
-  // never register (random users surfaced as "already exists" or, before the guard
-  // below, silently overwritten/destroyed). This was the root cause of blocked
-  // teacher registrations even after changing the email.
-  let user = await User.findOne({
+  // BLOCK if an already-VERIFIED account claims the same primary identity
+  // (exact roll number or the same official email). Shared identifiers like a
+  // personal notification email or registration number are NOT enough to block
+  // a genuinely new student — matching ONLY those falls through to a fresh
+  // pending record below.
+  const verifiedConflict = await User.findOne({
     $or: [
-      { email: officialEmail },
-      ...(cleanPersonalEmail ? [{ personalNotificationEmail: cleanPersonalEmail }] : []),
-      ...(formattedRegNo && REG_NO_REGEX.test(formattedRegNo) ? [{ registrationNo: formattedRegNo }] : []),
-      ...(formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) ? [{ rollNo: formattedRollNo }] : [])
+      { email: officialEmail, isEmailVerified: true },
+      ...(formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) ? [{ rollNo: formattedRollNo, isEmailVerified: true }] : [])
     ]
-  });
+  }).select('_id role').lean();
 
-  if (user) {
-    const verified = user.isEmailVerified || user.isUniversityEmailVerified;
-    const isExactIdentity =
-      (user.role === "STUDENT" && formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) && user.rollNo === formattedRollNo) ||
-      (user.email && officialEmail && user.email.toLowerCase() === officialEmail.toLowerCase());
-
-    if (verified && user.role !== "PENDING_TEACHER") {
-      if (isExactIdentity) {
-        // The SAME verified account already exists (same roll number or same
-        // official email). Never overwrite it; guide the user to recover it.
-        const linkedRole =
-          user.role === "STUDENT" ? "a student"
-          : user.role === "ADMIN" ? "an administrator"
-          : user.role === "TEACHER" ? "a teacher"
-          : user.role === "TA" ? "a teaching assistant"
-          : "an active";
-        return next(new AppError(`This email or roll number is already linked to ${linkedRole} account. Please log in, or use Forgot Password if you cannot remember your credentials.`, 400));
-      }
-      // Matched ONLY on a shared/derived identifier (personal notification email,
-      // registration number, or a coincidental derived email). That is NOT the
-      // same person — do NOT destroy the existing verified account, but DO NOT
-      // block a genuine new registration either. Fall through to create a fresh
-      // pending record below.
-      user = null;
-    } else {
-      // Incomplete / unverified / pending-teacher record: safely refresh it with
-      // the latest attempt so the user can re-verify.
-      user.name = name;
-      user.rollNo = formattedRollNo;
-      if (formattedRegNo) user.registrationNo = formattedRegNo;
-      if (!user.isUniversityEmailVerified) user.email = officialEmail;
-      user.password = password;
-      user.role = assignedRole;
-      if (cleanPersonalEmail) user.personalNotificationEmail = cleanPersonalEmail;
-      user.requiresEmail = true;
-      user.isEmailVerified = false;
-      user.isUniversityEmailVerified = false;
-      user.otpCode = hashedOtp;
-      user.otpExpiresAt = otpExpiry;
-      await user.save();
+  if (verifiedConflict) {
+    if (verifiedConflict.role === "PENDING_TEACHER") {
+      return next(new AppError("Your teacher account is pending Admin approval. Contact the administrator.", 400));
     }
+    const linkedRole = verifiedConflict.role === "STUDENT"
+      ? "a student"
+      : verifiedConflict.role === "ADMIN"
+      ? "an administrator"
+      : verifiedConflict.role === "TEACHER"
+      ? "a teacher"
+      : verifiedConflict.role === "TA"
+      ? "a teaching assistant"
+      : "an active";
+    return next(new AppError(`This email or roll number is already linked to ${linkedRole} account. Please log in, or use Forgot Password if you cannot remember your credentials.`, 400));
   }
 
-  if (!user) {
-    user = await User.create({
+  // Store the pending registration. Re-initiating overwrites the last attempt
+  // (new OTP) so a stale record never blocks a fresh verification.
+  let pending = await PendingRegistration.findOne({ destinationEmail }).select("+otpCode +otpExpiresAt");
+  if (pending) {
+    pending.name = name;
+    pending.email = officialEmail;
+    pending.rollNo = formattedRollNo;
+    if (formattedRegNo) pending.registrationNo = formattedRegNo;
+    pending.personalNotificationEmail = cleanPersonalEmail;
+    pending.role = assignedRole;
+    pending.password = password;
+    pending.otpCode = hashedOtp;
+    pending.otpExpiresAt = otpExpiry;
+    await pending.save();
+  } else {
+    await PendingRegistration.create({
       name,
       email: officialEmail,
       rollNo: formattedRollNo,
@@ -347,9 +398,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
       password,
       role: assignedRole,
       personalNotificationEmail: cleanPersonalEmail,
-      requiresEmail: true,
-      isEmailVerified: false,
-      isUniversityEmailVerified: false,
+      destinationEmail,
       otpCode: hashedOtp,
       otpExpiresAt: otpExpiry,
     });
@@ -377,25 +426,26 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const hashedInputOtp = hashOtp(cleanOtp);
   const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
-  const user = await User.findOne({
+  const pending = await PendingRegistration.findOne({
     $or: [
       { email: cleanEmail },
+      { destinationEmail: cleanEmail },
       { personalNotificationEmail: cleanEmail },
       ...(FULL_ROLL_NO_REGEX.test(prefixFromEmail) ? [{ rollNo: prefixFromEmail }] : []),
       ...(REG_NO_REGEX.test(prefixFromEmail) ? [{ registrationNo: prefixFromEmail }] : [])
     ]
   }).select("+otpCode +otpExpiresAt");
 
-  if (!user) {
+  if (!pending) {
     console.warn(`[verifyRegistrationOTP] No pending registration found. Searched email="${cleanEmail}" prefix="${prefixFromEmail}"`);
     return next(new AppError("No pending registration found for this account. Please re-initiate registration.", 400));
   }
 
-  if (!user.otpCode || user.otpCode !== hashedInputOtp) {
+  if (!pending.otpCode || pending.otpCode !== hashedInputOtp) {
     return next(new AppError("Invalid OTP code!", 400));
   }
 
-  if (user.otpExpiresAt && user.otpExpiresAt < Date.now()) {
+  if (pending.otpExpiresAt && pending.otpExpiresAt < Date.now()) {
     return next(new AppError("OTP code has expired!", 400));
   }
 
@@ -404,16 +454,51 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   // Also auto-derive the roll number from the email prefix when applicable.
   const verifiedViaUniversityEmail = cleanEmail.endsWith('@pucit.edu.pk');
 
-  user.isEmailVerified = true;
-  if (verifiedViaUniversityEmail) {
-    user.isUniversityEmailVerified = true;
-    if (user.role === "STUDENT" && !user.rollNo && FULL_ROLL_NO_REGEX.test(prefixFromEmail)) {
-      user.rollNo = prefixFromEmail;
-    }
+  // Final conflict re-check (a verified account may have appeared while the
+  // user sat on the OTP screen).
+  const finalConflict = await User.findOne({
+    $or: [
+      { email: pending.email, isEmailVerified: true },
+      ...(pending.rollNo && FULL_ROLL_NO_REGEX.test(pending.rollNo) ? [{ rollNo: pending.rollNo, isEmailVerified: true }] : []),
+      ...(pending.registrationNo ? [{ registrationNo: pending.registrationNo, isEmailVerified: true }] : [])
+    ]
+  }).select('_id role').lean();
+
+  if (finalConflict) {
+    return next(new AppError("This email or roll number is already registered. Please log in, or use Forgot Password if you cannot remember your credentials.", 400));
   }
-  user.otpCode = undefined;
-  user.otpExpiresAt = undefined;
-  await user.save();
+
+  let finalRollNo = pending.rollNo || "";
+  if (!finalRollNo && verifiedViaUniversityEmail && FULL_ROLL_NO_REGEX.test(prefixFromEmail)) {
+    finalRollNo = prefixFromEmail;
+  }
+
+  // Create the real account ONLY after successful verification.
+  const user = await User.create({
+    name: pending.name,
+    email: pending.email,
+    rollNo: finalRollNo || undefined,
+    registrationNo: pending.registrationNo || undefined,
+    password: pending.password,
+    role: pending.role,
+    personalNotificationEmail: pending.personalNotificationEmail,
+    requiresEmail: true,
+    isEmailVerified: true,
+    isUniversityEmailVerified: verifiedViaUniversityEmail,
+  });
+
+  // Remove any legacy unverified duplicates that carry the exact same identity
+  // so stale admission attempts can never resurface as login failures.
+  await User.deleteMany({
+    role: { $in: ["STUDENT", "PENDING_TEACHER"] },
+    isEmailVerified: false,
+    _id: { $ne: user._id },
+    $or: [
+      { email: user.email },
+      ...(user.rollNo ? [{ rollNo: user.rollNo }] : []),
+      ...(user.registrationNo ? [{ registrationNo: user.registrationNo }] : [])
+    ]
+  });
 
   const userRoll = user.rollNo ? user.rollNo.toUpperCase() : "";
 
@@ -429,6 +514,9 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   if (user.role === "STUDENT") {
     await syncStudentEnrollment(user);
   }
+
+  // The pending attempt has served its purpose.
+  await PendingRegistration.deleteMany({ $or: [{ email: pending.email }, { destinationEmail: pending.destinationEmail }] });
 
   user.password = undefined;
   const token = signToken(user._id, user.role);
@@ -524,7 +612,7 @@ exports.login = catchAsync(async (req, res, next) => {
 
     dashboardData = { classrooms, labrooms, marks };
   } else if (user.role === "ADMIN") {
-    const [activeClassrooms, activeLabrooms, pendingTeachers, allUsers] = await Promise.all([
+    const [activeClassrooms, activeLabrooms, pendingTeachers, allUsers, pendingRegistrations, emailQuota] = await Promise.all([
       Classroom.find({ isActive: true })
         .populate("teacher", "name email")
         .populate("tas", "name rollNo")
@@ -534,10 +622,12 @@ exports.login = catchAsync(async (req, res, next) => {
         .populate("tas", "name rollNo")
         .populate("students", "name rollNo registrationNo"),
       User.find({ role: "PENDING_TEACHER" }).select("-password"),
-      User.find().select("-password")
+      User.find().select("-password"),
+      PendingRegistration.countDocuments(),
+      getEmailQuotaStatus()
     ]);
 
-    dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, allUsers };
+    dashboardData = { activeClassrooms, activeLabrooms, pendingTeachers, pendingRegistrations, emailQuota, allUsers };
   }
 
   res.status(200).json({
@@ -593,6 +683,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     title: "Password Reset Request",
     bodyText: `Hello <strong>${user.name}</strong>, we received a request to reset your password. Use the secure verification boxes below. This code will expire in 10 minutes.`,
     otpCode: otp,
+    importance: "important",
     details: [{ label: "Account Target", value: user.rollNo || user.registrationNo || user.email }],
   });
 
@@ -762,6 +853,7 @@ exports.requestOfficialEmailActivation = catchAsync(async (req, res, next) => {
     title: "Activate Official University Inbox",
     bodyText: `Hello <strong>${user.name}</strong>, your official university inbox is now accessible. Use the secure verification code boxes below to link and lock your account permanently.`,
     otpCode: otp,
+    importance: "important",
     details: [{ label: "Official Email", value: targetEmail }],
   });
 
@@ -880,6 +972,7 @@ exports.approvePendingTeacher = catchAsync(async (req, res, next) => {
       subject: "Teacher Account Approved",
       title: "Teacher Account Approved",
       bodyText: `Hello <strong>${user.name}</strong>, your teacher account registration has been <span style="color: #10b981; font-weight: 600;">approved</span> by the Administrator. You can now log in and manage your classrooms and labs.`,
+      importance: "important",
       details: [
         { label: "Account Name", value: user.name },
         { label: "Assigned Role", value: "TEACHER" },
@@ -920,6 +1013,7 @@ exports.rejectTeacher = catchAsync(async (req, res, next) => {
         subject: "Teacher Account Request Status",
         title: "Registration Request Update",
         bodyText: `Hello <strong>${teacherName}</strong>,<br><br>We regret to inform you that your teacher account registration request for the PUCIT Portal has been <span style="color: #e11d48; font-weight: 600;">declined</span> at this time.<br><br>If you believe this is an error or need further assistance with your credentials, please feel free to contact the administrator, <strong>Shehzada Ather (IT F25 - Old Campus)</strong>.<br><br>Your registration profile has been reset. You may re-register on the portal with updated credentials whenever you are ready.`,
+        importance: "important",
         details: [
           { label: "Status", value: '<span style="color: #e11d48; font-weight: 600;">Declined / Reset</span>' },
           { label: "Support Contact", value: "Shehzada Ather, IT F25 (Old Campus)" },
@@ -949,7 +1043,9 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
     adminsCount,
     pendingTeachersCount,
     activeClassroomsCount,
-    activeLabroomsCount
+    activeLabroomsCount,
+    pendingRegistrationsCount,
+    emailQuota
   ] = await Promise.all([
     User.countDocuments(),
     User.countDocuments({ role: "STUDENT" }),
@@ -957,7 +1053,9 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
     User.countDocuments({ role: "ADMIN" }),
     User.countDocuments({ role: "PENDING_TEACHER" }),
     Classroom.countDocuments({ isActive: true }),
-    Labroom.countDocuments({ isActive: true })
+    Labroom.countDocuments({ isActive: true }),
+    PendingRegistration.countDocuments(),
+    getEmailQuotaStatus()
   ]);
 
   res.status(200).json({
@@ -966,6 +1064,8 @@ exports.getAdminAnalytics = catchAsync(async (req, res, next) => {
       totalUsers,
       totalClassrooms: activeClassroomsCount,
       totalLabrooms: activeLabroomsCount,
+      pendingRegistrations: pendingRegistrationsCount,
+      emailQuota,
       userBreakdown: {
         totalUsers,
         students: studentsCount,
@@ -1119,6 +1219,7 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
         subject: "Account Termination Notice",
         title: "Account Removal Notification",
         bodyText: `Hello <strong>${targetUser.name}</strong>,<br><br>We are writing to inform you that your account on the PUCIT Classroom Portal has been <span style="color: #e11d48; font-weight: 600;">terminated / deleted</span> by the platform administrator.<br><br>If you believe this action was taken in error or require any assistance regarding your data or credentials, please reach out directly to the administrator, <strong>Shehzada Ather (IT F25 - Old Campus)</strong>.`,
+        importance: "important",
         details: [
           { label: "Account Name", value: targetUser.name },
           { label: "Identifier / Roll No", value: targetUser.rollNo || targetUser.email },
@@ -1196,9 +1297,12 @@ exports.cleanupUnverifiedRegistrations = catchAsync(async (req, res, next) => {
     ? await User.deleteMany({ _id: { $in: staleRecords.map((r) => r._id) } })
     : { deletedCount: 0 };
 
+  // Also drop expired/stale pending registration attempts (older than 24h).
+  const stalePending = await PendingRegistration.deleteMany({ createdAt: { $lt: cutoff } });
+
   res.status(200).json({
     status: "success",
-    message: `Cleaned up ${deleted.deletedCount} stale unverified registration record(s) older than 24 hours. Admins, teachers, verified and recent accounts were NOT touched.`,
-    data: { deletedCount: deleted.deletedCount, deletedRecords: staleRecords },
+    message: `Cleaned up ${deleted.deletedCount} stale unverified registration record(s) and ${stalePending.deletedCount} pending registration attempt(s) older than 24 hours. Admins, teachers, verified and recent accounts were NOT touched.`,
+    data: { deletedCount: deleted.deletedCount, deletedRecords: staleRecords, pendingRemoved: stalePending.deletedCount },
   });
 });

@@ -17,6 +17,9 @@ router.post('/verify-recovery-otp', authController.verifyRecoveryOtp);
 // Public maintenance status endpoint (so frontend login/banner can check if site is down)
 router.get('/maintenance/status', authController.getMaintenanceStatus);
 
+// Public registration mode endpoint (drives the registration form's live behavior)
+router.get('/registration-mode', authController.getRegistrationMode);
+
 // =============================================================================
 // PROTECTED USER ROUTES (Requires Valid JWT Token)
 // =============================================================================
@@ -45,6 +48,11 @@ router.post('/admin/cleanup-registrations', restrictTo('ADMIN'), authController.
 
 router.post('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
 router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
+
+// Admin: fresher prefix registration toggle + daily email quota status
+router.post('/admin/registration-mode', restrictTo('ADMIN'), authController.toggleRegistrationMode);
+router.patch('/admin/registration-mode', restrictTo('ADMIN'), authController.toggleRegistrationMode);
+router.get('/admin/email-quota', restrictTo('ADMIN'), authController.getEmailQuota);
 
 // =============================================================================
 // ADMIN TEACHER APPROVAL & REJECTION ROUTES (Admin Only)

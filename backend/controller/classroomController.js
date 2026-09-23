@@ -39,6 +39,40 @@ const verifyClassroomStaff = async (userId, userRole, classroomId) => {
   return false;
 };
 
+// Helper: When an activity's category is renamed in settings, MOVE its already-
+// recorded marks from the old schema key to the new one instead of deleting the
+// old activity and making the teacher re-enter every grade. Only array-backed
+// sessional categories take part (single-entry mids/finals/finalProject are not
+// part of the sessional manager).
+const SESSIONAL_ARRAY_KEYS = [
+  'quizzes', 'assignments', 'presentations', 'projects', 'homework',
+  'classActivities', 'classParticipation', 'vivas', 'specialMarks'
+];
+
+const migrateClassroomActivityMarks = async (classroomId, fromKey, toKey) => {
+  if (!SESSIONAL_ARRAY_KEYS.includes(fromKey) || !SESSIONAL_ARRAY_KEYS.includes(toKey)) return;
+
+  const markDocs = await Mark.find({ classroom: classroomId, [fromKey]: { $ne: [] } }).select(`_id ${fromKey} ${toKey}`);
+
+  await Promise.all(markDocs.map(async (doc) => {
+    const items = doc[fromKey] || [];
+    if (!items.length) return;
+
+    const existing = doc[toKey] || [];
+    const existingTitles = new Set(existing.map(i => String(i.title || '').trim().toLowerCase()));
+
+    const toMove = items.filter(i => !existingTitles.has(String(i.title || '').trim().toLowerCase()));
+    if (!toMove.length) {
+      doc[fromKey] = [];
+      return await doc.save();
+    }
+
+    doc[toKey] = [...existing, ...toMove];
+    doc[fromKey] = [];
+    await doc.save();
+  }));
+};
+
 // =============================================================================
 // 1. CREATE CLASSROOM
 // =============================================================================
@@ -939,6 +973,9 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
   const { className, sectionPrefix, maxCapacity, placeholderTeacherName, gradingScheme, sessionalActivities } = req.body;
 
+  const currentClassroom = await Classroom.findOne({ _id: classroomId, isActive: true }).select('sessionalActivities').lean();
+  if (!currentClassroom) return next(new AppError('Active classroom not found!', 404));
+
   const updateData = {};
   if (className) updateData.className = className.trim();
   if (sectionPrefix) updateData.sectionPrefix = sectionPrefix.trim().toUpperCase();
@@ -949,6 +986,16 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
       category: a.category.trim(),
       allocatedMarks: Number(a.allocatedMarks) || 0
+    }));
+
+    // Migrate existing marks when an activity's type changed (edit-in-place).
+    const oldKeys = (currentClassroom.sessionalActivities || []).map(a => getNormalizedTargetKey(a.category));
+    const newKeys = updateData.sessionalActivities.map(a => getNormalizedTargetKey(a.category));
+
+    await Promise.all(oldKeys.map((oldKey, idx) => {
+      const newKey = newKeys[idx];
+      if (!newKey || newKey === oldKey) return null;
+      return migrateClassroomActivityMarks(classroomId, oldKey, newKey);
     }));
   }
 

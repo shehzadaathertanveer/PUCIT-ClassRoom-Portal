@@ -1,5 +1,60 @@
 const https = require("https");
 const nodemailer = require("nodemailer");
+const PlatformSetting = require("../models/platformSettingSchema");
+
+// ---------------------------------------------------------------------------
+// Daily email quota accounting (24-hour rolling window).
+//
+//   DAILY_QUOTA         total emails allowed per rolling 24h (default 300).
+//   IMPORTANT_THRESHOLD once this many emails were sent, ONLY important mail
+//                       (OTP codes, account termination, teacher decisions)
+//                       is delivered; routine notifications are silently
+//                       dropped for the rest of the day. (default 220)
+//
+// The counter lives in the PlatformSetting collection so restarts do not
+// reset it. The window resets on the first send after `startedAt + 24h`.
+// ---------------------------------------------------------------------------
+const DAILY_QUOTA = Number(process.env.EMAIL_DAILY_QUOTA) || 300;
+const IMPORTANT_THRESHOLD = Number(process.env.EMAIL_IMPORTANT_THRESHOLD) || 220;
+const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const getEmailQuotaState = async () => {
+  const now = Date.now();
+  const doc = await PlatformSetting.findOne({ key: "emailQuota" }).lean();
+
+  if (!doc) {
+    await PlatformSetting.create({ key: "emailQuota", value: { sent: 0, startedAt: now } });
+    return { sent: 0, startedAt: now };
+  }
+
+  const startedAt = doc.value?.startedAt || now;
+  if (now - startedAt >= QUOTA_WINDOW_MS) {
+    await PlatformSetting.updateOne(
+      { key: "emailQuota" },
+      { $set: { value: { sent: 0, startedAt: now } } }
+    );
+    return { sent: 0, startedAt: now };
+  }
+
+  return { sent: doc.value?.sent || 0, startedAt };
+};
+
+const recordEmailSent = async () => {
+  await PlatformSetting.updateOne({ key: "emailQuota" }, { $inc: { "value.sent": 1 } });
+};
+
+const getEmailQuotaStatus = async () => {
+  const { sent, startedAt } = await getEmailQuotaState();
+  const remaining = Math.max(DAILY_QUOTA - sent, 0);
+  return {
+    sent,
+    dailyQuota: DAILY_QUOTA,
+    importantThreshold: IMPORTANT_THRESHOLD,
+    remaining,
+    importantOnly: sent >= IMPORTANT_THRESHOLD,
+    resetAt: new Date(startedAt + QUOTA_WINDOW_MS).toISOString(),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Multi-provider styled email utility.
@@ -250,8 +305,21 @@ const sendViaGmail = async (to, subject, htmlContent) => {
   return { ok: true, via: "Gmail SMTP" };
 };
 
-const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode }) => {
+const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode, importance = "normal" }) => {
   if (!to) return false;
+
+  const isImportant = importance === "important";
+  const { sent } = await getEmailQuotaState();
+
+  if (sent >= DAILY_QUOTA) {
+    console.log(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${DAILY_QUOTA}). Blocked "${subject}" -> ${to}.`);
+    return false;
+  }
+
+  if (!isImportant && sent >= IMPORTANT_THRESHOLD) {
+    console.log(`[emailService] Quota ${sent}/${DAILY_QUOTA} hit important-reserve (${IMPORTANT_THRESHOLD}); dropped routine notification "${subject}" -> ${to}.`);
+    return true;
+  }
 
   const htmlContent = buildHtml({ subject, title, bodyText, details, otpCode });
   const failures = [];
@@ -260,6 +328,7 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode 
   try {
     const brevoResult = await sendViaBrevo(to, subject, htmlContent);
     if (brevoResult.ok) {
+      await recordEmailSent();
       console.log(`[emailService] Delivered "${subject}" to ${to} via ${brevoResult.via}.`);
       return true;
     }
@@ -278,6 +347,7 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode 
   try {
     const gmailResult = await sendViaGmail(to, subject, htmlContent);
     if (gmailResult.ok) {
+      await recordEmailSent();
       console.log(`[emailService] Delivered "${subject}" to ${to} via ${gmailResult.via}.`);
       return true;
     }
@@ -293,3 +363,4 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode 
 };
 
 module.exports = sendStyledEmail;
+module.exports.getEmailQuotaStatus = getEmailQuotaStatus;

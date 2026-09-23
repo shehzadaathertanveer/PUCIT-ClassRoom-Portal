@@ -673,7 +673,22 @@ const LabroomDetail = () => {
     );
   }
 
-  const activeStudents = (labroom.students || []).filter(s => s && (s._id || s.name));
+  const activeStudents = (labroom.students || [])
+    .filter(s => s && (s._id || s.name))
+    .sort((a, b) => {
+      const prefix = (labroom.sectionPrefix || '').toUpperCase();
+      const ra = String(a.rollNo || '').toUpperCase();
+      const rb = String(b.rollNo || '').toUpperCase();
+      const pa = ra.startsWith(prefix);
+      const pb = rb.startsWith(prefix);
+      if (pa !== pb) return pb ? 0 : -1;
+      if (pa && pb) {
+        const da = parseInt((ra.replace(/\D/g, '') || '').slice(-3), 10) || 99999;
+        const db = parseInt((rb.replace(/\D/g, '') || '').slice(-3), 10) || 99999;
+        return da - db;
+      }
+      return ra.localeCompare(rb);
+    });
   const totalStudentsCount = activeStudents.length;
   const reversedNotices = [...(labroom?.notices || [])].reverse();
   const latestNotice = reversedNotices[0];
@@ -2043,6 +2058,9 @@ const LabroomDetail = () => {
                           }}
                           className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono uppercase"
                         >
+                          {!presetCategories.includes(act.category) && (
+                            <option value={act.category} key={`current-${act.category}`}>{act.category}</option>
+                          )}
                           {presetCategories.map(cat => (
                             <option key={cat} value={cat}>{cat}</option>
                           ))}

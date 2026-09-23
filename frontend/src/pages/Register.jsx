@@ -25,11 +25,24 @@ const Register = () => {
   const [helperText, setHelperText] = useState('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
   const [isErrorState, setIsErrorState] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const [fresherRegistrationEnabled, setFresherRegistrationEnabled] = useState(null);
   
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const fresherBatchCode = (import.meta.env.VITE_FRESHER_BATCH || 'f26').trim().toLowerCase();
+
+  // Load the fresher registration gate. When disabled, students may only
+  // register with full Roll Numbers (e.g. BITF26A004), not bare prefixes.
+  useEffect(() => {
+    API.get('/auth/registration-mode')
+      .then((res) => {
+        const enabled = res.data?.data?.fresherRegistrationEnabled;
+        if (typeof enabled === 'boolean') setFresherRegistrationEnabled(enabled);
+      })
+      .catch(() => setFresherRegistrationEnabled(true));
+  }, []);
 
   // Smart dual-role and precise fresher detection logic
   useEffect(() => {
@@ -53,7 +66,11 @@ const Register = () => {
           // Case 1: Prefix only (e.g. BITF26A) -> Needs Reg No AND Personal Email
           setIsFresherPrefixOnly(true);
           setIsFresherWithRoll(false);
-          setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+          if (fresherRegistrationEnabled === false) {
+            setHelperText(`Fresher prefix-only registration is currently disabled. Please enter your full Roll Number (e.g. BITF26A004) to continue. (${trimmedRoll.toUpperCase()})`);
+          } else {
+            setHelperText(`Fresher section prefix detected (${trimmedRoll.toUpperCase()}). Please enter your University Registration Number & Personal Email.`);
+          }
         } else {
           // Case 2: Full roll number with index (e.g. BITF26A004) -> Needs ONLY Personal Email
           setIsFresherPrefixOnly(false);
@@ -82,7 +99,7 @@ const Register = () => {
       setIsSenior(false);
       setHelperText('Enter your roll number first if you are a student, or enter your email first if you are a teacher.');
     }
-  }, [rollNo, email, fresherBatchCode, isErrorState]);
+  }, [rollNo, email, fresherBatchCode, isErrorState, fresherRegistrationEnabled]);
 
   // Real-time form validation including password matching
   const hasIdentifier = rollNo.trim().length > 0 || email.trim().length > 0;
@@ -93,7 +110,8 @@ const Register = () => {
     fresherCheck = personalNotificationEmail.trim().length > 0;
   }
   const passwordsMatch = password.length > 0 && password === confirmPassword;
-  const isFormValid = hasIdentifier && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch;
+  const isFormValid = hasIdentifier && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch
+    && !(isFresherPrefixOnly && fresherRegistrationEnabled === false);
 
   const handleRegister = async (e) => {
     if (e) {
@@ -238,29 +256,43 @@ const Register = () => {
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Email Address {isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll && <span className="text-orange-300 font-normal lowercase">(auto-configured)</span>}
-            </label>
-            <input 
-              type="email" 
-              value={email} 
-              onChange={(e) => {
-                if (!isEmailDisabled) setEmail(e.target.value);
-                if (isErrorState) setIsErrorState(false);
-              }} 
-              disabled={isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck="false"
-              className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
-                isEmailDisabled && !isFresherPrefixOnly && !isFresherWithRoll 
-                  ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
-                  : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
-              }`} 
-              placeholder="teacher.name@pucit.edu.pk" 
-            />
-          </div>
+          {!isEmailDisabled && (
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+                Email Address
+              </label>
+              <input 
+                type="email" 
+                value={email} 
+                onChange={(e) => {
+                  if (!isEmailDisabled) setEmail(e.target.value);
+                  if (isErrorState) setIsErrorState(false);
+                }} 
+                disabled={isEmailDisabled}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
+                className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
+                  isEmailDisabled
+                    ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
+                    : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
+                }`} 
+                placeholder="teacher.name@pucit.edu.pk" 
+              />
+            </div>
+          )}
+
+          {/* Senior students: official inbox is auto-linked to their roll number */}
+          {isSenior && (
+            <div className="bg-sky-950/20 border border-sky-500/20 p-4 rounded-2xl animate-fadeIn">
+              <p className="text-[11px] text-sky-300 font-bold uppercase tracking-wider mb-1">
+                Official University Email <span className="text-slate-500 font-normal lowercase">(auto-configured)</span>
+              </p>
+              <p className="text-xs sm:text-sm text-sky-100 font-mono break-all">
+                {rollNo.trim().toLowerCase()}@pucit.edu.pk
+              </p>
+            </div>
+          )}
 
           {/* Conditional Freshers Registration Number & Personal Email Fields (Triggered only when section prefix only is typed, e.g. BITF26A) */}
           {isFresherPrefixOnly && (

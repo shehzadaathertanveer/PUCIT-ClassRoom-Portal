@@ -5,6 +5,13 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 
+// Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
+const getRollDigits = (rollNo = '') => {
+  const digits = String(rollNo || '').replace(/\D/g, '');
+  if (!digits) return 99999;
+  return parseInt(digits.slice(-3), 10);
+};
+
 // =============================================================================
 // HELPER: Normalize Lab Target Keys Safely (Mapped to Expanded Lab Schema)
 // =============================================================================
@@ -40,6 +47,38 @@ const getNormalizedLabTargetKey = (rawType = '') => {
   
   // Default fallback
   return 'labTasks';
+};
+
+// Helper: When a lab activity's category is renamed in settings, MOVE its
+// recorded scores to the new schema key instead of wiping the old activity.
+const LAB_ARRAY_KEYS = [
+  'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
+  'presentations', 'finalProject', 'labMids', 'labFinals',
+  'labActivities', 'labBehavior', 'labWorksheets', 'troubleshooting'
+];
+
+const migrateLabActivityMarks = async (labroomId, fromKey, toKey) => {
+  if (!LAB_ARRAY_KEYS.includes(fromKey) || !LAB_ARRAY_KEYS.includes(toKey)) return;
+
+  const markDocs = await LabMark.find({ labroom: labroomId, [fromKey]: { $ne: [] } }).select(`_id ${fromKey} ${toKey}`);
+
+  await Promise.all(markDocs.map(async (doc) => {
+    const items = doc[fromKey] || [];
+    if (!items.length) return;
+
+    const existing = doc[toKey] || [];
+    const existingTitles = new Set(existing.map(i => String(i.title || '').trim().toLowerCase()));
+
+    const toMove = items.filter(i => !existingTitles.has(String(i.title || '').trim().toLowerCase()));
+    if (!toMove.length) {
+      doc[fromKey] = [];
+      return await doc.save();
+    }
+
+    doc[toKey] = [...existing, ...toMove];
+    doc[fromKey] = [];
+    await doc.save();
+  }));
 };
 
 // =============================================================================
@@ -1455,6 +1494,9 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
   const { labName, sectionPrefix, maxCapacity, placeholderTeacherName, sessionalActivities } = req.body;
 
+  const currentLabroom = await Labroom.findOne({ _id: labroomId, isActive: true }).select('sessionalActivities').lean();
+  if (!currentLabroom) return next(new AppError('Active labroom not found!', 404));
+
   const updateData = {};
   if (labName) updateData.labName = labName.trim();
   if (sectionPrefix) updateData.sectionPrefix = sectionPrefix.trim().toUpperCase();
@@ -1464,6 +1506,16 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
       category: a.category.trim(),
       allocatedMarks: Number(a.allocatedMarks) || 0
+    }));
+
+    // Migrate existing scores when a lab activity's type changed (edit-in-place).
+    const oldKeys = (currentLabroom.sessionalActivities || []).map(a => getNormalizedLabTargetKey(a.category));
+    const newKeys = updateData.sessionalActivities.map(a => getNormalizedLabTargetKey(a.category));
+
+    await Promise.all(oldKeys.map((oldKey, idx) => {
+      const newKey = newKeys[idx];
+      if (!newKey || newKey === oldKey) return null;
+      return migrateLabActivityMarks(labroomId, oldKey, newKey);
     }));
   }
 
@@ -1523,7 +1575,7 @@ exports.lookupLabTeacher = catchAsync(async (req, res, next) => {
 exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
 
-  const labroom = await Labroom.findById(labroomId)
+const labroom = await Labroom.findById(labroomId)
     .populate('students', 'name rollNo email personalNotificationEmail')
     .lean();
 
@@ -1533,8 +1585,27 @@ exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
 
   const existingMarks = await LabMark.find({ labroom: labroomId }).lean();
 
+  // Order students by roll number: section-prefix regulars by trailing digits,
+  // then add/drop students alphabetically.
+  const prefix = (labroom.sectionPrefix || '').toUpperCase();
+  const regular = [];
+  const addDrop = [];
+
+  (labroom.students || []).forEach((student) => {
+    const roll = student.rollNo ? student.rollNo.toUpperCase() : '';
+    if (roll.startsWith(prefix)) {
+      regular.push(student);
+    } else {
+      addDrop.push(student);
+    }
+  });
+
+  regular.sort((a, b) => getRollDigits(a.rollNo) - getRollDigits(b.rollNo));
+  addDrop.sort((a, b) => (a.rollNo || '').localeCompare(b.rollNo || ''));
+  const sortedStudents = [...regular, ...addDrop];
+
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
       labroom: {
         _id: labroom._id,
@@ -1555,7 +1626,7 @@ exports.getBulkLabMarkSheet = catchAsync(async (req, res, next) => {
         troubleshooting: labroom.troubleshooting || [],
         sessionalActivities: labroom.sessionalActivities || []
       },
-      students: labroom.students || [],
+      students: sortedStudents,
       existingMarks,
     },
   });

@@ -68,6 +68,11 @@ const Dashboard = () => {
   const [maintMessage, setMaintMessage] = useState(maintenance?.message || 'Portal is undergoing scheduled maintenance.');
   const [togglingMaint, setTogglingMaint] = useState(false);
 
+  // Fresher registration mode + email quota (Admin only)
+  const [fresherMode, setFresherMode] = useState(null);
+  const [emailQuota, setEmailQuota] = useState(null);
+  const [togglingFresherMode, setTogglingFresherMode] = useState(false);
+
   // Edit Profile / Password & Email Verification modal state
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -155,11 +160,18 @@ const Dashboard = () => {
   const fetchAdminData = async () => {
     try {
       setLoadingPending(true);
-      const [pendingRes, analyticsRes, usersRes] = await Promise.all([
+      const [pendingRes, analyticsRes, usersRes, quotaRes, modeRes] = await Promise.all([
         API.get('/auth/admin/pending-teachers').catch(() => null),
         API.get('/auth/admin/analytics').catch(() => null),
-        API.get('/auth/admin/users').catch(() => ({ data: { data: { users: [] } } }))
+        API.get('/auth/admin/users').catch(() => ({ data: { data: { users: [] } } })),
+        API.get('/auth/admin/email-quota').catch(() => null),
+        API.get('/auth/registration-mode').catch(() => null)
       ]);
+
+      const fetchedQuota = quotaRes?.data?.data?.emailQuota;
+      if (fetchedQuota) setEmailQuota(fetchedQuota);
+      const fetchedMode = modeRes?.data?.data?.fresherRegistrationEnabled;
+      if (typeof fetchedMode === 'boolean') setFresherMode(fetchedMode);
 
       const teachers = pendingRes?.data?.data?.teachers || [];
       if (pendingRes?.data?.data?.teachers) {
@@ -192,6 +204,20 @@ const Dashboard = () => {
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  const handleToggleFresherMode = async () => {
+    if (togglingFresherMode) return;
+    setTogglingFresherMode(true);
+    try {
+      const res = await API.post('/auth/admin/registration-mode', { fresherRegistrationEnabled: !fresherMode });
+      const updated = res.data?.data?.fresherRegistrationEnabled;
+      if (typeof updated === 'boolean') setFresherMode(updated);
+    } catch (err) {
+      console.warn('Failed to toggle fresher registration mode:', err?.response?.data?.message || err.message);
+    } finally {
+      setTogglingFresherMode(false);
+    }
+  };
 
   const handleCourseTypeChange = (type) => {
     setNewClassData({
@@ -271,7 +297,7 @@ const Dashboard = () => {
       sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
       maxCapacity: Number(newClassData.maxCapacity) || 40,
       sessionalActivities: labActivities.map(act => ({
-        category: act.category === 'Other' ? (act.customCategory.trim() || 'Custom Lab Activity') : act.category,
+        category: act.category,
         allocatedMarks: Number(act.allocatedMarks) || 0
       }))
     };
@@ -681,6 +707,17 @@ const Dashboard = () => {
               >
                 Maint: {maintenance?.isUnderMaintenance ? 'ON' : 'OFF'}
               </button>
+              <button
+                onClick={handleToggleFresherMode}
+                disabled={togglingFresherMode || fresherMode === null}
+                className={`px-3.5 py-2.5 border text-xs font-extrabold uppercase tracking-wide rounded-xl transition-all cursor-pointer flex-grow sm:flex-grow-0 text-center shadow disabled:opacity-50 disabled:cursor-not-allowed ${
+                  fresherMode
+                    ? 'bg-sky-950/80 border-sky-500/40 text-sky-300'
+                    : 'bg-slate-800 border-slate-600 text-slate-400'
+                }`}
+              >
+                Fresher Reg: {fresherMode === null ? '…' : fresherMode ? 'ON' : 'OFF'}
+              </button>
             </>
           )}
 
@@ -752,6 +789,35 @@ const Dashboard = () => {
                 <p className="text-[9px] text-emerald-400 font-bold uppercase">Review List →</p>
               </div>
             </div>
+
+            {emailQuota && (
+              <div className="bg-[#130910]/90 border border-teal-500/30 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-3 text-center sm:text-left">
+                  <span className="text-lg">✉️</span>
+                  <div>
+                    <p className="text-[10px] font-mono uppercase text-slate-400">Daily Email Quota (Brevo)</p>
+                    <p className="text-xs text-slate-300 leading-snug">
+                      <span className={`font-black ${emailQuota.sent >= emailQuota.dailyQuota ? 'text-red-400' : emailQuota.sent >= emailQuota.importantThreshold ? 'text-amber-400' : 'text-teal-300'}`}>{emailQuota.sent}</span>
+                      <span className="text-slate-500"> / {emailQuota.dailyQuota}</span> sent in last 24h
+                      {emailQuota.sent >= emailQuota.dailyQuota
+                        ? <span className="text-red-400 font-bold"> • Quota reached — all mail paused until reset</span>
+                        : emailQuota.importantOnly
+                        ? <span className="text-amber-400 font-bold"> • Important emails only (OTP / critical)</span>
+                        : <span className="text-teal-400 font-bold"> • All mail allowed</span>}
+                    </p>
+                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">
+                      Resets {emailQuota.resetAt ? new Date(emailQuota.resetAt).toLocaleTimeString() : 'in 24h'} • {Math.max(emailQuota.remaining, 0)} remaining
+                    </p>
+                  </div>
+                </div>
+                <div className="w-full sm:w-48 h-2 bg-[#080507] rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className={`h-full transition-all ${emailQuota.sent >= emailQuota.dailyQuota ? 'bg-red-500' : emailQuota.sent >= emailQuota.importantThreshold ? 'bg-amber-500' : 'bg-teal-500'}`}
+                    style={{ width: `${Math.min(100, Math.round((emailQuota.sent / emailQuota.dailyQuota) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1879,7 +1945,6 @@ const Dashboard = () => {
                             <option value="Lab Behavior">Lab Behavior</option>
                             <option value="Lab Worksheets">Lab Worksheets</option>
                             <option value="Troubleshooting">Troubleshooting</option>
-                            <option value="Other">Other (Custom)</option>
                           </select>
                           <input 
                             type="number" 
@@ -1900,16 +1965,6 @@ const Dashboard = () => {
                             </button>
                           )}
                         </div>
-                        {act.category === 'Other' && (
-                          <input 
-                            type="text" 
-                            required
-                            placeholder="Enter custom lab activity name"
-                            value={act.customCategory}
-                            onChange={(e) => handleActivityChange(idx, 'customCategory', e.target.value, 'LAB')}
-                            className="w-full px-3 py-1.5 bg-[#080507] border border-blue-500/40 rounded-xl text-white text-xs"
-                          />
-                        )}
                       </div>
                     ))}
                   </div>
