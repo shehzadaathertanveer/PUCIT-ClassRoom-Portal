@@ -639,13 +639,16 @@ const Dashboard = () => {
 
   const assignedUserIds = new Set();
   const classEnrolledStudentIds = new Set();
+  const labEnrolledStudentIds = new Set();
   classroomsList.forEach(c => {
     const isClass = c.courseType === 'CLASSROOM';
+    const isLab = c.courseType === 'LAB';
     (c.students || []).forEach(s => {
       const id = s?._id || s;
       if (!id) return;
       assignedUserIds.add(String(id));
       if (isClass) classEnrolledStudentIds.add(String(id));
+      if (isLab) labEnrolledStudentIds.add(String(id));
     });
     (c.tas || []).forEach(t => {
       const id = t?._id || t;
@@ -658,13 +661,13 @@ const Dashboard = () => {
   });
 
   const unassignedUsersCount = detailedAnalyticsData.users.filter(u => !assignedUserIds.has(String(u._id))).length;
-  const unassignedStudentsCount = detailedAnalyticsData.users.filter(u => u.role === 'STUDENT' && !classEnrolledStudentIds.has(String(u._id))).length;
+  const unassignedStudentsCount = detailedAnalyticsData.users.filter(u => u.role === 'STUDENT' && !classEnrolledStudentIds.has(String(u._id)) && !labEnrolledStudentIds.has(String(u._id))).length;
   const assignmentFilterLabel = userAssignmentFilter === 'UNASSIGNED_USERS' ? 'Unassigned Users' : userAssignmentFilter === 'UNASSIGNED_STUDENTS' ? 'Unassigned Students' : 'ALL';
 
   const filteredAnalyticsUsers = detailedAnalyticsData.users.filter(u => {
     if (userRoleFilter !== 'ALL' && u.role !== userRoleFilter) return false;
     if (userAssignmentFilter === 'UNASSIGNED_USERS' && assignedUserIds.has(String(u._id))) return false;
-    if (userAssignmentFilter === 'UNASSIGNED_STUDENTS' && (u.role !== 'STUDENT' || classEnrolledStudentIds.has(String(u._id)))) return false;
+    if (userAssignmentFilter === 'UNASSIGNED_STUDENTS' && (u.role !== 'STUDENT' || classEnrolledStudentIds.has(String(u._id)) || labEnrolledStudentIds.has(String(u._id)))) return false;
     if (userSearchQuery.trim()) {
       const q = userSearchQuery.trim().toLowerCase();
       return (u.name || '').toLowerCase().includes(q)
