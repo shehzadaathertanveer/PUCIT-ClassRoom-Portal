@@ -119,6 +119,11 @@ exports.createLabroom = catchAsync(async (req, res, next) => {
   const cleanPrefix = sectionPrefix.trim().toUpperCase();
   const credits = creditHours ? Number(creditHours) : 1;
 
+  const duplicateLab = await Labroom.findOne({ labName: labName.trim(), sectionPrefix: cleanPrefix, isActive: true }).select('_id');
+  if (duplicateLab) {
+    return next(new AppError(`A lab room named "${labName.trim()}" already exists for section ${cleanPrefix}. Re-name it or deactivate the old one first.`, 400));
+  }
+
   let finalSessionalActivities = [
     { category: 'Lab Tasks', allocatedMarks: 50 },
     { category: 'Vivas', allocatedMarks: 30 },
