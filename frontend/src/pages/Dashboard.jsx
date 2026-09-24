@@ -14,6 +14,7 @@ const Dashboard = () => {
   const [selectedAnalyticsTab, setSelectedAnalyticsTab] = useState('users'); // 'users' | 'classrooms' | 'labrooms' | 'pending'
   const [userRoleFilter, setUserRoleFilter] = useState('ALL'); // 'ALL' | 'STUDENT' | 'TEACHER' | 'TA' | 'ADMIN'
   const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userAssignmentFilter, setUserAssignmentFilter] = useState('ALL'); // 'ALL' | 'UNASSIGNED_USERS' | 'UNASSIGNED_STUDENTS'
   const [detailedAnalyticsData, setDetailedAnalyticsData] = useState({ users: [], teachers: [] });
   const [viewingUser, setViewingUser] = useState(null);
   const [isViewUserModalOpen, setIsViewUserModalOpen] = useState(false);
@@ -636,8 +637,34 @@ const Dashboard = () => {
   const createdLabrooms = labroomsOnly.filter(l => (l.teacher?._id || l.teacher) === user?._id);
   const assignedTeacherCourses = classroomsList.filter(c => (c.teacher?._id || c.teacher) === user?._id || c.tas?.some(ta => (ta._id || ta) === user?._id));
 
+  const assignedUserIds = new Set();
+  const classEnrolledStudentIds = new Set();
+  classroomsList.forEach(c => {
+    const isClass = c.courseType === 'CLASSROOM';
+    (c.students || []).forEach(s => {
+      const id = s?._id || s;
+      if (!id) return;
+      assignedUserIds.add(String(id));
+      if (isClass) classEnrolledStudentIds.add(String(id));
+    });
+    (c.tas || []).forEach(t => {
+      const id = t?._id || t;
+      if (id) assignedUserIds.add(String(id));
+    });
+    const tid = c.teacher?._id || c.teacher;
+    if (tid) assignedUserIds.add(String(tid));
+    const cid = c.createdBy?._id || c.createdBy;
+    if (cid) assignedUserIds.add(String(cid));
+  });
+
+  const unassignedUsersCount = detailedAnalyticsData.users.filter(u => !assignedUserIds.has(String(u._id))).length;
+  const unassignedStudentsCount = detailedAnalyticsData.users.filter(u => u.role === 'STUDENT' && !classEnrolledStudentIds.has(String(u._id))).length;
+  const assignmentFilterLabel = userAssignmentFilter === 'UNASSIGNED_USERS' ? 'Unassigned Users' : userAssignmentFilter === 'UNASSIGNED_STUDENTS' ? 'Unassigned Students' : 'ALL';
+
   const filteredAnalyticsUsers = detailedAnalyticsData.users.filter(u => {
     if (userRoleFilter !== 'ALL' && u.role !== userRoleFilter) return false;
+    if (userAssignmentFilter === 'UNASSIGNED_USERS' && assignedUserIds.has(String(u._id))) return false;
+    if (userAssignmentFilter === 'UNASSIGNED_STUDENTS' && (u.role !== 'STUDENT' || classEnrolledStudentIds.has(String(u._id)))) return false;
     if (userSearchQuery.trim()) {
       const q = userSearchQuery.trim().toLowerCase();
       return (u.name || '').toLowerCase().includes(q)
@@ -1199,7 +1226,7 @@ const Dashboard = () => {
               </button>
             </div>
 
-            {selectedAnalyticsTab === 'users' && (
+{selectedAnalyticsTab === 'users' && (
               <div className="flex flex-wrap items-center gap-1.5 bg-[#080507] p-2 rounded-2xl border border-slate-800">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Filter Role:</span>
                 {['ALL', 'STUDENT', 'TEACHER', 'TA', 'ADMIN'].map(role => (
@@ -1207,12 +1234,35 @@ const Dashboard = () => {
                     key={role}
                     onClick={() => setUserRoleFilter(role)}
                     className={`px-3 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
-                      userRoleFilter === role 
-                        ? 'bg-purple-500 text-black shadow-sm' 
+                      userRoleFilter === role
+                        ? 'bg-purple-500 text-black shadow-sm'
                         : 'bg-[#130910] text-slate-300 hover:bg-slate-800'
                     }`}
                   >
                     {role}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {selectedAnalyticsTab === 'users' && (
+              <div className="flex flex-wrap items-center gap-1.5 bg-[#080507] p-2 rounded-2xl border border-slate-800">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">Assignment:</span>
+                {[
+                  { key: 'ALL', label: 'ALL', count: detailedAnalyticsData.users.length },
+                  { key: 'UNASSIGNED_USERS', label: 'Unassigned Users', count: unassignedUsersCount },
+                  { key: 'UNASSIGNED_STUDENTS', label: 'Unassigned Students', count: unassignedStudentsCount }
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setUserAssignmentFilter(opt.key)}
+                    className={`px-3 py-1 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer ${
+                      userAssignmentFilter === opt.key
+                        ? 'bg-purple-500 text-black shadow-sm'
+                        : 'bg-[#130910] text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {opt.label} ({opt.count})
                   </button>
                 ))}
               </div>
@@ -1239,7 +1289,7 @@ const Dashboard = () => {
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
               {selectedAnalyticsTab === 'users' && (
                 filteredAnalyticsUsers.length === 0 ? (
-                  <p className="text-slate-400 text-xs text-center py-6 italic">No user records found for filter: {userRoleFilter}</p>
+                  <p className="text-slate-400 text-xs text-center py-6 italic">No user records found for filter: {userRoleFilter}{userAssignmentFilter !== 'ALL' ? ` + ${assignmentFilterLabel}` : ''}</p>
                 ) : (
                   filteredAnalyticsUsers.map((u, idx) => (
                     <div key={idx} className="bg-[#080507] border border-slate-800 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

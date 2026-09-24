@@ -90,6 +90,10 @@ const LabroomDetail = () => {
   const [addingStudent, setAddingStudent] = useState(false);
   const [addStudentError, setAddStudentError] = useState('');
 
+  // Add/Drop single-student lookup preview (mirrors ClassroomDetail addDrop flow)
+  const [lookupTargetStudent, setLookupTargetStudent] = useState(null);
+  const [lookingUpStudent, setLookingUpStudent] = useState(false);
+
   // Smart Detect / Class Roster lookup state
   const [classDirectoryStudents, setClassDirectoryStudents] = useState([]);
   const [loadingDirectory, setLoadingDirectory] = useState(false);
@@ -425,6 +429,24 @@ const LabroomDetail = () => {
     }
   };
 
+  const handleLookupStudentForAddDrop = async (e) => {
+    e.preventDefault();
+    if (!addDropInput.trim()) return;
+
+    setLookingUpStudent(true);
+    setLookupTargetStudent(null);
+    setAddStudentError('');
+
+    try {
+      const res = await API.post(`/labrooms/${labroomId}/lookup-student`, { rollInput: addDropInput.trim() });
+      setLookupTargetStudent(res.data?.data?.student || res.data?.student);
+    } catch (err) {
+      setAddStudentError(err.response?.data?.message || 'Student record not found.');
+    } finally {
+      setLookingUpStudent(false);
+    }
+  };
+
   const handleAddStudentSubmit = async (e) => {
     e.preventDefault();
     setAddingStudent(true);
@@ -452,10 +474,9 @@ const LabroomDetail = () => {
         await API.post(`/labrooms/add-bulk-range`, { labroomId, startRoll: start, endRoll: end });
         showToast(`Bulk range from ${start} to ${end} enrolled!`);
       } else if (addModeType === 'batch') {
-        const rolls = addDropInput.split(/[\n,]+/).map(r => r.trim()).filter(Boolean);
-        if (rolls.length === 0) throw new Error('Enter at least one roll number.');
-        await API.post(`/labrooms/add-drop-seniors`, { labroomId, rollNumbers: rolls });
-        showToast(`Successfully enrolled ${rolls.length} students!`);
+        if (!lookupTargetStudent) throw new Error('Please lookup and verify the student first.');
+        await API.post(`/labrooms/add-student-by-roll`, { labroomId, rollInput: lookupTargetStudent.rollNo || addDropInput.trim() });
+        showToast(`Student ${lookupTargetStudent.name} enrolled successfully!`);
       } else if (addModeType === 'smartDetect') {
         if (selectedDirectoryRolls.length === 0) throw new Error('Please select at least one student from the directory.');
         const selectedIds = classDirectoryStudents
@@ -470,6 +491,7 @@ const LabroomDetail = () => {
       setBulkStart('');
       setBulkEnd('');
       setAddDropInput('');
+      setLookupTargetStudent(null);
       setSelectedDirectoryRolls([]);
       fetchLabroomData();
     } catch (err) {
@@ -1748,7 +1770,7 @@ const LabroomDetail = () => {
                 <h3 className="text-base font-extrabold text-white uppercase">Enroll Students</h3>
                 <p className="text-[11px] text-slate-400">Choose your preferred quick-entry method for section <strong className="text-blue-400 font-mono">{labroom?.sectionPrefix}</strong></p>
               </div>
-              <button onClick={() => setIsAddStudentModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
             
             {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
@@ -1756,7 +1778,7 @@ const LabroomDetail = () => {
             <div className="grid grid-cols-4 gap-1.5">
               <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Shorthand</button>
               <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
-              <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Full Roll</button>
+              <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Add/Drop</button>
               <button type="button" onClick={() => setAddModeType('smartDetect')} className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Add<span className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-black/25 text-black' : 'bg-slate-700 text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span></button>
             </div>
 
@@ -1797,17 +1819,51 @@ const LabroomDetail = () => {
               )}
 
               {addModeType === 'batch' && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Full Roll Numbers / Add-Drop List</label>
-                  <textarea 
-                    rows="4" 
-                    required 
-                    placeholder="BITF26A001, BITF26A002, BITF26A047" 
-                    value={addDropInput} 
-                    onChange={(e) => setAddDropInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono resize-none focus:ring-1 focus:ring-blue-400" 
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">Accepts full roll numbers or registration numbers separated by commas or newlines.</p>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase text-slate-400">Full Roll Number or Registration No</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="e.g. BITF26A047 or 2023123" 
+                        value={addDropInput} 
+                        onChange={(e) => { setAddDropInput(e.target.value); setLookupTargetStudent(null); }} 
+                        className="flex-1 px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={handleLookupStudentForAddDrop} 
+                        disabled={lookingUpStudent || !addDropInput.trim()}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/40 rounded-xl text-xs font-bold uppercase cursor-pointer disabled:opacity-50"
+                      >
+                        {lookingUpStudent ? 'Searching...' : 'Lookup'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500">Enter the student's full roll number or registration number, then Lookup. Verify their info and status before confirming enrollment.</p>
+                  </div>
+
+                  {lookupTargetStudent && (
+                    <div className="bg-[#080507] border border-emerald-500/40 p-4 rounded-2xl space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Student Name:</span>
+                        <strong className="text-white">{lookupTargetStudent.name}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Email:</span>
+                        <strong className="text-blue-300">{lookupTargetStudent.personalNotificationEmail || lookupTargetStudent.email || 'N/A'}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Roll / Reg No:</span>
+                        <strong className="font-mono text-cyan-400">{lookupTargetStudent.rollNo}{lookupTargetStudent.registrationNo && lookupTargetStudent.registrationNo !== 'N/A' ? ` / ${lookupTargetStudent.registrationNo}` : ''}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 uppercase">Status:</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${lookupTargetStudent.isAlreadyEnrolled ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-300'}`}>
+                          {lookupTargetStudent.isAlreadyEnrolled ? 'Already Enrolled' : lookupTargetStudent.isAddDrop ? 'Add/Drop Senior' : 'Regular Prefix Match'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1931,9 +1987,9 @@ const LabroomDetail = () => {
               )}
 
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setIsAddStudentModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" disabled={addingStudent} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
-                  {addingStudent ? 'Processing...' : 'Enroll Students'}
+                <button type="button" onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
+                <button type="submit" disabled={addingStudent || (addModeType === 'batch' && !lookupTargetStudent)} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                  {addingStudent ? 'Processing...' : (addModeType === 'batch' ? 'Confirm Enrollment' : 'Enroll Students')}
                 </button>
               </div>
             </form>
