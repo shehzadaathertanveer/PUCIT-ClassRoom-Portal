@@ -5,27 +5,90 @@ const PlatformSetting = require("../models/platformSettingSchema");
 // ---------------------------------------------------------------------------
 // Daily email quota accounting (fixed calendar-day window).
 //
-//   DAILY_QUOTA         total emails allowed per calendar day (default 300).
-//   IMPORTANT_THRESHOLD once this many emails were sent, ONLY important mail
-//                       (OTP codes, account termination, teacher decisions)
-//                       is delivered; routine notifications are silently
-//                       dropped for the rest of the day. (default 220)
-//   OTP_RESERVE_THRESHOLD once this many emails were sent, the remaining quota
-//                       is RESERVED for OTP flows only (registration,
-//                       forgot-password, official-inbox activation). Admin
-//                       notices such as account-termination / teacher-decision
-//                       emails are dropped so they can never exhaust the day's
-//                       allowance before users can register or recover
-//                       passwords. (default 250)
+//   dailyQuotaHardCap   total emails allowed per calendar day (default 300).
+//                       Once reached, every email is refused and
+//                       sendStyledEmail returns false (never a silent success).
 //
-// The counter lives in the PlatformSetting collection so restarts do not
-// reset it. The window auto-resets every day at EMAIL_QUOTA_RESET_TIME
-// (default 05:11) in EMAIL_QUOTA_RESET_TIMEZONE (default Asia/Karachi), even if
-// no email is sent that day.
+//   otpReserveThreshold once this many emails were sent **today**, only OTP
+//                       mail (registration, password recovery, inbox
+//                       activation) is sent — routine notifications are
+//                       dropped loudly (returns false). This guarantees users
+//                       can always register/recover a password even near the
+//                       daily ceiling. Default 250.
+//
+//   importantThreshold  optional middle layer: above it, routine notifications
+//                       are dropped but critical + important admin mail still
+//                       goes. Default = dailyQuotaHardCap (DISABLED).
+//
+// All three can be changed LIVE by an ADMIN from the dashboard. They are
+// stored in PlatformSetting("emailQuotaConfig"); the EMAIL_* env vars below act
+// only as fallback defaults. The daily counter lives in PlatformSetting
+// ("emailQuota") so restarts do not reset it, and it auto-resets at
+// EMAIL_QUOTA_RESET_TIME (default 05:11) in EMAIL_QUOTA_RESET_TIMEZONE (default
+// Asia/Karachi) even if no email is sent that day.
 // ---------------------------------------------------------------------------
-const DAILY_QUOTA = Number(process.env.EMAIL_DAILY_QUOTA) || 300;
-const IMPORTANT_THRESHOLD = Number(process.env.EMAIL_IMPORTANT_THRESHOLD) || 220;
-const OTP_RESERVE_THRESHOLD = Number(process.env.EMAIL_OTP_RESERVE) || 250;
+
+// Coerce a value into a non-negative integer, or null if invalid/unset.
+const asQuotaInt = (x) => {
+  const n = Number(x);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+};
+
+// Effective quota settings (admin-overridable from the dashboard).
+const getEmailQuotaConfig = async () => {
+  const doc = await PlatformSetting.findOne({ key: "emailQuotaConfig" }).lean();
+  const v = doc?.value || {};
+  const envDaily = asQuotaInt(process.env.EMAIL_DAILY_QUOTA) ?? 300;
+  const envReserve = asQuotaInt(process.env.EMAIL_OTP_RESERVE);
+  const envImportant = asQuotaInt(process.env.EMAIL_IMPORTANT_THRESHOLD);
+
+  const dailyQuota = asQuotaInt(v.dailyQuota) ?? envDaily;
+  const otpReserve = asQuotaInt(v.otpReserveThreshold) ?? (envReserve !== null ? envReserve : 250);
+  const important = asQuotaInt(v.importantThreshold) ?? (envImportant !== null ? envImportant : dailyQuota);
+
+  const safeDaily = Math.max(1, dailyQuota);
+  return {
+    dailyQuota: safeDaily,
+    otpReserveThreshold: Math.min(Math.max(1, otpReserve), safeDaily),
+    importantThreshold: Math.min(Math.max(1, important), safeDaily),
+  };
+};
+
+// Persist admin changes to the quota settings and return the fresh status.
+const updateEmailQuotaConfig = async (fields = {}) => {
+  const daily = asQuotaInt(fields.dailyQuota);
+  const reserve = asQuotaInt(fields.otpReserveThreshold);
+  const important = asQuotaInt(fields.importantThreshold);
+
+  const cleaned = {};
+  if (daily !== null) cleaned.dailyQuota = daily;
+  if (reserve !== null) cleaned.otpReserveThreshold = reserve;
+  if (important !== null) cleaned.importantThreshold = important;
+  if (Object.keys(cleaned).length === 0) {
+    throw new Error("Provide at least one valid quota setting (numbers only).");
+  }
+
+  const existing = await PlatformSetting.findOne({ key: "emailQuotaConfig" }).lean();
+  await PlatformSetting.updateOne(
+    { key: "emailQuotaConfig" },
+    { $set: { value: { ...(existing?.value || {}), ...cleaned } } },
+    { upsert: true }
+  );
+  return getEmailQuotaStatus();
+};
+
+// Admin shortcut: zero the daily counter immediately (useful if quota was
+// consumed by notifications and OTP capacity is needed before 05:11).
+const resetEmailQuotaCounter = async () => {
+  const now = Date.now();
+  await PlatformSetting.updateOne(
+    { key: "emailQuota" },
+    { $set: { value: { sent: 0, startedAt: now, resetAt: getNextResetAt(now) } } },
+    { upsert: true }
+  );
+  return getEmailQuotaStatus();
+};
+
 const RESET_TIME = (process.env.EMAIL_QUOTA_RESET_TIME || "05:11").trim();
 const RESET_TIMEZONE = process.env.EMAIL_QUOTA_RESET_TIMEZONE || "Asia/Karachi";
 const [RESET_HOUR, RESET_MINUTE] = RESET_TIME.split(":").map(Number);
@@ -109,16 +172,16 @@ const recordEmailSent = async () => {
 };
 
 const getEmailQuotaStatus = async () => {
-  const state = await getEmailQuotaState();
-  const remaining = Math.max(DAILY_QUOTA - state.sent, 0);
+  const [state, config] = await Promise.all([getEmailQuotaState(), getEmailQuotaConfig()]);
+  const remaining = Math.max(config.dailyQuota - state.sent, 0);
   return {
     sent: state.sent,
-    dailyQuota: DAILY_QUOTA,
-    importantThreshold: IMPORTANT_THRESHOLD,
-    otpReserveThreshold: OTP_RESERVE_THRESHOLD,
+    dailyQuota: config.dailyQuota,
+    importantThreshold: config.importantThreshold,
+    otpReserveThreshold: config.otpReserveThreshold,
     remaining,
-    importantOnly: state.sent >= IMPORTANT_THRESHOLD,
-    otpOnly: state.sent >= OTP_RESERVE_THRESHOLD,
+    importantOnly: state.sent >= config.importantThreshold,
+    otpOnly: state.sent >= config.otpReserveThreshold,
     resetAt: new Date(state.resetAt).toISOString(),
   };
 };
@@ -376,21 +439,25 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode,
   if (!to) return false;
 
   const isImportant = importance === "important";
-  const { sent } = await getEmailQuotaState();
+  const [{ sent }, config] = await Promise.all([getEmailQuotaState(), getEmailQuotaConfig()]);
 
-  if (sent >= DAILY_QUOTA) {
-    console.log(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${DAILY_QUOTA}). Blocked "${subject}" -> ${to}.`);
+  if (sent >= config.dailyQuota) {
+    console.error(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${config.dailyQuota}). Blocked "${subject}" -> ${to}.`);
     return false;
   }
 
-  if (!critical && sent >= OTP_RESERVE_THRESHOLD) {
-    console.log(`[emailService] Quota ${sent}/${DAILY_QUOTA} past OTP reserve (${OTP_RESERVE_THRESHOLD}); dropped non-OTP email "${subject}" -> ${to}.`);
-    return true;
+  // OTP reserve layer: past the threshold only critical OTP mail is sent, so
+  // registrations / password recovery keep working near the daily ceiling. A
+  // dropped email NEVER returns true: callers must not report success for an
+  // email that was never sent.
+  if (!critical && config.otpReserveThreshold < config.dailyQuota && sent >= config.otpReserveThreshold) {
+    console.error(`[emailService] Quota ${sent}/${config.dailyQuota} past OTP reserve (${config.otpReserveThreshold}); DROPPED non-OTP email "${subject}" -> ${to}.`);
+    return false;
   }
 
-  if (!isImportant && sent >= IMPORTANT_THRESHOLD) {
-    console.log(`[emailService] Quota ${sent}/${DAILY_QUOTA} hit important-reserve (${IMPORTANT_THRESHOLD}); dropped routine notification "${subject}" -> ${to}.`);
-    return true;
+  if (!isImportant && config.importantThreshold < config.dailyQuota && sent >= config.importantThreshold) {
+    console.error(`[emailService] Quota ${sent}/${config.dailyQuota} hit important-reserve (${config.importantThreshold}); DROPPED routine notification "${subject}" -> ${to}.`);
+    return false;
   }
 
   const htmlContent = buildHtml({ subject, title, bodyText, details, otpCode });
@@ -436,3 +503,5 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode,
 
 module.exports = sendStyledEmail;
 module.exports.getEmailQuotaStatus = getEmailQuotaStatus;
+module.exports.updateEmailQuotaConfig = updateEmailQuotaConfig;
+module.exports.resetEmailQuotaCounter = resetEmailQuotaCounter;

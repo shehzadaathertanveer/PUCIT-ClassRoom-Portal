@@ -547,11 +547,36 @@ exports.updateLabroomTAs = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(targetLabId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  const mergedTaIds = Array.from(new Set([...(labroom.tas || []).map(id => id.toString()), ...cleanTaIds]));
+  const existingTaSet = new Set((labroom.tas || []).map((id) => id.toString()));
+  const newlyAddedIds = cleanTaIds.filter((id) => !existingTaSet.has(id));
+
+  const mergedTaIds = Array.from(new Set([...existingTaSet, ...cleanTaIds]));
   labroom.tas = mergedTaIds;
   await labroom.save();
 
   await labroom.populate('tas', 'name rollNo email personalNotificationEmail');
+
+  if (newlyAddedIds.length > 0) {
+    const newTas = await User.find({ _id: { $in: newlyAddedIds } }).select('name email personalNotificationEmail');
+    await Promise.all(
+      newTas.map(async (ta) => {
+        const taEmail = ta.personalNotificationEmail || ta.email;
+        if (taEmail && !taEmail.includes('@temp.pucit.edu.pk')) {
+          await sendStyledEmail({
+            to: taEmail,
+            subject: `Assigned as Lab TA for ${labroom.labName}`,
+            title: `Lab TA Assignment: ${labroom.labName}`,
+            bodyText: `You have been officially assigned as a Teaching Assistant for Lab <strong>${labroom.labName} (${labroom.sectionPrefix})</strong>.`,
+            details: [
+              { label: 'Credit Hours', value: labroom.creditHours },
+              { label: 'Instructor', value: labroom.teacher?.name || labroom.placeholderTeacherName },
+              { label: 'Assigned By', value: `${req.user.name} (${req.user.role})` }
+            ]
+          });
+        }
+      })
+    );
+  }
 
   res.status(200).json({
     status: 'success',

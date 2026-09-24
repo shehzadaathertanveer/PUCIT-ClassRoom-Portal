@@ -9,10 +9,12 @@ process.on('uncaughtException', (err) => {
 
 const path = require('path');
 
-// Load local .env file ONLY if not in production (Vercel uses its own dashboard env vars)
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: path.join(__dirname, 'config/config.env') });
-}
+// Load config/config.env as DEFAULT values in every environment (override:false
+// means real process env vars always win). Previously the file was skipped when
+// NODE_ENV=production — e.g. on Render — so stale dashboard EMAIL_* values were
+// used silently and delivery broke. Now the current config.env always backs the
+// SMTP credentials, quota settings, and connection strings.
+dotenv.config({ path: path.join(__dirname, 'config/config.env'), override: false });
 
 const app = require('./app');
 const connectDB = require('./config/db');

@@ -53,10 +53,13 @@ router.post('/admin/fix-student-email-integrity', restrictTo('ADMIN'), authContr
 router.post('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
 router.patch('/admin/maintenance', restrictTo('ADMIN'), authController.toggleMaintenanceMode);
 
-// Admin: fresher prefix registration toggle + daily email quota status
+// Admin: fresher prefix registration toggle + daily email quota status/control
 router.post('/admin/registration-mode', restrictTo('ADMIN'), authController.toggleRegistrationMode);
 router.patch('/admin/registration-mode', restrictTo('ADMIN'), authController.toggleRegistrationMode);
 router.get('/admin/email-quota', restrictTo('ADMIN'), authController.getEmailQuota);
+router.post('/admin/email-quota', restrictTo('ADMIN'), authController.updateEmailQuota);
+router.patch('/admin/email-quota', restrictTo('ADMIN'), authController.updateEmailQuota);
+router.post('/admin/email-quota/reset', restrictTo('ADMIN'), authController.resetEmailQuota);
 
 // =============================================================================
 // ADMIN TEACHER APPROVAL & REJECTION ROUTES (Admin Only)

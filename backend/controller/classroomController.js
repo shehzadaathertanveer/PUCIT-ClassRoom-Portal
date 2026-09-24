@@ -522,11 +522,34 @@ exports.updateClassroomTAs = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findOne({ _id: targetClassId, isActive: true });
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
 
-  const mergedTaIds = Array.from(new Set([...(classroom.tas || []).map(id => id.toString()), ...cleanTaIds]));
+  const existingTaSet = new Set((classroom.tas || []).map((id) => id.toString()));
+  const newlyAddedIds = cleanTaIds.filter((id) => !existingTaSet.has(id));
+
+  const mergedTaIds = Array.from(new Set([...existingTaSet, ...cleanTaIds]));
   classroom.tas = mergedTaIds;
   await classroom.save();
 
   await classroom.populate('tas', 'name rollNo email personalNotificationEmail');
+
+  if (newlyAddedIds.length > 0) {
+    const newTas = await User.find({ _id: { $in: newlyAddedIds } }).select('name email personalNotificationEmail');
+    await Promise.all(
+      newTas.map(async (ta) => {
+        const taEmail = ta.personalNotificationEmail || ta.email;
+        if (taEmail && !taEmail.includes('@temp.pucit.edu.pk')) {
+          await sendStyledEmail({
+            to: taEmail,
+            subject: `Assigned as TA for ${classroom.className}`,
+            title: `TA Assignment: ${classroom.className}`,
+            bodyText: `You have been officially assigned as a Teaching Assistant for classroom <strong>${classroom.className} (${classroom.sectionPrefix})</strong>.`,
+            details: [
+              { label: 'Assigned By', value: `${req.user.name} (${req.user.role})` }
+            ]
+          });
+        }
+      })
+    );
+  }
 
   res.status(200).json({
     status: 'success',

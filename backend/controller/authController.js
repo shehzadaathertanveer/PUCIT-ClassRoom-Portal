@@ -13,7 +13,7 @@ const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
 const sendStyledEmail = require("../utils/emailService");
-const { getEmailQuotaStatus } = require("../utils/emailService");
+const { getEmailQuotaStatus, updateEmailQuotaConfig, resetEmailQuotaCounter } = require("../utils/emailService");
 
 // In-memory maintenance flag object
 let systemMaintenance = {
@@ -204,6 +204,38 @@ exports.toggleRegistrationMode = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.getEmailQuota = catchAsync(async (req, res, next) => {
   const emailQuota = await getEmailQuotaStatus();
+
+  res.status(200).json({
+    status: "success",
+    data: { emailQuota }
+  });
+});
+
+// =============================================================================
+// EMAIL QUOTA CONFIG (Admin — set the daily hard cap and OTP-only reserve live)
+// =============================================================================
+exports.updateEmailQuota = catchAsync(async (req, res, next) => {
+  const { dailyQuota, otpReserveThreshold, importantThreshold } = req.body;
+
+  let emailQuota;
+  try {
+    emailQuota = await updateEmailQuotaConfig({ dailyQuota, otpReserveThreshold, importantThreshold });
+  } catch (err) {
+    return next(new AppError(err.message, 400));
+  }
+
+  res.status(200).json({
+    status: "success",
+    data: { emailQuota }
+  });
+});
+
+// =============================================================================
+// EMAIL QUOTA RESET (Admin — zero the daily counter immediately, e.g. when OTPs
+// are needed before 05:11; count still resumes for the rest of the day)
+// =============================================================================
+exports.resetEmailQuota = catchAsync(async (req, res, next) => {
+  const emailQuota = await resetEmailQuotaCounter();
 
   res.status(200).json({
     status: "success",

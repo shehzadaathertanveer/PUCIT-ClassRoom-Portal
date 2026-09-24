@@ -73,6 +73,11 @@ const Dashboard = () => {
   const [emailQuota, setEmailQuota] = useState(null);
   const [togglingFresherMode, setTogglingFresherMode] = useState(false);
 
+  // Email quota editor (Admin only): daily hard cap + OTP-only reserve
+  const [quotaDraft, setQuotaDraft] = useState({ dailyQuota: '', otpReserveThreshold: '' });
+  const [savingQuota, setSavingQuota] = useState(false);
+  const [quotaSaveMsg, setQuotaSaveMsg] = useState('');
+
   // Student email/roll integrity repair (Admin only)
   const [repairingStudents, setRepairingStudents] = useState(false);
   const [repairMessage, setRepairMessage] = useState('');
@@ -173,7 +178,10 @@ const Dashboard = () => {
       ]);
 
       const fetchedQuota = quotaRes?.data?.data?.emailQuota;
-      if (fetchedQuota) setEmailQuota(fetchedQuota);
+      if (fetchedQuota) {
+        setEmailQuota(fetchedQuota);
+        setQuotaDraft({ dailyQuota: String(fetchedQuota.dailyQuota), otpReserveThreshold: String(fetchedQuota.otpReserveThreshold) });
+      }
       const fetchedMode = modeRes?.data?.data?.fresherRegistrationEnabled;
       if (typeof fetchedMode === 'boolean') setFresherMode(fetchedMode);
 
@@ -220,6 +228,43 @@ const Dashboard = () => {
       console.warn('Failed to toggle fresher registration mode:', err?.response?.data?.message || err.message);
     } finally {
       setTogglingFresherMode(false);
+    }
+  };
+
+  // Admin: save the daily email hard cap + OTP-only reserve threshold
+  const handleSaveQuota = async () => {
+    if (savingQuota) return;
+    setSavingQuota(true);
+    setQuotaSaveMsg('');
+    try {
+      const daily = Number(quotaDraft.dailyQuota);
+      const reserve = Number(quotaDraft.otpReserveThreshold);
+      if (!Number.isFinite(daily) || daily < 1 || !Number.isFinite(reserve) || reserve < 1) {
+        setQuotaSaveMsg('Both limits must be positive whole numbers.');
+        return;
+      }
+      await API.patch('/auth/admin/email-quota', { dailyQuota: daily, otpReserveThreshold: reserve });
+      setQuotaSaveMsg('Saved. Apply for the next email.');
+      fetchAdminData();
+    } catch (err) {
+      setQuotaSaveMsg(err.response?.data?.message || 'Failed to save email quota settings.');
+    } finally {
+      setSavingQuota(false);
+    }
+  };
+
+  // Admin: zero the daily email counter immediately
+  const handleResetQuota = async () => {
+    if (savingQuota) return;
+    setSavingQuota(true);
+    try {
+      await API.post('/auth/admin/email-quota/reset');
+      setQuotaSaveMsg('Daily counter reset. Emails can be sent again.');
+      fetchAdminData();
+    } catch (err) {
+      setQuotaSaveMsg(err.response?.data?.message || 'Failed to reset daily counter.');
+    } finally {
+      setSavingQuota(false);
     }
   };
 
@@ -833,33 +878,79 @@ const Dashboard = () => {
             </div>
 
             {emailQuota && (
-              <div className="bg-[#130910]/90 border border-teal-500/30 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
-                <div className="flex items-center gap-3 text-center sm:text-left">
-                  <span className="text-lg">✉️</span>
-                  <div>
-                    <p className="text-[10px] font-mono uppercase text-slate-400">Daily Email Quota (Brevo)</p>
-                    <p className="text-xs text-slate-300 leading-snug">
-                      <span className={`font-black ${emailQuota.sent >= emailQuota.dailyQuota ? 'text-red-400' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'text-orange-400' : emailQuota.sent >= emailQuota.importantThreshold ? 'text-amber-400' : 'text-teal-300'}`}>{emailQuota.sent}</span>
-                      <span className="text-slate-500"> / {emailQuota.dailyQuota}</span> sent in last 24h
-                      {emailQuota.sent >= emailQuota.dailyQuota
-                        ? <span className="text-red-400 font-bold"> • Quota reached — all mail paused until reset</span>
-                        : emailQuota.otpOnly
-                        ? <span className="text-orange-400 font-bold"> • OTPs only (registrations / password recovery)</span>
-                        : emailQuota.importantOnly
-                        ? <span className="text-amber-400 font-bold"> • Important emails only (OTP / critical)</span>
-                        : <span className="text-teal-400 font-bold"> • All mail allowed</span>}
-                    </p>
-                    <p className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">
-                      Resets {emailQuota.resetAt ? new Date(emailQuota.resetAt).toLocaleTimeString() : 'in 24h'} • {Math.max(emailQuota.remaining, 0)} remaining
-                    </p>
+              <div className="bg-[#130910]/90 border border-teal-500/30 rounded-2xl p-3.5 sm:p-4 shadow-md flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-3 text-center sm:text-left">
+                    <span className="text-lg">✉️</span>
+                    <div>
+                      <p className="text-[10px] font-mono uppercase text-slate-400">Daily Email Quota</p>
+                      <p className="text-xs text-slate-300 leading-snug">
+                        <span className={`font-black ${emailQuota.sent >= emailQuota.dailyQuota ? 'text-red-400' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'text-orange-400' : emailQuota.sent >= emailQuota.importantThreshold ? 'text-amber-400' : 'text-teal-300'}`}>{emailQuota.sent}</span>
+                        <span className="text-slate-500"> / {emailQuota.dailyQuota}</span> sent in last 24h
+                        {emailQuota.sent >= emailQuota.dailyQuota
+                          ? <span className="text-red-400 font-bold"> • Quota reached — all mail paused until reset</span>
+                          : emailQuota.otpOnly
+                          ? <span className="text-orange-400 font-bold"> • OTPs only (registrations / password recovery)</span>
+                          : emailQuota.importantOnly
+                          ? <span className="text-amber-400 font-bold"> • Important emails only (OTP / critical)</span>
+                          : <span className="text-teal-400 font-bold"> • All mail allowed</span>}
+                      </p>
+                      <p className="text-[9px] text-slate-500 uppercase font-bold tracking-wider">
+                        Resets {emailQuota.resetAt ? new Date(emailQuota.resetAt).toLocaleTimeString() : 'in 24h'} • {Math.max(emailQuota.remaining, 0)} remaining
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full sm:w-48 h-2 bg-[#080507] rounded-full overflow-hidden border border-slate-800 shrink-0">
+                    <div
+                      className={`h-full transition-all ${emailQuota.sent >= emailQuota.dailyQuota ? 'bg-red-500' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'bg-orange-500' : emailQuota.sent >= emailQuota.importantThreshold ? 'bg-amber-500' : 'bg-teal-500'}`}
+                      style={{ width: `${Math.min(100, Math.round((emailQuota.sent / emailQuota.dailyQuota) * 100))}%` }}
+                    />
                   </div>
                 </div>
-                <div className="w-full sm:w-48 h-2 bg-[#080507] rounded-full overflow-hidden border border-slate-800">
-                  <div
-                    className={`h-full transition-all ${emailQuota.sent >= emailQuota.dailyQuota ? 'bg-red-500' : emailQuota.sent >= emailQuota.otpReserveThreshold ? 'bg-orange-500' : emailQuota.sent >= emailQuota.importantThreshold ? 'bg-amber-500' : 'bg-teal-500'}`}
-                    style={{ width: `${Math.min(100, Math.round((emailQuota.sent / emailQuota.dailyQuota) * 100))}%` }}
-                  />
-                </div>
+
+                {user?.role === 'ADMIN' && (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5 pt-3 border-t border-teal-500/20 w-full">
+                    <label className="flex flex-col gap-1 flex-1">
+                      <span className="text-[9px] font-mono uppercase text-slate-400">Daily Limit (hard stop)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={quotaDraft.dailyQuota}
+                        onChange={(e) => setQuotaDraft({ ...quotaDraft, dailyQuota: e.target.value })}
+                        className="bg-[#080507] border border-teal-500/30 focus:border-teal-400 outline-none text-teal-200 rounded-xl px-3 py-1.5 text-sm font-bold w-full"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 flex-1">
+                      <span className="text-[9px] font-mono uppercase text-slate-400">OTP-only after</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={quotaDraft.otpReserveThreshold}
+                        onChange={(e) => setQuotaDraft({ ...quotaDraft, otpReserveThreshold: e.target.value })}
+                        className="bg-[#080507] border border-orange-500/30 focus:border-orange-400 outline-none text-orange-200 rounded-xl px-3 py-1.5 text-sm font-bold w-full"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveQuota}
+                        disabled={savingQuota}
+                        className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white font-bold text-[11px] uppercase rounded-xl cursor-pointer"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleResetQuota}
+                        disabled={savingQuota}
+                        className="px-3 py-1.5 bg-[#080507] border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white font-bold text-[11px] uppercase rounded-xl cursor-pointer"
+                      >
+                        Reset counter
+                      </button>
+                    </div>
+                    {quotaSaveMsg && (
+                      <p className={`w-full text-[10px] font-bold ${quotaSaveMsg.startsWith('Failed') ? 'text-red-400' : quotaSaveMsg.startsWith('Both') ? 'text-amber-400' : 'text-teal-300'}`}>{quotaSaveMsg}</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
