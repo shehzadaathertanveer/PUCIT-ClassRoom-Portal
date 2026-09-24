@@ -653,8 +653,19 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
     await syncStudentEnrollment(user);
   }
 
-  // The pending attempt has served its purpose.
-  await PendingRegistration.deleteMany({ $or: [{ email: pending.email }, { destinationEmail: pending.destinationEmail }] });
+  // The pending attempt has served its purpose — remove EVERY trace of it
+  // (official email, delivery inbox, roll number, reg number, personal email)
+  // so a stale record can never linger after a successful registration, even if
+  // an earlier failed attempt used a different email.
+  await PendingRegistration.deleteMany({
+    $or: [
+      { email: pending.email },
+      { destinationEmail: pending.destinationEmail },
+      ...(pending.rollNo ? [{ rollNo: pending.rollNo }] : []),
+      ...(pending.registrationNo ? [{ registrationNo: pending.registrationNo }] : []),
+      ...(pending.personalNotificationEmail ? [{ personalNotificationEmail: pending.personalNotificationEmail }] : []),
+    ],
+  });
 
   user.password = undefined;
   const token = signToken(user._id, user.role);
