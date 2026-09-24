@@ -14,7 +14,10 @@ const OtpVerify = () => {
   const location = useLocation();
 
   // Extract user data passed from the registration page state
-  const { email, name, rollNo, password, personalNotificationEmail, registrationNo } = location.state || {};
+  const { email, name, rollNo, password, personalNotificationEmail, registrationNo, verificationEmail } = location.state || {};
+  // The address the server actually delivered the code to (may differ from the
+  // official account email, e.g. a fresher verifying via a personal inbox).
+  const deliveryEmail = verificationEmail || email;
 
   useEffect(() => {
     if (!email) {
@@ -37,7 +40,7 @@ const OtpVerify = () => {
     setStatusMessage('Verifying security code...');
 
     try {
-      await API.post('/auth/verify-otp', { email, otp });
+      await API.post('/auth/verify-otp', { email: deliveryEmail, otp });
       
       setIsSuccess(true);
       setStatusMessage('User validated, please login now.');
@@ -65,7 +68,7 @@ const OtpVerify = () => {
     try {
       await API.post('/auth/signup/initiate', { 
         name, 
-        email, 
+        email: deliveryEmail, 
         password, 
         rollNo,
         ...(personalNotificationEmail && { personalNotificationEmail }),
@@ -107,7 +110,15 @@ const OtpVerify = () => {
               : 'bg-orange-950/30 border-orange-500/20 text-orange-300/95'
           }`}>
             {statusMessage}
-            {email && !isSuccess && <span className="block mt-1 font-mono text-slate-300 text-[11px]">{email}</span>}
+            {deliveryEmail && !isSuccess && (
+              <span className="block mt-1.5 text-[11px]">
+                <span className="text-slate-400">Code sent to</span>{' '}
+                <span className="font-mono text-orange-300">{deliveryEmail}</span>
+                {email && email !== deliveryEmail && (
+                  <span className="block mt-1 text-slate-500">(your official account email is <span className="font-mono text-slate-400">{email}</span>)</span>
+                )}
+              </span>
+            )}
           </p>
 
           {/* Spam/Junk Notice Box */}

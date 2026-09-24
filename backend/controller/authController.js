@@ -415,6 +415,13 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("A personal notification email is required for registration when using temporary roll/registration numbers!", 400));
   }
 
+  // An @temp.pucit.edu.pk address has NO real inbox — Gmail would silently
+  // accept the message and it would never arrive, leaving the student waiting
+  // forever. Block it with an actionable message instead of a phantom "sent".
+  if (/@temp\.pucit\.edu\.pk$/i.test(destinationEmail)) {
+    return next(new AppError("A temporary @temp.pucit.edu.pk address has no inbox, so no verification code can be delivered there. Enter your full Roll Number (e.g. BITF26A004) or provide a personal email address instead.", 400));
+  }
+
   // DAILY EMAIL QUOTA GATE: when the daily sending limit is exhausted, block
   // new registrations instead of silently failing at the mail provider.
   const quota = await getEmailQuotaStatus();
@@ -484,7 +491,7 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     pending.otpExpiresAt = otpExpiry;
     await pending.save();
   } else {
-    await PendingRegistration.create({
+    pending = await PendingRegistration.create({
       name,
       email: officialEmail,
       rollNo: formattedRollNo,
@@ -498,10 +505,29 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     });
   }
 
+  // ONE attempt per identity: purge stale PendingRegistration records left over
+  // from earlier attempts that share the same official email, full roll number,
+  // registration number or delivery inbox. This guarantees the priority-ordered
+  // OTP verification can never resolve to an outdated record carrying an old
+  // code. (Prefix entries share a non-unique roll prefix, so only FULL roll
+  // numbers are cleaned, never bare prefixes.)
+  if (pending && pending._id) {
+    await PendingRegistration.deleteMany({
+      _id: { $ne: pending._id },
+      $or: [
+        { email: officialEmail },
+        ...(formattedRollNo && FULL_ROLL_NO_REGEX.test(formattedRollNo) ? [{ rollNo: formattedRollNo }] : []),
+        ...(formattedRegNo ? [{ registrationNo: formattedRegNo }] : []),
+        { destinationEmail },
+      ],
+    });
+  }
+
   res.status(200).json({
     status: "success",
     message: `Verification code sent to ${destinationEmail}. Please verify OTP to complete registration.`,
     email: officialEmail,
+    verificationEmail: destinationEmail,
   });
 });
 
@@ -520,15 +546,24 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   const hashedInputOtp = hashOtp(cleanOtp);
   const prefixFromEmail = cleanEmail.split('@')[0].toUpperCase();
 
-  const pending = await PendingRegistration.findOne({
-    $or: [
-      { email: cleanEmail },
-      { destinationEmail: cleanEmail },
-      { personalNotificationEmail: cleanEmail },
-      ...(FULL_ROLL_NO_REGEX.test(prefixFromEmail) ? [{ rollNo: prefixFromEmail }] : []),
-      ...(REG_NO_REGEX.test(prefixFromEmail) ? [{ registrationNo: prefixFromEmail }] : [])
-    ]
-  }).select("+otpCode +otpExpiresAt");
+  // Priority-order lookup, NOT a single $or: when stale duplicate pending
+  // records survive from earlier attempts (same roll/reg number, older OTP),
+  // the $or version could resolve to an OUTDATED record and reject a perfectly
+  // correct code. Look up the exact delivery address first, then the official
+  // email, then the remaining aliases — the newest record for that address wins.
+  let pending = await PendingRegistration.findOne({ destinationEmail: cleanEmail }).select("+otpCode +otpExpiresAt");
+  if (!pending) {
+    pending = await PendingRegistration.findOne({ email: cleanEmail }).select("+otpCode +otpExpiresAt");
+  }
+  if (!pending) {
+    pending = await PendingRegistration.findOne({ personalNotificationEmail: cleanEmail }).select("+otpCode +otpExpiresAt");
+  }
+  if (!pending && FULL_ROLL_NO_REGEX.test(prefixFromEmail)) {
+    pending = await PendingRegistration.findOne({ rollNo: prefixFromEmail }).select("+otpCode +otpExpiresAt");
+  }
+  if (!pending && REG_NO_REGEX.test(prefixFromEmail)) {
+    pending = await PendingRegistration.findOne({ registrationNo: prefixFromEmail }).select("+otpCode +otpExpiresAt");
+  }
 
   if (!pending) {
     console.warn(`[verifyRegistrationOTP] No pending registration found. Searched email="${cleanEmail}" prefix="${prefixFromEmail}"`);
@@ -536,6 +571,7 @@ exports.verifyRegistrationOTP = catchAsync(async (req, res, next) => {
   }
 
   if (!pending.otpCode || pending.otpCode !== hashedInputOtp) {
+    console.warn(`[verifyRegistrationOTP] OTP mismatch. lookedUp="${cleanEmail}" pendingId="${pending._id}" pendingEmail="${pending.email}" pendingDest="${pending.destinationEmail}" pendingRoll="${pending.rollNo}"`);
     return next(new AppError("Invalid OTP code!", 400));
   }
 

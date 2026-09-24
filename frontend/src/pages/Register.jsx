@@ -198,6 +198,7 @@ const Register = () => {
         navigate('/otp-verify', { 
           state: { 
             email: responseData.email, 
+            verificationEmail: responseData.verificationEmail || responseData.email,
             name: name.trim(), 
             rollNo: registerRoll, 
             password,
