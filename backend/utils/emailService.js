@@ -3,9 +3,9 @@ const nodemailer = require("nodemailer");
 const PlatformSetting = require("../models/platformSettingSchema");
 
 // ---------------------------------------------------------------------------
-// Daily email quota accounting (24-hour rolling window).
+// Daily email quota accounting (fixed calendar-day window).
 //
-//   DAILY_QUOTA         total emails allowed per rolling 24h (default 300).
+//   DAILY_QUOTA         total emails allowed per calendar day (default 300).
 //   IMPORTANT_THRESHOLD once this many emails were sent, ONLY important mail
 //                       (OTP codes, account termination, teacher decisions)
 //                       is delivered; routine notifications are silently
@@ -19,32 +19,89 @@ const PlatformSetting = require("../models/platformSettingSchema");
 //                       passwords. (default 250)
 //
 // The counter lives in the PlatformSetting collection so restarts do not
-// reset it. The window resets on the first send after `startedAt + 24h`.
+// reset it. The window auto-resets every day at EMAIL_QUOTA_RESET_TIME
+// (default 05:11) in EMAIL_QUOTA_RESET_TIMEZONE (default Asia/Karachi), even if
+// no email is sent that day.
 // ---------------------------------------------------------------------------
 const DAILY_QUOTA = Number(process.env.EMAIL_DAILY_QUOTA) || 300;
 const IMPORTANT_THRESHOLD = Number(process.env.EMAIL_IMPORTANT_THRESHOLD) || 220;
 const OTP_RESERVE_THRESHOLD = Number(process.env.EMAIL_OTP_RESERVE) || 250;
-const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RESET_TIME = (process.env.EMAIL_QUOTA_RESET_TIME || "05:11").trim();
+const RESET_TIMEZONE = process.env.EMAIL_QUOTA_RESET_TIMEZONE || "Asia/Karachi";
+const [RESET_HOUR, RESET_MINUTE] = RESET_TIME.split(":").map(Number);
+
+// Zoned wall-clock fields for a given instant in RESET_TIMEZONE.
+const zonedPartsOf = (date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: RESET_TIMEZONE,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const map = {};
+  for (const p of parts) map[p.type] = parseInt(p.value, 10);
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    hour: map.hour % 24,
+    minute: map.minute % 60,
+    second: map.second % 60,
+  };
+};
+
+// Resolve a zoned wall-clock time into a real UTC epoch ms via refinement.
+const wallClockToUtc = (year, month, day, hour, minute) => {
+  let candidate = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  for (let i = 0; i < 3; i++) {
+    const p = zonedPartsOf(new Date(candidate));
+    const wallMinutes = p.hour * 60 + p.minute;
+    const targetMinutes = hour * 60 + minute;
+    candidate += (targetMinutes - wallMinutes) * 60000;
+  }
+  return candidate;
+};
+
+// Epoch ms of the next RR reset (RESET_TIME in RESET_TIMEZONE) at/after `now`.
+const getNextResetAt = (now) => {
+  const p = zonedPartsOf(new Date(now));
+  let reset = wallClockToUtc(p.year, p.month, p.day, RESET_HOUR, RESET_MINUTE);
+  if (reset <= now) {
+    reset = wallClockToUtc(p.year, p.month, p.day + 1, RESET_HOUR, RESET_MINUTE);
+  }
+  return reset;
+};
 
 const getEmailQuotaState = async () => {
   const now = Date.now();
   const doc = await PlatformSetting.findOne({ key: "emailQuota" }).lean();
 
   if (!doc) {
-    await PlatformSetting.create({ key: "emailQuota", value: { sent: 0, startedAt: now } });
-    return { sent: 0, startedAt: now };
+    const resetAt = getNextResetAt(now);
+    await PlatformSetting.create({
+      key: "emailQuota",
+      value: { sent: 0, startedAt: now, resetAt },
+    });
+    return { sent: 0, startedAt: now, resetAt };
   }
 
   const startedAt = doc.value?.startedAt || now;
-  if (now - startedAt >= QUOTA_WINDOW_MS) {
+  const storedResetAt = doc.value?.resetAt ? new Date(doc.value.resetAt).getTime() : getNextResetAt(startedAt);
+
+  if (now >= storedResetAt) {
+    const nextResetAt = getNextResetAt(now);
     await PlatformSetting.updateOne(
       { key: "emailQuota" },
-      { $set: { value: { sent: 0, startedAt: now } } }
+      { $set: { value: { sent: 0, startedAt: now, resetAt: nextResetAt } } }
     );
-    return { sent: 0, startedAt: now };
+    return { sent: 0, startedAt: now, resetAt: nextResetAt };
   }
 
-  return { sent: doc.value?.sent || 0, startedAt };
+  return { sent: doc.value?.sent || 0, startedAt, resetAt: storedResetAt };
 };
 
 const recordEmailSent = async () => {
@@ -52,17 +109,17 @@ const recordEmailSent = async () => {
 };
 
 const getEmailQuotaStatus = async () => {
-  const { sent, startedAt } = await getEmailQuotaState();
-  const remaining = Math.max(DAILY_QUOTA - sent, 0);
+  const state = await getEmailQuotaState();
+  const remaining = Math.max(DAILY_QUOTA - state.sent, 0);
   return {
-    sent,
+    sent: state.sent,
     dailyQuota: DAILY_QUOTA,
     importantThreshold: IMPORTANT_THRESHOLD,
     otpReserveThreshold: OTP_RESERVE_THRESHOLD,
     remaining,
-    importantOnly: sent >= IMPORTANT_THRESHOLD,
-    otpOnly: sent >= OTP_RESERVE_THRESHOLD,
-    resetAt: new Date(startedAt + QUOTA_WINDOW_MS).toISOString(),
+    importantOnly: state.sent >= IMPORTANT_THRESHOLD,
+    otpOnly: state.sent >= OTP_RESERVE_THRESHOLD,
+    resetAt: new Date(state.resetAt).toISOString(),
   };
 };
 
