@@ -523,9 +523,14 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     });
   }
 
+  const isOfficialPucitInbox = /@pucit\.edu\.pk$/i.test(destinationEmail);
+  console.log(`[initiateRegistration] ${name} (${assignedRole}) roll="${formattedRollNo}" fresherRoll=${isFresherRoll} fresherMode=${fresherRegistrationEnabled} -> OTP target="${destinationEmail}" officialPucitInbox=${isOfficialPucitInbox}`);
+
   res.status(200).json({
     status: "success",
-    message: `Verification code sent to ${destinationEmail}. Please verify OTP to complete registration.`,
+    message: isOfficialPucitInbox
+      ? `Verification code sent to your OFFICIAL PUCIT inbox (${destinationEmail}). Note: if you cannot access that inbox, re-register with a personal email instead.`
+      : `Verification code sent to ${destinationEmail}. Please verify OTP to complete registration.`,
     email: officialEmail,
     verificationEmail: destinationEmail,
   });
