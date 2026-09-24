@@ -5,16 +5,21 @@ const PlatformSetting = require("../models/platformSettingSchema");
 // ---------------------------------------------------------------------------
 // Daily email quota accounting (fixed calendar-day window).
 //
-//   dailyQuotaHardCap   total emails allowed per calendar day (default 300).
-//                       Once reached, every email is refused and
-//                       sendStyledEmail returns false (never a silent success).
+//   dailyQuotaHardCap   total NON-OTP emails allowed per calendar day
+//                       (default 300). Once reached, every ordinary email is
+//                       refused and sendStyledEmail returns false. OTP /
+//                       critical mail (registration, password recovery, inbox
+//                       activation) ALWAYS goes through — the cap exists purely
+//                       to reserve the daily budget for exactly those
+//                       verification emails, so students can ALWAYS register or
+//                       recover a password even when the cap is exhausted, and
+//                       everything returns to normal after the next reset.
 //
 //   otpReserveThreshold once this many emails were sent **today**, only OTP
-//                       mail (registration, password recovery, inbox
-//                       activation) is sent — routine notifications are
-//                       dropped loudly (returns false). This guarantees users
-//                       can always register/recover a password even near the
-//                       daily ceiling. Default 250.
+//                       mail is sent — routine notifications are dropped loudly
+//                       (returns false). This guarantees users can always
+//                       register/recover a password even near the daily ceiling.
+//                       Default 250.
 //
 //   importantThreshold  optional middle layer: above it, routine notifications
 //                       are dropped but critical + important admin mail still
@@ -41,16 +46,22 @@ const getEmailQuotaConfig = async () => {
   const envDaily = asQuotaInt(process.env.EMAIL_DAILY_QUOTA) ?? 300;
   const envReserve = asQuotaInt(process.env.EMAIL_OTP_RESERVE);
   const envImportant = asQuotaInt(process.env.EMAIL_IMPORTANT_THRESHOLD);
+  const envHard = asQuotaInt(process.env.EMAIL_HARD_CAP) ?? 300;
 
   const dailyQuota = asQuotaInt(v.dailyQuota) ?? envDaily;
   const otpReserve = asQuotaInt(v.otpReserveThreshold) ?? (envReserve !== null ? envReserve : 250);
   const important = asQuotaInt(v.importantThreshold) ?? (envImportant !== null ? envImportant : dailyQuota);
 
   const safeDaily = Math.max(1, dailyQuota);
+  // hardCeiling = the ABSOLUTE wall for the day (defaults to the provider's
+  // real limit, e.g. Brevo 300/day). Once reached, EVERY email — even OTP —
+  // is refused and callers surface the "try again tomorrow" message.
+  const hardCeiling = Math.max(envHard, safeDaily);
   return {
     dailyQuota: safeDaily,
     otpReserveThreshold: Math.min(Math.max(1, otpReserve), safeDaily),
     importantThreshold: Math.min(Math.max(1, important), safeDaily),
+    hardCeiling,
   };
 };
 
@@ -173,15 +184,16 @@ const recordEmailSent = async () => {
 
 const getEmailQuotaStatus = async () => {
   const [state, config] = await Promise.all([getEmailQuotaState(), getEmailQuotaConfig()]);
-  const remaining = Math.max(config.dailyQuota - state.sent, 0);
   return {
     sent: state.sent,
     dailyQuota: config.dailyQuota,
     importantThreshold: config.importantThreshold,
     otpReserveThreshold: config.otpReserveThreshold,
-    remaining,
+    hardCeiling: config.hardCeiling,
+    remaining: Math.max(config.hardCeiling - state.sent, 0),
     importantOnly: state.sent >= config.importantThreshold,
     otpOnly: state.sent >= config.otpReserveThreshold,
+    hardLocked: state.sent >= config.hardCeiling,
     resetAt: new Date(state.resetAt).toISOString(),
   };
 };
@@ -441,8 +453,20 @@ const sendStyledEmail = async ({ to, subject, title, bodyText, details, otpCode,
   const isImportant = importance === "important";
   const [{ sent }, config] = await Promise.all([getEmailQuotaState(), getEmailQuotaConfig()]);
 
-  if (sent >= config.dailyQuota) {
-    console.error(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${config.dailyQuota}). Blocked "${subject}" -> ${to}.`);
+  // HARD CEILING: the absolute wall for the day (provider limit, default 300).
+  // At this point even OTP/critical mail is refused — the provider cannot
+  // deliver a single more message — so callers surface "try again tomorrow".
+  if (sent >= config.hardCeiling) {
+    console.error(`[emailService] HARD DAILY CEILING REACHED (${sent}/${config.hardCeiling}). All mail blocked today, incl OTP "${subject}" -> ${to}.`);
+    return false;
+  }
+
+  // Daily soft cap: only throttles NON-OTP mail. OTP / critical mail (registration,
+  // password recovery, inbox activation) ALWAYS goes through — the cap exists purely
+  // to reserve delivery capacity for exactly those verification emails once the
+  // routine budget is spent.
+  if (sent >= config.dailyQuota && !critical) {
+    console.error(`[emailService] DAILY EMAIL QUOTA EXHAUSTED (${sent}/${config.dailyQuota}). Blocked non-OTP "${subject}" -> ${to}.`);
     return false;
   }
 

@@ -422,13 +422,9 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
     return next(new AppError("A temporary @temp.pucit.edu.pk address has no inbox, so no verification code can be delivered there. Enter your full Roll Number (e.g. BITF26A004) or provide a personal email address instead.", 400));
   }
 
-  // DAILY EMAIL QUOTA GATE: when the daily sending limit is exhausted, block
-  // new registrations instead of silently failing at the mail provider.
-  const quota = await getEmailQuotaStatus();
-  if (quota.remaining <= 0) {
-    return next(new AppError("The daily email limit has been reached, so new registrations are paused. Please try again tomorrow.", 429));
-  }
-
+  // Registration OTP emails are CRITICAL and intentionally bypass the daily
+  // email cap — sendStyledEmail only throttles non-OTP mail — so students can
+  // always register even when routine notifications have consumed the budget.
   const emailSent = await sendStyledEmail({
     to: destinationEmail,
     subject: "Account Registration OTP",
@@ -445,6 +441,10 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   });
 
   if (!emailSent) {
+    const quotaAfter = await getEmailQuotaStatus();
+    if (quotaAfter.hardLocked) {
+      return next(new AppError("The daily email limit has been reached, so new registrations are paused. Please try again tomorrow.", 429));
+    }
     return next(new AppError("We could not send the verification code to your email right now. Please double-check your email address and try again in a moment.", 500));
   }
 
@@ -826,13 +826,9 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const targetEmail = user.personalNotificationEmail || user.email;
 
-  // DAILY EMAIL QUOTA GATE: block password-recovery emails when the daily limit
-  // is exhausted so users get a clear message instead of a silent mail failure.
-  const quota = await getEmailQuotaStatus();
-  if (quota.remaining <= 0) {
-    return next(new AppError("The daily email limit has been reached, so password recovery is paused. Please try again tomorrow.", 429));
-  }
-
+  // Password-recovery OTP emails are CRITICAL and intentionally bypass the daily
+  // email cap — sendStyledEmail only throttles non-OTP mail — so a locked-out
+  // user can always recover a password even after the budget is exhausted.
   const emailSent = await sendStyledEmail({
     to: targetEmail,
     subject: "Password Recovery OTP",
@@ -845,6 +841,10 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   });
 
   if (!emailSent) {
+    const quotaAfter = await getEmailQuotaStatus();
+    if (quotaAfter.hardLocked) {
+      return next(new AppError("The daily email limit has been reached, so password recovery is paused. Please try again tomorrow.", 429));
+    }
     return next(new AppError("We could not send the recovery code to your email right now. Please try again in a moment.", 500));
   }
 
