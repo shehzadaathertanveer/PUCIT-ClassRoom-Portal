@@ -34,6 +34,23 @@ const getNormalizedTargetKey = (rawType = '') => {
   const clean = raw.toLowerCase();
   if (STANDARD_CATEGORIES.includes(clean)) return clean;
 
+  // Idempotency guard for already-normalised keys that are NOT in
+  // STANDARD_CATEGORIES. Without this, "labReports" falls through to the
+  // dynamic fallback below and becomes "labreports", so a cap the UI saved was
+  // read back under a different key and silently appeared unset. The UI always
+  // sends the key it received, so every resolver output must survive a second
+  // pass unchanged.
+  const dynamicFallback = (input) => {
+    const camel = input
+      .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
+      .replace(/[^a-zA-Z0-9]/g, '');
+    return camel.endsWith('s') ? camel : camel + 's';
+  };
+  // Checked against the ORIGINAL string, not the lowercased one: lowercasing
+  // first would flatten "labReports" to "labreports", which no longer compares
+  // equal and would re-enter the fallback below as a different key.
+  if (dynamicFallback(raw) === raw) return raw;
+
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
   if (clean.includes('present')) return 'presentations';
@@ -48,10 +65,7 @@ const getNormalizedTargetKey = (rawType = '') => {
   if (clean === 'finals' || clean === 'final') return 'finals';
   
   // Dynamic normalization fallback for safety
-  const sanitizedCamel = clean
-    .replace(/[^a-zA-Z0-9]+(.)/g, (m, chr) => chr.toUpperCase())
-    .replace(/[^a-zA-Z0-9]/g, '');
-  return sanitizedCamel.endsWith('s') ? sanitizedCamel : sanitizedCamel + 's';
+  return dynamicFallback(clean);
 };
 
 // Helper: Normalizes singular/plural category inputs from frontend UI variants
@@ -148,6 +162,44 @@ const { canBypass } = createBypassRules({
   getItems: getClassroomCategoryItems,
   getSlotCount: countCategorySlots
 });
+
+/**
+ * How many activities this classroom actually holds in each category.
+ *
+ * The bypass panel used to render a box for every category the schema supports,
+ * which buried the real ones under a wall of empty inputs for categories the
+ * teacher never uses. Reporting the live counts lets the UI show exactly the
+ * categories present in THIS room, and it is recomputed on every fetch so the list
+ * follows the room's activities as they are added or removed.
+ *
+ * Standard keys are counted from the room document. Classroom is also the room
+ * type that can hold teacher-defined categories (stored under customActivities
+ * in the mark docs), so a sessional entry that resolves to a non-standard key is
+ * counted too. Labroom is deliberately excluded: its mark schema has no custom
+ * bucket, and its resolver folds unknown names into labTasks, so counting them
+ * here would double-count lab tasks and expose that collision in the UI.
+ */
+const buildClassroomActivityCounts = (classroom) => {
+  const counts = {};
+  for (const key of STANDARD_CATEGORIES) {
+    counts[key] = countCategorySlots(classroom, key);
+  }
+
+  for (const act of classroom?.sessionalActivities || []) {
+    const label = typeof act === 'string' ? act : act?.category || act?.categoryName || '';
+    if (!label) continue;
+    // A sessional entry is a weight allocation, so it only counts when marks are
+    // actually allocated to it.
+    const allocated = Number(typeof act === 'object' ? act.allocatedMarks : 0) || 0;
+    if (allocated <= 0) continue;
+
+    const key = getNormalizedTargetKey(String(label));
+    if (STANDARD_CATEGORIES.includes(key)) continue; // already counted above
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  return counts;
+};
 
 // =============================================================================
 // 1. GET BULK SHEET FOR ADDING MARKS (FIXED TO INCLUDE CUSTOM ACTIVITIES)
@@ -1713,14 +1765,20 @@ const toPlainBypassLimits = (limits) => {
 
 exports.getBypassLimits = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
-  const classroom = await Classroom.findById(classroomId).select('className bypassLimits').lean();
+  const classroom = await Classroom.findById(classroomId)
+    .select('className bypassLimits quizzes assignments presentations projects homework classActivities classParticipation vivas specialMarks mids finals finalProject sessionalActivities')
+    .lean();
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
   res.status(200).json({
     status: 'success',
     data: {
       className: classroom.className,
-      limits: toPlainBypassLimits(classroom.bypassLimits)
+      limits: toPlainBypassLimits(classroom.bypassLimits),
+      // How many activities this room actually has per category. The UI uses
+      // this to show a cap box only for categories that exist here, instead of
+      // listing every category the schema happens to support.
+      activityCounts: buildClassroomActivityCounts(classroom)
     }
   });
 });

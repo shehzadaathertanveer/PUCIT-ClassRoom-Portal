@@ -73,6 +73,27 @@ const { canBypass } = createBypassRules({
   getSlotCount: countLabSlots
 });
 
+/**
+ * How many activities this labroom actually holds in each category.
+ *
+ * The panel used to render a box for every category the schema supports, so the
+ * handful a teacher really uses were buried under empty inputs. Reporting live
+ * counts lets the UI show exactly this labroom's categories, recomputed on every
+ * fetch so it follows the lab's activities as they are added or removed.
+ *
+ * Standard categories only. Labroom has no custom-activity bucket in its mark
+ * schema and RESOLVE_LAB_CATEGORY folds unrecognised names into labTasks, so
+ * deriving extra keys here would both double-count lab tasks and surface that
+ * collision in the UI.
+ */
+const buildLabActivityCounts = (labroom) => {
+  const counts = {};
+  for (const key of VALID_STANDARD_CATEGORIES) {
+    counts[key] = countLabSlots(labroom, key);
+  }
+  return counts;
+};
+
 // =============================================================================
 // 1. GET BULK LAB MARK SHEET (Sorted 001->040 + Add/Drop)
 // =============================================================================
@@ -1024,14 +1045,20 @@ const countLabCategorySlots = (labroom, categoryKey) =>
 
 exports.getLabBypassLimits = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const labroom = await Labroom.findById(labroomId).select('labName bypassLimits').lean();
+  const labroom = await Labroom.findById(labroomId)
+    .select('labName bypassLimits labTasks quizzes assignments presentations vivas labTests projects troubleshooting labWorksheets labBehavior labActivities labMids labFinals finalProject sessionalActivities')
+    .lean();
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
   res.status(200).json({
     status: 'success',
     data: {
       labName: labroom.labName,
-      limits: toPlainBypassLimits(labroom.bypassLimits)
+      limits: toPlainBypassLimits(labroom.bypassLimits),
+      // Same purpose as the classroom endpoint: only offer a cap box for the
+      // categories this labroom actually has, and re-read on every fetch so the
+      // list tracks the lab's activities as they change.
+      activityCounts: buildLabActivityCounts(labroom)
     }
   });
 });

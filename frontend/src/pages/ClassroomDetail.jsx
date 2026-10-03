@@ -25,6 +25,7 @@ import {
   RectangleStackIcon,
   StarIcon,
   TrophyIcon,
+  TrashIcon,
   UserGroupIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
@@ -149,6 +150,9 @@ const ClassroomDetail = () => {
 
   // Class Settings & Weights modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  // Which settings tab is showing: 'general' (details, colour, weights, danger
+  // zone) or 'bypass' (per-category bypass caps).
+  const [settingsTab, setSettingsTab] = useState('general');
   // TAs cannot open Classroom Settings, but they still need to see the bypass
   // caps that constrain what they can mark. Read-only, teacher/admin only to edit.
   const [isBypassModalOpen, setIsBypassModalOpen] = useState(false);
@@ -1221,7 +1225,7 @@ const ClassroomDetail = () => {
                 <button type="button" onClick={() => setIsItemModalOpen(true)} className="lm-btn shrink-0"><PlusIcon className="w-4 h-4" />Result</button>
               </>
             )}
-            {isTeacherOrAdmin && <button type="button" onClick={() => setIsSettingsModalOpen(true)} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+            {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setIsSettingsModalOpen(true); }} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
             {isAssignedTa && !isTeacherOrAdmin && <button type="button" onClick={() => setIsBypassModalOpen(true)} className="lm-btn-ghost shrink-0"><ShieldCheckIcon className="w-4 h-4" />Bypass Limits</button>}
           </div>
         </div>
@@ -2435,6 +2439,40 @@ const ClassroomDetail = () => {
                 <XMarkIcon className="w-4 h-4" />
               </button>
             </div>
+            {/* Bypass limits have their own tab. They save through their own
+                endpoint and their own button, so they must not sit inside the
+                settings <form> - a submit there would fire the wrong save. */}
+            <div className="flex gap-1 rounded-lg bg-black/30 p-1 border border-white/[0.06]" role="tablist" aria-label="Classroom settings sections">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'general'}
+                onClick={() => setSettingsTab('general')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer ${
+                  settingsTab === 'general'
+                    ? 'bg-orange-500/15 text-orange-200 border border-orange-400/30'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                General
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'bypass'}
+                onClick={() => setSettingsTab('bypass')}
+                className={`flex-1 rounded-md px-3 py-1.5 text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer ${
+                  settingsTab === 'bypass'
+                    ? 'bg-orange-500/15 text-orange-200 border border-orange-400/30'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                Bypass Limits
+              </button>
+            </div>
+
+            {settingsTab === 'general' && (
+            <>
             <form onSubmit={handleUpdateClassSettings} className="space-y-4">
               <div>
                 <label className="block lm-eyebrow mb-1">Class Name</label>
@@ -2480,17 +2518,6 @@ const ClassroomDetail = () => {
                   disabled={updatingSettings}
                 />
               </div>
-
-              {/* Bypass ("B") limits - caps how many activities per category a
-                  student may bypass. Teacher/admin editable; TAs see it read-only. */}
-              <BypassLimitsPanel
-                apiBase="/classroommarks"
-                roomId={classroomId}
-                roomType="classroom"
-                customCategories={editSessionalActivities}
-                canEdit={isTeacherOrAdmin}
-                showToast={showToast}
-              />
 
               {/* Strict Preset Sessional Activities Manager */}
               <div className="pt-3 border-t border-white/[0.06] space-y-3">
@@ -2583,6 +2610,19 @@ const ClassroomDetail = () => {
                 </button>
               </form>
             </div>
+            </>
+            )}
+
+            {settingsTab === 'bypass' && (
+              <BypassLimitsPanel
+                apiBase="/classroommarks"
+                roomId={classroomId}
+                roomType="classroom"
+                customCategories={editSessionalActivities}
+                canEdit={isTeacherOrAdmin}
+                showToast={showToast}
+              />
+            )}
           </div>
         </div>
       )}
