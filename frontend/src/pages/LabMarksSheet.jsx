@@ -138,8 +138,12 @@ const LabMarksSheet = () => {
           );
           if (item) {
             const rawStored = item.obtainedMarks;
-            const hasStored = rawStored !== undefined && rawStored !== null && String(rawStored).trim() !== '';
-            obtained = item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK);
+            const stored = String(rawStored ?? '').trim();
+            // Ungraded work is seeded as a bare 0 by the backend, which is
+            // indistinguishable from a real zero score on load. Normalise it
+            // back to the -99 sentinel so every box opens as "ungraded".
+            const hasScore = stored !== '' && stored !== '0';
+            obtained = item.isAbsent ? 'A' : (hasScore ? rawStored : UNGRADED_MARK);
             isAbsent = !!item.isAbsent;
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
@@ -353,7 +357,7 @@ const LabMarksSheet = () => {
 
       students.forEach(student => {
         const studentId = student._id.toString();
-        const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false };
+        const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false };
         const roll = student.rollNo || 'N/A';
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
         const rawMark = String(inputData.obtainedMarks ?? '').trim();
@@ -563,7 +567,7 @@ const LabMarksSheet = () => {
                   ) : (
                     displayedStudents.map((student, idx) => {
                       const studentId = student._id.toString();
-                      const inputData = markInputs[studentId] || { obtainedMarks: '', isAbsent: false, file: {} };
+                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, file: {} };
 
                       const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
 
