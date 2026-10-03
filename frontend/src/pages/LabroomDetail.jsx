@@ -1,5 +1,34 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import {
+  AcademicCapIcon,
+  ArrowDownTrayIcon,
+  ArrowLeftIcon,
+  ArrowPathIcon,
+  ArrowRightIcon,
+  BeakerIcon,
+  ChartBarIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  Cog6ToothIcon,
+  DocumentTextIcon,
+  EnvelopeIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  FolderIcon,
+  KeyIcon,
+  MagnifyingGlassIcon,
+  MegaphoneIcon,
+  PaperAirplaneIcon,
+  PaperClipIcon,
+  PencilSquareIcon,
+  PlusIcon,
+  StarIcon,
+  TrashIcon,
+  TrophyIcon,
+  UserGroupIcon,
+  XMarkIcon
+} from '@heroicons/react/24/outline';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
@@ -676,20 +705,27 @@ const LabroomDetail = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-6 space-y-4">
-        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-mono text-xs text-slate-400 tracking-wider">Syncing lab environment...</p>
+      <div className="relative min-h-dvh overflow-x-hidden lm-canvas lm-acc-lab flex flex-col items-center justify-center p-6 text-slate-100">
+        <div className="lm-topline" />
+        <div className="lm-ambient" />
+        <div className="lm-card rounded-2xl p-8 w-full max-w-xs flex flex-col items-center gap-4 text-center">
+          <div className="lm-bar mx-auto"></div>
+          <p className="lm-eyebrow font-mono">Syncing lab environment...</p>
+        </div>
       </div>
     );
   }
 
   if (error || !labroom) {
     return (
-      <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-4">
-        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-4 shadow-xl">
-          <h2 className="font-extrabold text-sm text-white">Lab Connection Error</h2>
-          <p className="text-xs text-slate-300">{error || 'Labroom does not exist.'}</p>
-          <Link to="/" className="block py-3 bg-blue-500 text-black font-extrabold text-xs uppercase rounded-xl">Dashboard</Link>
+      <div className="relative min-h-dvh overflow-x-hidden lm-canvas lm-acc-lab flex flex-col items-center justify-center p-4 text-slate-100">
+        <div className="lm-topline" />
+        <div className="lm-ambient" />
+        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 sm:p-8 text-center max-w-sm w-full space-y-4 shadow-xl">
+          <ExclamationTriangleIcon className="w-8 h-8 mx-auto text-red-300" />
+          <h2 className="font-extrabold text-sm text-slate-100">Lab Connection Error</h2>
+          <p className="text-xs text-slate-300 break-words">{error || 'Labroom does not exist.'}</p>
+          <Link to="/" className="lm-btn w-full">Dashboard</Link>
         </div>
       </div>
     );
@@ -1009,86 +1045,108 @@ const LabroomDetail = () => {
   const badgeColorClass = 'bg-blue-500/10 border-blue-500/30 text-blue-400';
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-3 sm:px-6 lg:px-8 py-5 selection:bg-blue-400 selection:text-black overflow-x-hidden">
+    <div className="relative min-h-dvh overflow-x-hidden lm-canvas lm-acc-lab flex flex-col justify-between px-4 sm:px-6 lg:px-8 py-4 sm:py-5 text-slate-100 selection:bg-orange-300 selection:text-slate-950">
 
-      <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] bg-blue-500/15 rounded-full blur-[100px] pointer-events-none"></div>
+      <div className="lm-topline" />
+      <div className="lm-ambient" />
 
       {toastMessage && (
-        <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
-          <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-2xl backdrop-blur-xl ${
-            toastType === 'success' ? 'bg-[#130910]/95 border-emerald-500/50 text-emerald-300' : 'bg-[#130910]/95 border-red-500/50 text-red-300'
+        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm">
+          <div className={`lm-toast flex items-center gap-3 px-4 py-3 ${
+            toastType === 'success' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'
           }`}>
-            <span className="text-base font-bold">{toastType === 'success' ? '✓' : '⚠️'}</span>
-            <p className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</p>
+            {toastType === 'success'
+              ? <CheckIcon className="w-4 h-4 shrink-0" />
+              : <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />}
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-100 break-words min-w-0">{toastMessage}</p>
           </div>
         </div>
       )}
 
       {/* TOP CONTROLLER BAR */}
-      <header className={`relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#130910]/95 backdrop-blur-2xl border ${themeColorClass} rounded-2xl p-4 shadow-xl`}>
-        <div className="flex items-center justify-between sm:justify-start gap-2.5">
-          <div className="flex items-center gap-2">
-            <Link to="/" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">← Back</Link>
-            <div>
-              <h1 className="text-sm sm:text-base font-black text-white leading-tight">{labroom.labName}</h1>
-              <p className="text-[11px] font-mono font-semibold text-blue-400">{labroom.sectionPrefix}</p>
+      <header className={`lm-card sticky top-2 z-30 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 sm:p-4 ${themeColorClass}`}>
+        <div className="flex items-center justify-between sm:justify-start gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Link to="/" className="lm-btn-ghost shrink-0">
+              <ArrowLeftIcon className="w-4 h-4" />
+              <span>Back</span>
+            </Link>
+            <div className="min-w-0">
+              <h1 className="lm-title text-lg sm:text-2xl font-black leading-tight break-words">{labroom.labName}</h1>
+              <p className="lm-eyebrow font-mono text-blue-300 mt-0.5 break-words">{labroom.sectionPrefix}</p>
             </div>
           </div>
-          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border uppercase ${badgeColorClass} whitespace-nowrap`}>
-            🔬 Lab
+          <span className={`lm-badge ${badgeColorClass} shrink-0 uppercase`}>
+            <BeakerIcon className="w-3.5 h-3.5" />
+            Lab
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800">
-          {user?.role === 'STUDENT' && !isAssignedTa && (
-            <button onClick={() => setIsComplaintModalOpen(true)} className="px-3 py-2 bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚠️ Complaints</button>
-          )}
-          {isStaffOrAdmin && (
-            <>
-              <button onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="px-3 py-2 bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-500/50 text-[10px] font-extrabold uppercase rounded-xl transition-all">📥 Feedback</button>
-              <button onClick={handleExportExcelSheet} className="px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 text-[10px] font-extrabold uppercase rounded-xl transition-all shadow-md">📊 Export Excel</button>
-            </>
-          )}
-          <button onClick={() => setIsMembersModalOpen(true)} className="px-3 py-2 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">👥 Roster</button>
-          {isAdmin && <button onClick={() => setIsAssignTeacherModalOpen(true)} className="px-3 py-2 bg-purple-950/80 hover:bg-purple-900 text-purple-300 border border-purple-500/40 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Instructor</button>}
-          {isTeacherOrAdmin && <button onClick={() => setIsTaModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ TA</button>}
-          {isStaffOrAdmin && (
-            <>
-              <button onClick={() => setIsAddStudentModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">+ Student</button>
-              <button onClick={() => setIsExcelModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 text-[10px] font-extrabold uppercase rounded-xl transition-all">📊 Upload Sync</button>
-              <button onClick={() => setIsItemModalOpen(true)} className="px-3.5 py-2 bg-gradient-to-r from-blue-400 to-cyan-500 text-black text-[10px] font-extrabold uppercase rounded-xl shadow-md transition-all">+ Evaluation</button>
-            </>
-          )}
-          {isTeacherOrAdmin && <button onClick={() => setIsSettingsModalOpen(true)} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] font-extrabold uppercase rounded-xl transition-all">⚙️ Settings</button>}
+        <div className="lm-scroll-x -mx-3 px-3 sm:mx-0 sm:px-0">
+          <div className="flex items-center gap-1.5 min-w-max w-max">
+            {user?.role === 'STUDENT' && !isAssignedTa && (
+              <button onClick={() => setIsComplaintModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300 border border-blue-500/30">
+                <ExclamationTriangleIcon className="w-4 h-4" />
+                Complaints
+              </button>
+            )}
+            {isStaffOrAdmin && (
+              <>
+                <button onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="lm-btn-ghost uppercase text-cyan-300 border border-cyan-500/30">
+                  <ArrowDownTrayIcon className="w-4 h-4" />
+                  Feedback
+                </button>
+                <button onClick={handleExportExcelSheet} className="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30">
+                  <ChartBarIcon className="w-4 h-4" />
+                  Export Excel
+                </button>
+              </>
+            )}
+            <button onClick={() => setIsMembersModalOpen(true)} className="lm-btn-ghost uppercase text-cyan-300 border border-cyan-500/30">
+              <UserGroupIcon className="w-4 h-4" />
+              Roster
+            </button>
+            {isAdmin && <button onClick={() => setIsAssignTeacherModalOpen(true)} className="lm-btn-ghost uppercase text-purple-300 border border-purple-500/30"><PlusIcon className="w-4 h-4" />Instructor</button>}
+            {isTeacherOrAdmin && <button onClick={() => setIsTaModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300"><PlusIcon className="w-4 h-4" />TA</button>}
+            {isStaffOrAdmin && (
+              <>
+                <button onClick={() => setIsAddStudentModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300"><PlusIcon className="w-4 h-4" />Student</button>
+                <button onClick={() => setIsExcelModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300"><ChartBarIcon className="w-4 h-4" />Upload Sync</button>
+                <button onClick={() => setIsItemModalOpen(true)} className="lm-btn uppercase"><PlusIcon className="w-4 h-4" />Evaluation</button>
+              </>
+            )}
+            {isTeacherOrAdmin && <button onClick={() => setIsSettingsModalOpen(true)} className="lm-btn-ghost uppercase text-slate-200"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+          </div>
         </div>
       </header>
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto my-6 space-y-6 flex-grow">
+      <main className="relative z-10 w-full max-w-6xl mx-auto my-5 sm:my-6 space-y-4 sm:space-y-6 flex-grow min-w-0">
         
         {/* NOTICE BOARD SECTION */}
-        <section className={`bg-[#130910]/90 backdrop-blur-2xl border ${themeColorClass} rounded-3xl p-5 sm:p-7 space-y-4 shadow-xl`}>
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <span>📢</span>
-              <h2 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Notice Board</h2>
+        <section className={`lm-card p-4 sm:p-6 space-y-4 ${themeColorClass}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <MegaphoneIcon className="w-4 h-4 text-orange-300 shrink-0" />
+              <h2 className="text-sm sm:text-base font-black text-slate-100 uppercase tracking-wider">Notice Board</h2>
             </div>
             {labroom?.notices?.length > 0 && (
-              <button onClick={() => setShowAllNotices(!showAllNotices)} className="text-xs font-bold underline cursor-pointer text-blue-400">
+              <button onClick={() => setShowAllNotices(!showAllNotices)} className="lm-chip">
                 {showAllNotices ? 'Show Latest Only' : `View All (${labroom.notices.length})`}
               </button>
             )}
           </div>
 
           {isStaffOrAdmin && (
-            <form onSubmit={handlePostNotice} className="bg-[#080507]/80 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <input type="text" placeholder="Notice Title" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} required className="w-full px-3.5 py-2.5 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs" />
-              <textarea placeholder="Write announcement details..." value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} required rows="2" className="w-full px-3.5 py-2.5 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs resize-none" />
+            <form onSubmit={handlePostNotice} className="lm-inset p-4 space-y-3">
+              <input type="text" placeholder="Notice Title" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} required className="lm-field text-sm" />
+              <textarea placeholder="Write announcement details..." value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} required rows="2" className="lm-field resize-none text-sm" />
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <label className="cursor-pointer text-xs text-slate-300 hover:text-white transition-colors truncate">
-                  📎 {noticeFile ? `Attached: ${noticeFile.name}` : 'Attach Image, PDF, or ZIP'}
+                <label className="cursor-pointer flex items-center gap-2 text-xs text-slate-300 hover:text-slate-100 transition-colors min-w-0">
+                  <PaperClipIcon className="w-4 h-4 shrink-0 text-orange-300" />
+                  <span className="truncate">{noticeFile ? `Attached: ${noticeFile.name}` : 'Attach Image, PDF, or ZIP'}</span>
                   <input type="file" onChange={(e) => setNoticeFile(e.target.files[0])} className="hidden" accept="image/*,.pdf,.zip" />
                 </label>
-                <button type="submit" disabled={postingNotice} className="px-4 py-2 text-black font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer bg-blue-500 hover:bg-blue-400">
+                <button type="submit" disabled={postingNotice} className="lm-btn shrink-0 w-full sm:w-auto">
                   {postingNotice ? 'Publishing...' : 'Publish Notice'}
                 </button>
               </div>
@@ -1097,12 +1155,14 @@ const LabroomDetail = () => {
 
           <div className="space-y-3">
             {!latestNotice ? (
-              <p className="text-slate-500 text-xs italic text-center py-4">No announcements posted yet.</p>
+              <div className="lm-inset p-6 text-center">
+                <p className="text-slate-500 text-xs italic">No announcements posted yet.</p>
+              </div>
             ) : showAllNotices ? (
               reversedNotices.map((n, idx) => (
-                <div key={n._id || idx} className="bg-[#080507]/60 border border-slate-800 rounded-2xl p-4 space-y-2">
-                  <h4 className="text-white font-bold text-xs sm:text-sm">{n?.title}</h4>
-                  <p className="text-slate-300 text-xs leading-relaxed">{n?.content}</p>
+                <div key={n._id || idx} className="lm-card-flat p-4 space-y-2">
+                  <h4 className="text-slate-100 font-bold text-xs sm:text-sm break-words">{n?.title}</h4>
+                  <p className="text-slate-300 text-xs leading-relaxed break-words">{n?.content}</p>
                   {n?.attachment && n.attachment.url && (
                     <div className="pt-2">
                       <NoticeAttachment attachment={n.attachment} />
@@ -1111,9 +1171,9 @@ const LabroomDetail = () => {
                 </div>
               ))
             ) : (
-              <div className="bg-[#080507]/60 border border-slate-800 rounded-2xl p-4 space-y-2">
-                <h4 className="text-white font-bold text-sm sm:text-base">{latestNotice?.title}</h4>
-                <p className="text-slate-300 text-xs leading-relaxed">{latestNotice?.content}</p>
+              <div className="lm-card-flat p-4 space-y-2">
+                <h4 className="text-slate-100 font-bold text-sm sm:text-base break-words">{latestNotice?.title}</h4>
+                <p className="text-slate-300 text-xs leading-relaxed break-words">{latestNotice?.content}</p>
                 {latestNotice?.attachment && latestNotice.attachment.url && (
                   <div className="pt-2">
                     <NoticeAttachment attachment={latestNotice.attachment} />
@@ -1125,58 +1185,67 @@ const LabroomDetail = () => {
         </section>
 
         {/* NAVIGATION TABS WITH ACTIVITY COUNTS */}
-        <div className="flex items-center bg-[#130910]/80 border border-blue-500/20 rounded-2xl p-2 gap-1 overflow-x-auto">
-          <button onClick={() => setActiveTab('overview')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${activeTab === 'overview' ? 'bg-blue-400 text-black' : 'text-slate-400'}`}>📊 Overview</button>
-          
-          {isStaffOrAdmin && (
-            <button onClick={() => setActiveTab('leaderboard')} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${activeTab === 'leaderboard' ? 'bg-blue-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
-              <span>🏆 Lab Leaderboard</span>
-            </button>
-          )}
-
-          {sessionalActivitiesList.map((act) => {
-            const targetKey = getCategoryTargetKey(act.category);
-            const count = (labroom[targetKey] || []).length;
-            return (
-              <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase transition-all whitespace-nowrap cursor-pointer flex items-center gap-2 ${activeTab === act.category.toLowerCase() ? 'bg-blue-400 text-black' : 'text-slate-400 bg-slate-900/60'}`}>
-                <span>📁 {act.category}</span>
-                <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${activeTab === act.category.toLowerCase() ? 'bg-black/20 text-black' : 'bg-slate-800 text-slate-300'}`}>
-                  {count}
-                </span>
+        <div className="lm-card-flat p-2">
+          <div className="lm-scroll-x -mx-1 px-1">
+            <div className="flex items-center gap-1.5 min-w-max w-max py-0.5">
+              <button onClick={() => setActiveTab('overview')} className={activeTab === 'overview' ? 'lm-chip-active' : 'lm-chip'}>
+                <ChartBarIcon className="w-3.5 h-3.5" />
+                Overview
               </button>
-            );
-          })}
+
+              {isStaffOrAdmin && (
+                <button onClick={() => setActiveTab('leaderboard')} className={activeTab === 'leaderboard' ? 'lm-chip-active' : 'lm-chip'}>
+                  <TrophyIcon className="w-3.5 h-3.5" />
+                  Lab Leaderboard
+                </button>
+              )}
+
+              {sessionalActivitiesList.map((act) => {
+                const targetKey = getCategoryTargetKey(act.category);
+                const count = (labroom[targetKey] || []).length;
+                return (
+                  <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={activeTab === act.category.toLowerCase() ? 'lm-chip-active' : 'lm-chip'}>
+                    <FolderIcon className="w-3.5 h-3.5" />
+                    <span>{act.category}</span>
+                    <span className={`lm-badge ${activeTab === act.category.toLowerCase() ? 'bg-slate-950/25 text-slate-950 border-white/20' : 'text-slate-300'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 bg-[#130910]/90 backdrop-blur-2xl border border-blue-500/20 rounded-3xl p-6 space-y-5 shadow-xl">
-              <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="lg:col-span-2 lm-card p-4 sm:p-6 space-y-5">
+              <h3 className="text-sm sm:text-base font-extrabold text-slate-100 uppercase tracking-wider">
                 {user?.role === 'STUDENT' && !isAssignedTa ? 'Your Lab Progress & Detailed Breakdown' : 'Lab Performance Summary & Deep Metrics'}
               </h3>
               {user?.role === 'STUDENT' && !isAssignedTa ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="bg-gradient-to-br from-blue-950/60 to-[#080507] border border-blue-500/40 p-5 rounded-3xl space-y-2 shadow-2xl">
+                    <div className="lm-card p-4 sm:p-5 space-y-2 rounded-2xl border-blue-500/30">
                       <p className="text-xs text-blue-400 uppercase font-extrabold tracking-widest">Overall Lab Percentage</p>
-                      <p className="text-4xl sm:text-5xl font-black font-mono text-blue-300 tracking-tight">{studentAnalyticsData.overall}%</p>
+                      <p className="text-3xl sm:text-4xl lg:text-5xl font-black font-mono text-blue-300 tracking-tight">{studentAnalyticsData.overall}%</p>
                     </div>
-                    <div className="bg-gradient-to-br from-cyan-950/60 to-[#080507] border border-cyan-500/40 p-5 rounded-3xl space-y-2 shadow-2xl">
+                    <div className="lm-card p-4 sm:p-5 space-y-2 rounded-2xl border-cyan-500/30">
                       <p className="text-xs text-cyan-400 uppercase font-extrabold tracking-widest">Lab Standing & Rank</p>
-                      <p className="text-4xl sm:text-5xl font-black font-mono text-cyan-300 tracking-tight">{studentRankInfo.rank} <span className="text-sm text-slate-400 font-normal">/ {studentRankInfo.total}</span></p>
+                      <p className="text-3xl sm:text-4xl lg:text-5xl font-black font-mono text-cyan-300 tracking-tight">{studentRankInfo.rank} <span className="text-sm text-slate-400 font-normal">/ {studentRankInfo.total}</span></p>
                     </div>
                   </div>
 
-                  <div className="bg-[#080507] border border-slate-800 p-4 rounded-3xl space-y-3 shadow-lg">
+                  <div className="lm-inset p-4 space-y-3">
                     <p className="text-xs font-bold uppercase text-slate-300">Activity Category Breakdown</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {sessionalActivitiesList.map((act, i) => {
                         const catPct = studentAnalyticsData.categories?.[act.category] || '0.00';
                         return (
-                          <div key={i} className="bg-[#130910] p-3.5 rounded-2xl border border-slate-800 flex flex-col justify-between space-y-2">
-                            <span className="text-[10px] text-slate-400 uppercase font-bold truncate">{act.category}</span>
-                            <span className="font-mono font-black text-emerald-400 text-xl">{catPct}%</span>
-                            <span className="text-[9px] text-slate-500 font-mono">Weight: {act.allocatedMarks} Marks</span>
+                          <div key={i} className="lm-card-flat p-3.5 flex flex-col justify-between space-y-2">
+                            <span className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold truncate">{act.category}</span>
+                            <span className="font-mono font-black text-emerald-400 text-xl sm:text-2xl">{catPct}%</span>
+                            <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono">Weight: {act.allocatedMarks} Marks</span>
                           </div>
                         );
                       })}
@@ -1185,29 +1254,29 @@ const LabroomDetail = () => {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="bg-[#080507] border border-blue-500/30 p-4 rounded-2xl space-y-1 shadow-lg">
-                      <p className="text-[10px] text-blue-400 uppercase font-extrabold tracking-wider">Overall Lab Average %</p>
-                      <p className="text-2xl sm:text-3xl font-black font-mono text-blue-300">{labAnalytics?.classAverages?.overallLabPercentage ?? labAnalytics?.classAverages?.overallPercentage ?? labAnalytics?.averageOverallPercentage ?? '0.00'}%</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="lm-inset p-4 space-y-1">
+                      <p className="text-[10px] sm:text-xs text-blue-400 uppercase font-extrabold tracking-wider">Overall Lab Average %</p>
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-blue-300 break-words">{labAnalytics?.classAverages?.overallLabPercentage ?? labAnalytics?.classAverages?.overallPercentage ?? labAnalytics?.averageOverallPercentage ?? '0.00'}%</p>
                     </div>
-                    <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-1">
-                      <p className="text-[10px] text-slate-400 uppercase font-bold">Evaluated Students</p>
-                      <p className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">{labAnalytics?.rankings?.length || 0} / {totalStudentsCount}</p>
+                    <div className="lm-inset p-4 space-y-1">
+                      <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Evaluated Students</p>
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-black text-emerald-400 font-mono">{labAnalytics?.rankings?.length || 0} / {totalStudentsCount}</p>
                     </div>
-                    <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-1">
-                      <p className="text-[10px] text-slate-400 uppercase font-bold">Pending Grades</p>
-                      <p className="text-2xl sm:text-3xl font-black text-amber-400 font-mono">{totalPendingCount}</p>
+                    <div className="lm-inset p-4 space-y-1">
+                      <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Pending Grades</p>
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-black text-amber-400 font-mono">{totalPendingCount}</p>
                     </div>
                   </div>
-                  <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
+                  <div className="lm-inset p-4 space-y-3">
                     <p className="text-xs font-bold uppercase text-slate-300">Deep Category Breakdown (Lab Averages)</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
                       {sessionalActivitiesList.map((act, i) => {
                         const targetKey = getCategoryTargetKey(act.category);
                         const avgVal = getCategoryClassAverage(targetKey, act);
                         return (
-                          <div key={i} className="bg-[#130910] p-2.5 rounded-xl border border-slate-800">
-                            <span className="text-[10px] text-slate-400 block uppercase">{act.category} Avg</span>
+                          <div key={i} className="lm-card-flat p-2.5 min-w-0">
+                            <span className="text-[10px] sm:text-xs text-slate-400 block uppercase truncate">{act.category} Avg</span>
                             <span className="font-mono font-bold text-blue-400 text-sm">{Number(avgVal).toFixed(2)}%</span>
                           </div>
                         );
@@ -1219,56 +1288,57 @@ const LabroomDetail = () => {
             </div>
 
             {/* LAB PROFILE BOX */}
-            <div className="relative bg-gradient-to-br from-[#130910] via-[#0b1016] to-[#070b10] backdrop-blur-2xl border border-blue-500/35 rounded-3xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
-              
-              <div className="space-y-4 relative z-10">
-                <div className="flex items-center justify-between border-b border-blue-500/20 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="p-2 bg-blue-500/10 border border-blue-500/30 rounded-xl text-blue-400 text-xs">🔬</span>
-                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Lab Profile</h3>
+            <div className="relative lm-card p-4 sm:p-6 flex flex-col justify-between overflow-hidden">
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="p-2 lm-card-flat text-blue-300 flex items-center justify-center shrink-0">
+                      <BeakerIcon className="w-4 h-4" />
+                    </span>
+                    <h3 className="text-sm font-black text-slate-100 uppercase tracking-wider">Lab Profile</h3>
                   </div>
-                  <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-blue-500/15 text-blue-300 border border-blue-500/40 uppercase font-extrabold tracking-widest">
+                  <span className="lm-badge text-[10px] font-mono text-blue-300 bg-blue-500/10 border-blue-500/30 uppercase break-all">
                     {labroom.sectionPrefix}
                   </span>
                 </div>
 
                 <div className="space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between bg-[#080507]/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/80 shadow-inner">
-                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider">Lab Code</span>
-                    <strong className="text-cyan-400 font-mono font-bold">{labroom.sectionPrefix}-{labroomId.slice(-4).toUpperCase()}</strong>
+                  <div className="lm-inset flex items-center justify-between gap-3 p-3">
+                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider shrink-0">Lab Code</span>
+                    <strong className="text-cyan-400 font-mono font-bold min-w-0 text-right break-all">{labroom.sectionPrefix}-{labroomId.slice(-4).toUpperCase()}</strong>
                   </div>
 
-                  <div className="flex items-center justify-between bg-[#080507]/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/80 shadow-inner">
-                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider">Instructor</span>
-                    <strong className="text-white font-bold truncate max-w-[160px]">{labroom.teacher?.name || labroom.placeholderTeacherName || 'TBA'}</strong>
+                  <div className="lm-inset flex items-center justify-between gap-3 p-3">
+                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider shrink-0">Instructor</span>
+                    <strong className="text-slate-100 font-bold min-w-0 text-right break-words">{labroom.teacher?.name || labroom.placeholderTeacherName || 'TBA'}</strong>
                   </div>
 
-                  <div className="flex items-center justify-between bg-[#080507]/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/80 shadow-inner">
-                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider">Section</span>
-                    <strong className="text-blue-300 font-mono font-bold">{labroom.sectionPrefix}</strong>
+                  <div className="lm-inset flex items-center justify-between gap-3 p-3">
+                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider shrink-0">Section</span>
+                    <strong className="text-blue-300 font-mono font-bold min-w-0 text-right break-all">{labroom.sectionPrefix}</strong>
                   </div>
 
-                  <div className="flex items-center justify-between bg-[#080507]/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/80 shadow-inner">
-                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider">Enrollment</span>
-                    <div className="flex items-center gap-1.5 font-mono">
+                  <div className="lm-inset flex items-center justify-between gap-3 p-3">
+                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider shrink-0">Enrollment</span>
+                    <div className="flex items-center gap-1.5 font-mono min-w-0 justify-end">
                       <span className="text-emerald-400 font-black">{totalStudentsCount}</span>
                       <span className="text-slate-500">/</span>
                       <span className="text-slate-300">{labroom.maxCapacity || 40} Max</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between bg-[#080507]/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800/80 shadow-inner">
-                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider">TAs Assigned</span>
-                    <strong className="text-cyan-400 font-mono font-bold">{(labroom.tas || []).length} Active TAs</strong>
+                  <div className="lm-inset flex items-center justify-between gap-3 p-3">
+                    <span className="text-slate-400 uppercase font-extrabold text-[10px] tracking-wider shrink-0">TAs Assigned</span>
+                    <strong className="text-cyan-400 font-mono font-bold min-w-0 text-right break-words">{(labroom.tas || []).length} Active TAs</strong>
                   </div>
                 </div>
               </div>
 
-              <div className="pt-4 relative z-10">
-                <button onClick={() => setIsMembersModalOpen(true)} className="w-full py-3 bg-gradient-to-r from-blue-500/25 hover:from-blue-500/35 to-cyan-500/25 hover:to-cyan-500/35 border border-blue-500/40 text-blue-300 hover:text-blue-200 text-xs font-black uppercase tracking-wider rounded-2xl transition-all cursor-pointer shadow-lg shadow-blue-500/10 flex items-center justify-center gap-2">
-                  <span>👥 View Full Lab Roster</span>
-                  <span>→</span>
+              <div className="pt-4">
+                <button onClick={() => setIsMembersModalOpen(true)} className="lm-btn w-full">
+                  <UserGroupIcon className="w-4 h-4" />
+                  <span>View Full Lab Roster</span>
+                  <ArrowRightIcon className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -1277,44 +1347,45 @@ const LabroomDetail = () => {
 
         {/* LEADERBOARD TAB VIEW */}
         {activeTab === 'leaderboard' && isStaffOrAdmin && (
-          <div className="bg-[#130910]/90 backdrop-blur-2xl border border-blue-500/20 rounded-3xl p-6 space-y-5 shadow-xl">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h3 className="text-base font-black text-white uppercase tracking-wider">🏆 Lab Leaderboard & Standings</h3>
-                <p className="text-xs text-slate-400">Rankings across all students evaluated in this lab.</p>
+          <div className="lm-card p-4 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                  <TrophyIcon className="w-4 h-4 text-orange-300 shrink-0" />
+                  Lab Leaderboard & Standings
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">Rankings across all students evaluated in this lab.</p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                {[
-                  { key: 'overall', label: 'Overall' },
-                  ...sessionalActivitiesList.map(a => ({ key: a.category.toLowerCase(), label: a.category }))
-                ].map((filter) => (
-                  <button
-                    key={filter.key}
-                    onClick={() => setLeaderboardFilter(filter.key)}
-                    className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer ${
-                      leaderboardFilter === filter.key
-                        ? 'bg-blue-400 text-black shadow-lg shadow-blue-500/20'
-                        : 'bg-[#080507] text-slate-300 border border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    {filter.label}
-                  </button>
-                ))}
+              <div className="lm-scroll-x -mx-1 px-1 w-full sm:w-auto sm:mx-0 sm:px-0">
+                <div className="flex items-center gap-1.5 min-w-max w-max">
+                  {[
+                    { key: 'overall', label: 'Overall' },
+                    ...sessionalActivitiesList.map(a => ({ key: a.category.toLowerCase(), label: a.category }))
+                  ].map((filter) => (
+                    <button
+                      key={filter.key}
+                      onClick={() => setLeaderboardFilter(filter.key)}
+                      className={leaderboardFilter === filter.key ? 'lm-chip-active' : 'lm-chip'}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+            <div className="lm-scroll-x rounded-xl">
+              <table className="lm-table">
                 <thead>
-                  <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
-                    <th className="py-3 px-3">Rank</th>
-                    <th className="py-3 px-3">Roll Number</th>
-                    <th className="py-3 px-3">Student Name</th>
-                    <th className="py-3 px-3 text-right">Score Percentage</th>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Roll Number</th>
+                    <th>Student Name</th>
+                    <th className="text-right">Score Percentage</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60 text-xs">
+                <tbody>
                   {getSortedLeaderboard().length === 0 ? (
                     <tr>
                       <td colSpan="4" className="text-center py-10 text-slate-500 italic">No lab evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
@@ -1333,20 +1404,23 @@ const LabroomDetail = () => {
                       }
 
                       return (
-                        <tr key={idx} className="hover:bg-slate-900/40 transition-all">
-                          <td className="py-3.5 px-3 font-mono font-bold text-blue-400">
-                            {idx === 0 ? '👑 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
+                        <tr key={idx}>
+                          <td className="font-mono font-bold text-blue-400 whitespace-nowrap">
+                            {idx === 0 ? <span className="inline-flex items-center gap-1"><StarIcon className="w-3.5 h-3.5 text-orange-300" />#1</span> : idx === 1 ? <span className="inline-flex items-center gap-1"><StarIcon className="w-3.5 h-3.5 text-orange-200" />#2</span> : idx === 2 ? <span className="inline-flex items-center gap-1"><StarIcon className="w-3.5 h-3.5 text-slate-400" />#3</span> : `#${idx + 1}`}
                           </td>
-                          <td className="py-3.5 px-3 font-mono text-cyan-400 font-bold">{studentRoll}</td>
-                          <td className="py-3.5 px-3 text-white font-medium">
-                            <div className="flex items-center gap-2.5">
-                              <span className="truncate">{studentName}</span>
+                          <td className="font-mono text-cyan-400 font-bold break-all">{studentRoll}</td>
+                          <td className="text-slate-100 font-medium">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="truncate min-w-0">{studentName}</span>
                               {isStaffOrAdmin && (
-                                <button type="button" onClick={() => openStudentProfile(studentObj)} className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-200 rounded-lg text-[9px] font-bold uppercase tracking-wider cursor-pointer shrink-0">👁 Profile</button>
+                                <button type="button" onClick={() => openStudentProfile(studentObj)} className="lm-btn-ghost shrink-0 text-[9px] px-2 py-1">
+                                  <EyeIcon className="w-3.5 h-3.5" />
+                                  Profile
+                                </button>
                               )}
                             </div>
                           </td>
-                          <td className="py-3.5 px-3 font-mono font-extrabold text-emerald-400 text-right">
+                          <td className="font-mono font-extrabold text-emerald-400 text-right whitespace-nowrap">
                             {Number(currentScore || 0).toFixed(2)}%
                           </td>
                         </tr>
@@ -1367,13 +1441,15 @@ const LabroomDetail = () => {
           const itemsList = [...(labroom[targetKey] || [])].reverse();
 
           return (
-            <div key={cat} className="bg-[#130910]/90 backdrop-blur-2xl border border-blue-500/20 rounded-3xl p-6 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">{cat} Activity Portal</h3>
+            <div key={cat} className="lm-card p-4 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-100 uppercase tracking-wider min-w-0 break-words">{cat} Activity Portal</h3>
                 <span className="text-xs font-mono text-slate-400">Allocated Weight: <strong className="text-blue-400">{act.allocatedMarks} Marks</strong></span>
               </div>
               {itemsList.length === 0 ? (
-                <p className="text-slate-500 text-xs italic text-center py-8">No {cat.toLowerCase()} created yet.</p>
+                <div className="lm-inset p-6 text-center">
+                  <p className="text-slate-500 text-xs italic">No {cat.toLowerCase()} created yet.</p>
+                </div>
               ) : (
                 <div className="space-y-4">
                   {itemsList.map((item, idx) => {
@@ -1389,46 +1465,46 @@ const LabroomDetail = () => {
                     const hasFile = studentItemScore?.file && studentItemScore.file.url;
 
                     return (
-                      <div 
-                        key={idx} 
-                        className="bg-gradient-to-br from-[#090b10] to-[#080507] border border-slate-800 hover:border-blue-500/40 rounded-2xl p-5 space-y-4 transition-all shadow-lg flex flex-col justify-between"
+                      <div
+                        key={idx}
+                        className="lm-card-flat hover:border-white/20 hover:-translate-y-px p-4 sm:p-5 space-y-4 transition-all flex flex-col justify-between"
                       >
                         <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                              <span className="w-2.5 h-2.5 rounded-full bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.8)]"></span>
-                              <h4 className="text-white font-black text-sm sm:text-base tracking-wide">{item.title}</h4>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-2.5 h-2.5 rounded-full bg-orange-300 shrink-0"></span>
+                              <h4 className="text-slate-100 font-black text-sm sm:text-base tracking-wide min-w-0 break-words">{item.title}</h4>
                             </div>
-                            <span className="px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-mono text-slate-300 uppercase">
+                            <span className="lm-badge font-mono shrink-0">
                               {total} Marks
                             </span>
                           </div>
 
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
-                            <div className="grid grid-cols-2 gap-3 bg-[#130910]/80 p-3.5 rounded-xl border border-slate-800/80">
-                              <div className="space-y-1">
+                            <div className="grid grid-cols-2 gap-3 lm-inset p-3.5">
+                              <div className="space-y-1 min-w-0">
                                 <div>
-                                  <span className="text-[10px] text-slate-400 uppercase block font-extrabold tracking-wider">Your Score</span>
-                                  <span className="font-mono text-emerald-400 font-black text-sm">
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Your Score</span>
+                                  <span className="font-mono text-emerald-400 font-black text-sm break-words">
                                     {studentItemScore ? (studentItemScore.isAbsent ? 'Marked Absent' : `${obtained} / ${total}`) : 'Pending'}
                                   </span>
                                 </div>
-                                <div className="pt-1 border-t border-slate-800/60">
-                                  <span className="text-[10px] text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg Score</span>
+                                <div className="pt-1 border-t border-white/5">
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg Score</span>
                                   <span className="font-mono text-cyan-400 font-bold text-xs">
                                     {itemAvgRaw} / {total}
                                   </span>
                                 </div>
                               </div>
-                              <div className="text-right space-y-1">
+                              <div className="text-right space-y-1 min-w-0">
                                 <div>
-                                  <span className="text-[10px] text-slate-400 uppercase block font-extrabold tracking-wider">Your %</span>
-                                  <span className="font-mono text-blue-400 font-black text-sm">
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Your %</span>
+                                  <span className="font-mono text-blue-400 font-black text-sm break-words">
                                     {studentItemScore && !studentItemScore.isAbsent ? `${studentPercentage}%` : 'N/A'}
                                   </span>
                                 </div>
-                                <div className="pt-1 border-t border-slate-800/60">
-                                  <span className="text-[10px] text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg %</span>
+                                <div className="pt-1 border-t border-white/5">
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg %</span>
                                   <span className="font-mono text-cyan-400 font-bold text-xs">
                                     {itemAvgPct}%
                                   </span>
@@ -1436,53 +1512,57 @@ const LabroomDetail = () => {
                               </div>
                             </div>
                           ) : (
-                            <div className="bg-[#130910]/80 p-3.5 rounded-xl border border-slate-800/80 space-y-2 text-xs">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400 font-bold uppercase">Class Average:</span>
-                                <strong className="text-cyan-400 font-mono">{itemAvgPct}% ({itemAvgRaw} / {total})</strong>
+                            <div className="lm-inset p-3.5 space-y-2 text-xs">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 font-bold uppercase shrink-0">Class Average:</span>
+                                <strong className="text-cyan-400 font-mono text-right min-w-0 break-words">{itemAvgPct}% ({itemAvgRaw} / {total})</strong>
                               </div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-400 font-bold uppercase">Grading Progress:</span>
-                                <span className="font-mono text-emerald-400 font-bold">{gradedCount} / {totalStudentsCount} Evaluated</span>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 font-bold uppercase shrink-0">Grading Progress:</span>
+                                <span className="font-mono text-emerald-400 font-bold text-right min-w-0">{gradedCount} / {totalStudentsCount} Evaluated</span>
                               </div>
                             </div>
                           )}
                         </div>
 
                         {/* Card Action Controls */}
-                        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/5">
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
-                            <div className="w-full flex items-center justify-between">
+                            <div className="w-full flex flex-wrap items-center justify-between gap-2">
                               <span className="text-[10px] text-slate-500 italic">Submission Status Active</span>
                               {hasFile && (
-                                <button 
+                                <button
                                   onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
-                                  className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                                  className="lm-btn-ghost text-blue-300 border border-blue-500/30"
                                 >
-                                  <span>📎</span> View Your Attempt
+                                  <PaperClipIcon className="w-4 h-4" />
+                                  View Your Attempt
                                 </button>
                               )}
                             </div>
                           ) : (
                             isStaffOrAdmin && (
-                              <div className="flex items-center gap-2 w-full">
+                              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full min-w-0">
                                 {ungradedCount > 0 ? (
-                                  <button 
+                                  <button
                                     onClick={() => handleTabletClick(item, targetKey, cat, true)}
-                                    className="flex-1 py-2 bg-amber-950/80 hover:bg-amber-900 border border-amber-500/40 text-amber-300 rounded-xl text-[10px] font-bold uppercase transition-all cursor-pointer text-center"
+                                    className="lm-btn-ghost flex-1 text-amber-300 border border-amber-500/30"
                                   >
-                                    ⚠️ Grade Remaining ({ungradedCount})
+                                    <ExclamationTriangleIcon className="w-4 h-4" />
+                                    Grade Remaining ({ungradedCount})
                                   </button>
                                 ) : (
-                                  <span className="flex-1 py-2 bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 rounded-xl text-[10px] font-mono font-bold text-center">
-                                    ✓ All Graded
+                                  <span className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-950/40 px-3 py-2 text-[10px] sm:text-xs font-mono font-bold uppercase text-emerald-300">
+                                    <CheckIcon className="w-4 h-4" />
+                                    All Graded
                                   </span>
                                 )}
-                                <button 
+                                <button
                                   onClick={() => handleTabletClick(item, targetKey, cat, false)}
-                                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase rounded-xl transition-all cursor-pointer border border-slate-700 text-center"
+                                  className="lm-btn-ghost flex-1 text-slate-100"
                                 >
-                                  Full Sheet →
+                                  Full Sheet
+                                  <ArrowRightIcon className="w-4 h-4" />
                                 </button>
                               </div>
                             )
@@ -1502,54 +1582,64 @@ const LabroomDetail = () => {
 
       {/* 1. Roster Modal */}
       {isMembersModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-lg bg-[#130910] border border-cyan-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-cyan-300 uppercase">Lab Roster & Hierarchy</h3>
-              <button onClick={() => setIsMembersModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal lm-modal-wide p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-cyan-300 uppercase min-w-0 break-words">Lab Roster & Hierarchy</h3>
+              <button onClick={() => setIsMembersModalOpen(false)} aria-label="Close" title="Close" className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             
-            <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-1">
+            <div className="max-h-[55vh] sm:max-h-[60vh] overflow-y-auto space-y-4 pr-1">
               <div className="space-y-1.5">
-                <p className="text-[10px] text-blue-400 uppercase font-extrabold tracking-wider">Instructor</p>
-                <div className="bg-[#080507] border border-blue-500/30 p-3.5 rounded-2xl flex items-center justify-between text-xs">
-                  <div className="truncate">
-                    <p className="text-white font-bold truncate">{labroom.teacher?.name || labroom.placeholderTeacherName || 'TBA'}</p>
-                    <p className="font-mono text-blue-300">{labroom.teacher?.email || 'Primary Instructor'}</p>
+                <p className="text-[10px] sm:text-xs text-blue-400 uppercase font-extrabold tracking-wider">Instructor</p>
+                <div className="lm-card-flat p-3.5 flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <p className="text-slate-100 font-bold truncate">{labroom.teacher?.name || labroom.placeholderTeacherName || 'TBA'}</p>
+                    <p className="font-mono text-blue-300 break-all">{labroom.teacher?.email || 'Primary Instructor'}</p>
                   </div>
-                  <span className="px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded-lg text-[9px] font-bold uppercase">Instructor</span>
+                  <span className="lm-badge text-blue-400 bg-blue-500/10 border-blue-500/30 shrink-0">Instructor</span>
                 </div>
               </div>
 
               {(labroom.tas || []).length > 0 && (
                 <div className="space-y-1.5">
-                  <p className="text-[10px] text-cyan-400 uppercase font-extrabold tracking-wider">Teaching Assistants (TAs)</p>
+                  <p className="text-[10px] sm:text-xs text-cyan-400 uppercase font-extrabold tracking-wider">Teaching Assistants (TAs)</p>
                   {(labroom.tas || []).map((ta, i) => (
-                    <div key={i} className="bg-[#080507] border border-cyan-500/30 p-3.5 rounded-2xl flex items-center justify-between text-xs">
-                      <div className="truncate">
-                        <p className="text-white font-bold truncate">{ta.name || 'TA Member'}</p>
-                        <p className="font-mono text-cyan-400">{ta.rollNo || ta.email || 'N/A'}</p>
+                    <div key={i} className="lm-card-flat p-3.5 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <p className="text-slate-100 font-bold truncate">{ta.name || 'TA Member'}</p>
+                        <p className="font-mono text-cyan-400 break-all">{ta.rollNo || ta.email || 'N/A'}</p>
                       </div>
-                      <span className="px-2 py-1 bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded-lg text-[9px] font-bold uppercase">TA</span>
+                      <span className="lm-badge text-cyan-300 bg-cyan-500/10 border-cyan-500/30 shrink-0">TA</span>
                     </div>
                   ))}
                 </div>
               )}
 
               <div className="space-y-1.5">
-                <p className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider">Enrolled Students ({activeStudents.length})</p>
+                <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-extrabold tracking-wider">Enrolled Students ({activeStudents.length})</p>
                 {activeStudents.map((st, i) => (
-                  <div key={i} className="bg-[#080507] border border-slate-800 p-3.5 rounded-2xl flex items-center justify-between text-xs gap-3">
-                    <div className="truncate">
-                      <p className="text-white font-bold truncate">{st.name}</p>
-                      <p className="font-mono text-cyan-400">{st.rollNo}</p>
+                  <div key={i} className="lm-card-flat p-3.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-slate-100 font-bold truncate">{st.name}</p>
+                      <p className="font-mono text-cyan-400 break-all">{st.rollNo}</p>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
                       {isStaffOrAdmin && (
                         <>
-                          <button onClick={() => openStudentProfile(st)} title="View Profile" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer">👁 Profile</button>
-                          <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">🔑 Reset</button>
-                          <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" className="px-2.5 py-1.5 bg-red-950 hover:bg-red-900 text-red-300 rounded-lg text-[10px] font-bold uppercase cursor-pointer">✕</button>
+                          <button onClick={() => openStudentProfile(st)} title="View Profile" aria-label="View Profile" className="lm-btn-ghost">
+                            <EyeIcon className="w-3.5 h-3.5" />
+                            Profile
+                          </button>
+                          <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" aria-label="Reset Password" className="lm-btn-ghost">
+                            <KeyIcon className="w-3.5 h-3.5" />
+                            Reset
+                          </button>
+                          <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" aria-label="Remove Student" className="lm-btn-ghost !px-2.5 !py-2 text-red-300 border border-red-500/30">
+                            <XMarkIcon className="w-3.5 h-3.5" />
+                          </button>
                         </>
                       )}
                     </div>
@@ -1558,44 +1648,52 @@ const LabroomDetail = () => {
               </div>
             </div>
 
-            <button onClick={() => setIsMembersModalOpen(false)} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close Roster</button>
+            <button onClick={() => setIsMembersModalOpen(false)} className="lm-btn-ghost w-full uppercase">Close Roster</button>
           </div>
         </div>
       )}
 
       {/* STUDENT PROFILE POPUP (LAB) */}
       {isStudentProfileModalOpen && profileStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2">👁 Student Profile</h3>
-              <button type="button" onClick={() => setIsStudentProfileModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3 border-b border-white/5 pb-4">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <EyeIcon className="w-4 h-4 shrink-0" />
+                Student Profile
+              </h3>
+              <button type="button" onClick={() => setIsStudentProfileModalOpen(false)} aria-label="Close" title="Close" className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center text-2xl font-black text-black shadow-lg shadow-blue-500/30">
+              <div className="h-14 w-14 shrink-0 rounded-2xl lm-badge !px-0 bg-gradient-to-br from-orange-200 to-orange-400 text-xl font-black text-slate-950 flex items-center justify-center">
                 {(profileStudent.name || '?').charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <h4 className="text-white font-bold text-lg truncate">{profileStudent.name}</h4>
-                <p className="text-slate-400 font-mono text-xs">Roll: <span className="text-cyan-300">{profileStudent.rollNo}</span></p>
+                <h4 className="text-slate-100 font-bold text-lg truncate">{profileStudent.name}</h4>
+                <p className="text-slate-400 font-mono text-xs">Roll: <span className="text-cyan-300 break-all">{profileStudent.rollNo}</span></p>
                 {profileStudent.email && <p className="text-slate-500 font-mono text-[10px] truncate">{profileStudent.email}</p>}
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
-                <p className="text-[9px] text-blue-400 uppercase font-extrabold tracking-wider">Lab Rank</p>
-                <p className="text-white font-black text-lg font-mono">{profileStudent.rank}</p>
+              <div className="lm-inset p-3 text-center">
+                <p className="text-[10px] sm:text-xs text-blue-400 uppercase font-extrabold tracking-wider">Lab Rank</p>
+                <p className="text-slate-100 font-black text-xl sm:text-2xl font-mono">{profileStudent.rank}</p>
               </div>
-              <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 text-center">
-                <p className="text-[9px] text-slate-400 uppercase font-extrabold tracking-wider">Overall</p>
-                <p className="text-emerald-400 font-black text-lg font-mono">{profileStudent.overall}%</p>
+              <div className="lm-inset p-3 text-center">
+                <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-extrabold tracking-wider">Overall</p>
+                <p className="text-emerald-400 font-black text-xl sm:text-2xl font-mono">{profileStudent.overall}%</p>
               </div>
             </div>
 
             <div>
-              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">📝 Marks in All Activities</h5>
+              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <PencilSquareIcon className="w-4 h-4 text-orange-300 shrink-0" />
+                Marks in All Activities
+              </h5>
               <div className="space-y-3 max-h-[32vh] overflow-y-auto pr-1">
                 {sessionalActivitiesList.map((act) => {
                   const targetKey = getCategoryTargetKey(act.category);
@@ -1605,11 +1703,11 @@ const LabroomDetail = () => {
                   const catScores = mdoc[targetKey] || [];
                   const catPct = profileStudent.categories?.[act.category];
                   return (
-                    <div key={act.category} className="bg-[#080507] border border-slate-800 rounded-2xl p-3.5 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-blue-400">{act.category}</p>
+                    <div key={act.category} className="lm-card-flat p-3.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-blue-400 min-w-0 truncate">{act.category}</p>
                         {catPct !== undefined && (
-                          <span className="text-[10px] font-mono font-bold text-cyan-300">{catPct}%</span>
+                          <span className="text-[10px] sm:text-xs font-mono font-bold text-cyan-300 shrink-0">{catPct}%</span>
                         )}
                       </div>
                       {itemsList.map((item, idx) => {
@@ -1617,8 +1715,8 @@ const LabroomDetail = () => {
                         const obtained = score && !score.isAbsent ? score.obtainedMarks : null;
                         const total = Number(item.totalMarks || 0);
                         return (
-                          <div key={idx} className="flex items-center justify-between text-xs">
-                            <span className="text-slate-300 truncate">{item.title}</span>
+                          <div key={idx} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-slate-300 truncate min-w-0">{item.title}</span>
                             <span className={`font-mono font-bold shrink-0 ml-2 ${obtained === null ? 'text-slate-600' : score.isAbsent ? 'text-amber-400' : 'text-emerald-400'}`}>
                               {score && score.isAbsent ? 'ABSENT' : obtained === null ? 'Ungraded' : `${obtained} / ${total}`}
                             </span>
@@ -1636,11 +1734,13 @@ const LabroomDetail = () => {
 
       {/* 2. Create Result Sheet Modal */}
       {isItemModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-blue-400 uppercase">Create Evaluation Item</h3>
-              <button onClick={() => { setIsItemModalOpen(false); setEvaluationMode(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-blue-400 uppercase min-w-0 break-words">Create Evaluation Item</h3>
+              <button onClick={() => { setIsItemModalOpen(false); setEvaluationMode(null); }} aria-label="Close" title="Close" className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
 
             {!evaluationMode ? (
@@ -1648,24 +1748,24 @@ const LabroomDetail = () => {
                 <p className="text-xs text-slate-300">Select evaluation spread configuration:</p>
                 <button 
                   onClick={() => setEvaluationMode('full')} 
-                  className="w-full p-4 bg-[#080507] hover:bg-blue-950/40 border border-slate-800 hover:border-blue-500/40 rounded-2xl text-left transition-all group cursor-pointer space-y-1"
+                  className="lm-inset hover:border-blue-500/40 hover:-translate-y-px p-4 text-left transition-all cursor-pointer space-y-1 w-full"
                 >
-                  <p className="text-xs font-bold text-white group-hover:text-blue-300 uppercase">1. Full Class Spreadsheet</p>
-                  <p className="text-[10px] text-slate-400">Generates or opens the grading sheet for all enrolled students in the lab.</p>
+                  <p className="text-xs font-bold text-slate-100 uppercase">1. Full Class Spreadsheet</p>
+                  <p className="text-[10px] sm:text-xs text-slate-400">Generates or opens the grading sheet for all enrolled students in the lab.</p>
                 </button>
                 <button 
                   onClick={() => setEvaluationMode('range')} 
-                  className="w-full p-4 bg-[#080507] hover:bg-blue-950/40 border border-slate-800 hover:border-blue-500/40 rounded-2xl text-left transition-all group cursor-pointer space-y-1"
+                  className="lm-inset hover:border-blue-500/40 hover:-translate-y-px p-4 text-left transition-all cursor-pointer space-y-1 w-full"
                 >
-                  <p className="text-xs font-bold text-white group-hover:text-blue-300 uppercase">2. Select From a Range</p>
-                  <p className="text-[10px] text-slate-400">Filters sheet rows to a specific numeric suffix or ID range (e.g., 1 to 25).</p>
+                  <p className="text-xs font-bold text-slate-100 uppercase">2. Select From a Range</p>
+                  <p className="text-[10px] sm:text-xs text-slate-400">Filters sheet rows to a specific numeric suffix or ID range (e.g., 1 to 25).</p>
                 </button>
               </div>
             ) : (
               <form onSubmit={handleCreateAndOpenSheet} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
-                  <select value={itemCategory} onChange={(e) => setItemCategory(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono">
+                  <select value={itemCategory} onChange={(e) => setItemCategory(e.target.value)} className="lm-field uppercase font-mono">
                     {sessionalActivitiesList.map(act => (
                       <option key={act.category} value={act.category}>{act.category}</option>
                     ))}
@@ -1673,29 +1773,32 @@ const LabroomDetail = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Item Title</label>
-                  <input type="text" required placeholder="e.g. Lab Task 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                  <input type="text" required placeholder="e.g. Lab Task 1" value={itemTitle} onChange={(e) => setItemTitle(e.target.value)} className="lm-field" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
-                  <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="lm-field font-mono" />
                 </div>
 
                 {evaluationMode === 'range' && (
-                  <div className="grid grid-cols-2 gap-3 bg-[#080507] p-3 rounded-2xl border border-slate-800">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Start #</label>
-                      <input type="number" required placeholder="1" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} className="w-full px-3 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <div className="grid grid-cols-2 gap-3 lm-inset p-3">
+                    <div className="min-w-0">
+                      <label className="block text-[10px] sm:text-xs font-bold uppercase text-slate-400 mb-1">Start #</label>
+                      <input type="number" required placeholder="1" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} className="lm-field font-mono" />
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">End #</label>
-                      <input type="number" required placeholder="25" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} className="w-full px-3 py-2 bg-[#130910] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                    <div className="min-w-0">
+                      <label className="block text-[10px] sm:text-xs font-bold uppercase text-slate-400 mb-1">End #</label>
+                      <input type="number" required placeholder="25" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} className="lm-field font-mono" />
                     </div>
                   </div>
                 )}
 
-                <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setEvaluationMode(null)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">← Back</button>
-                  <button type="submit" disabled={creatingItem} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <button type="button" onClick={() => setEvaluationMode(null)} className="lm-btn-ghost w-full sm:w-1/2 uppercase">
+                    <ArrowLeftIcon className="w-4 h-4" />
+                    Back
+                  </button>
+                  <button type="submit" disabled={creatingItem} className="lm-btn w-full sm:w-1/2">
                     {creatingItem ? 'Opening...' : 'Open Sheet'}
                   </button>
                 </div>
@@ -1707,51 +1810,59 @@ const LabroomDetail = () => {
 
       {/* 3. Excel Upload Sync Modal */}
       {isExcelModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-blue-300 uppercase">📊 Sync Lab Marks via Excel/CSV</h3>
-              <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <ChartBarIcon className="w-4 h-4 shrink-0" />
+                Sync Lab Marks via Excel/CSV
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             
             {syncReport ? (
               <div className="space-y-4">
-                <div className="p-4 bg-emerald-950/60 border border-emerald-500/40 rounded-2xl space-y-2">
-                  <p className="text-emerald-300 font-bold text-xs">Sync Complete Successfully!</p>
+                <div className="lm-inset p-4 bg-emerald-950/60 border border-emerald-500/40 space-y-2">
+                  <p className="text-emerald-300 font-bold text-xs flex items-center gap-2">
+                    <CheckIcon className="w-4 h-4 shrink-0" />
+                    Sync Complete Successfully!
+                  </p>
                   <p className="text-xs text-slate-300">Total Rows Processed: <strong className="font-mono text-white">{syncReport.totalProcessed || 0}</strong></p>
                   <p className="text-xs text-slate-300">Successfully Updated: <strong className="font-mono text-emerald-400">{syncReport.updatedCount || 0}</strong></p>
                   {syncReport.errors?.length > 0 && (
                     <p className="text-xs text-amber-300">Warnings/Skipped: {syncReport.errors.length}</p>
                   )}
                 </div>
-                <button onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Done</button>
+                <button type="button" onClick={() => { setIsExcelModalOpen(false); setSyncReport(null); setExcelFile(null); }} className="lm-btn w-full">Done</button>
               </div>
             ) : (
               <form onSubmit={handleExcelSyncSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Category</label>
-                  <select value={excelCategory} onChange={(e) => setExcelCategory(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono">
+                  <label className="lm-eyebrow block mb-1.5">Category</label>
+                  <select value={excelCategory} onChange={(e) => setExcelCategory(e.target.value)} className="lm-field uppercase font-mono">
                     {sessionalActivitiesList.map(act => (
                       <option key={act.category} value={act.category}>{act.category}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Evaluation Title</label>
-                  <input type="text" required placeholder="e.g. Lab Task 1 or Viva 1" value={excelTitle} onChange={(e) => setExcelTitle(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                  <label className="lm-eyebrow block mb-1.5">Evaluation Title</label>
+                  <input type="text" required placeholder="e.g. Lab Task 1 or Viva 1" value={excelTitle} onChange={(e) => setExcelTitle(e.target.value)} className="lm-field" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
-                  <input type="number" required min="1" value={excelTotalMarks} onChange={(e) => setExcelTotalMarks(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <label className="lm-eyebrow block mb-1.5">Total Marks</label>
+                  <input type="number" required min="1" value={excelTotalMarks} onChange={(e) => setExcelTotalMarks(e.target.value)} className="lm-field font-mono" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Upload CSV / Excel File</label>
-                  <input type="file" required accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" onChange={(e) => setExcelFile(e.target.files[0])} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-500 file:text-black hover:file:bg-blue-400 cursor-pointer" />
-                  <p className="text-[10px] text-slate-500 mt-1">File must include columns for Roll Number / Reg ID and Marks Obtained.</p>
+                  <label className="lm-eyebrow block mb-1.5">Upload CSV / Excel File</label>
+                  <input type="file" required accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" onChange={(e) => setExcelFile(e.target.files[0])} className="lm-field file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-slate-700 file:text-slate-100 hover:file:bg-slate-600 cursor-pointer" />
+                  <p className="text-[10px] sm:text-xs text-slate-500 mt-1.5 leading-relaxed">File must include columns for Roll Number / Reg ID and Marks Obtained.</p>
                 </div>
-                <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setIsExcelModalOpen(false)} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                  <button type="submit" disabled={syncingExcel} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-2">
+                  <button type="button" onClick={() => setIsExcelModalOpen(false)} className="lm-btn-ghost w-full sm:w-1/2 uppercase">Cancel</button>
+                  <button type="submit" disabled={syncingExcel} className="lm-btn w-full sm:w-1/2">
                     {syncingExcel ? 'Syncing...' : 'Upload & Sync'}
                   </button>
                 </div>
@@ -1763,23 +1874,28 @@ const LabroomDetail = () => {
 
       {/* 4. Supercharged Add Student Modal */}
       {isAddStudentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-5 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-white uppercase">Enroll Students</h3>
-                <p className="text-[11px] text-slate-400">Choose your preferred quick-entry method for section <strong className="text-blue-400 font-mono">{labroom?.sectionPrefix}</strong></p>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-base font-extrabold text-slate-100 uppercase">Enroll Students</h3>
+                <p className="text-[10px] sm:text-xs text-slate-400 mt-1 break-words">Choose your preferred quick-entry method for section <strong className="text-blue-400 font-mono break-all">{labroom?.sectionPrefix}</strong></p>
               </div>
-              <button onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" aria-label="Close" title="Close" onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             
-            {addStudentError && <div className="p-3 bg-red-950/80 border border-red-500 text-red-200 rounded-xl text-xs">{addStudentError}</div>}
+            {addStudentError && <div className="lm-inset p-3 bg-red-950/60 border border-red-500/40 text-red-300 text-xs">{addStudentError}</div>}
             
-            <div className="grid grid-cols-4 gap-1.5">
-              <button type="button" onClick={() => setAddModeType('shorthand')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'shorthand' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>1. Shorthand</button>
-              <button type="button" onClick={() => setAddModeType('range')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'range' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>2. Range</button>
-              <button type="button" onClick={() => setAddModeType('batch')} className={`py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'batch' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>3. Add/Drop</button>
-              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-[10px] font-bold uppercase cursor-pointer transition-all ${addModeType === 'smartDetect' ? 'bg-blue-500 text-black shadow-sm' : 'bg-slate-800 text-slate-300'}`}>4. Smart Add<span className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-black/25 text-black' : 'bg-slate-700 text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span></button>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <button type="button" onClick={() => setAddModeType('shorthand')} className={`justify-center ${addModeType === 'shorthand' ? 'lm-chip-active' : 'lm-chip'}`}>1. Shorthand</button>
+              <button type="button" onClick={() => setAddModeType('range')} className={`justify-center ${addModeType === 'range' ? 'lm-chip-active' : 'lm-chip'}`}>2. Range</button>
+              <button type="button" onClick={() => setAddModeType('batch')} className={`justify-center ${addModeType === 'batch' ? 'lm-chip-active' : 'lm-chip'}`}>3. Add/Drop</button>
+              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`justify-center ${addModeType === 'smartDetect' ? 'lm-chip-active' : 'lm-chip'}`}>
+                <span className="whitespace-nowrap">4. Smart Add</span>
+                <span className={`lm-badge text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-slate-950/25 text-slate-950 border-white/20' : 'text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span>
+              </button>
             </div>
 
             <form onSubmit={handleAddStudentSubmit} className="space-y-4">
@@ -1792,9 +1908,9 @@ const LabroomDetail = () => {
                     placeholder="e.g. 3, 4, 56, 23" 
                     value={studentRollInput} 
                     onChange={(e) => setStudentRollInput(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase focus:ring-1 focus:ring-blue-400" 
+                    className="lm-field font-mono uppercase" 
                   />
-                  <p className="text-[10px] text-slate-500 leading-tight">
+                  <p className="text-[10px] sm:text-xs text-slate-500 leading-tight">
                     Quickly maps digits into full roll numbers using <span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span> prefix (e.g., <span className="font-mono text-cyan-400">3</span> becomes <span className="font-mono text-blue-400">{labroom?.sectionPrefix}003</span>).
                   </p>
                 </div>
@@ -1802,17 +1918,17 @@ const LabroomDetail = () => {
 
               {addModeType === 'range' && (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="min-w-0">
                       <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Start Suffix / #</label>
-                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                      <input type="number" required placeholder="1" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} className="lm-field font-mono" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label className="block text-xs font-bold uppercase text-slate-400 mb-1">End Suffix / #</label>
-                      <input type="number" required placeholder="40" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                      <input type="number" required placeholder="40" value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} className="lm-field font-mono" />
                     </div>
                   </div>
-                  <p className="text-[10px] text-slate-500">
+                  <p className="text-[10px] sm:text-xs text-slate-500">
                     Bulk enrolls a continuous numeric sequence under <span className="font-mono text-blue-400">{labroom?.sectionPrefix}</span>.
                   </p>
                 </div>
@@ -1828,37 +1944,38 @@ const LabroomDetail = () => {
                         placeholder="e.g. BITF26A047 or 2023123" 
                         value={addDropInput} 
                         onChange={(e) => { setAddDropInput(e.target.value); setLookupTargetStudent(null); }} 
-                        className="flex-1 px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" 
+                        className="lm-field flex-1 min-w-0 font-mono uppercase" 
                       />
                       <button 
                         type="button" 
                         onClick={handleLookupStudentForAddDrop} 
                         disabled={lookingUpStudent || !addDropInput.trim()}
-                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/40 rounded-xl text-xs font-bold uppercase cursor-pointer disabled:opacity-50"
+                        className="lm-btn-ghost shrink-0 text-blue-300 border border-blue-500/30"
                       >
+                        <MagnifyingGlassIcon className="w-4 h-4" />
                         {lookingUpStudent ? 'Searching...' : 'Lookup'}
                       </button>
                     </div>
-                    <p className="text-[10px] text-slate-500">Enter the student's full roll number or registration number, then Lookup. Verify their info and status before confirming enrollment.</p>
+                    <p className="text-[10px] sm:text-xs text-slate-500 leading-relaxed">Enter the student's full roll number or registration number, then Lookup. Verify their info and status before confirming enrollment.</p>
                   </div>
 
                   {lookupTargetStudent && (
-                    <div className="bg-[#080507] border border-emerald-500/40 p-4 rounded-2xl space-y-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 uppercase">Student Name:</span>
-                        <strong className="text-white">{lookupTargetStudent.name}</strong>
+                    <div className="lm-inset p-4 space-y-2 text-xs border-emerald-500/40 bg-emerald-950/25">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-400 uppercase shrink-0">Student Name:</span>
+                        <strong className="text-slate-100 min-w-0 text-right break-words">{lookupTargetStudent.name}</strong>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 uppercase">Email:</span>
-                        <strong className="text-blue-300">{lookupTargetStudent.personalNotificationEmail || lookupTargetStudent.email || 'N/A'}</strong>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-400 uppercase shrink-0">Email:</span>
+                        <strong className="text-blue-300 min-w-0 text-right break-all">{lookupTargetStudent.personalNotificationEmail || lookupTargetStudent.email || 'N/A'}</strong>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 uppercase">Roll / Reg No:</span>
-                        <strong className="font-mono text-cyan-400">{lookupTargetStudent.rollNo}{lookupTargetStudent.registrationNo && lookupTargetStudent.registrationNo !== 'N/A' ? ` / ${lookupTargetStudent.registrationNo}` : ''}</strong>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-400 uppercase shrink-0">Roll / Reg No:</span>
+                        <strong className="font-mono text-cyan-400 min-w-0 text-right break-all">{lookupTargetStudent.rollNo}{lookupTargetStudent.registrationNo && lookupTargetStudent.registrationNo !== 'N/A' ? ` / ${lookupTargetStudent.registrationNo}` : ''}</strong>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 uppercase">Status:</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${lookupTargetStudent.isAlreadyEnrolled ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-300'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-slate-400 uppercase shrink-0">Status:</span>
+                        <span className={`lm-badge ${lookupTargetStudent.isAlreadyEnrolled ? 'bg-amber-950/70 text-amber-300 border-amber-500/40' : 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'}`}>
                           {lookupTargetStudent.isAlreadyEnrolled ? 'Already Enrolled' : lookupTargetStudent.isAddDrop ? 'Add/Drop Senior' : 'Regular Prefix Match'}
                         </span>
                       </div>
@@ -1871,9 +1988,9 @@ const LabroomDetail = () => {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
                     <span>Matching Prefix: <strong className="text-blue-400 font-mono">{labroom?.sectionPrefix}</strong></span>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-emerald-950/70 border border-emerald-500/40 text-emerald-300">✅ Enrolled <b className="font-mono">{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-blue-950/70 border border-blue-500/40 text-blue-300">🟢 Available <b className="font-mono">{classDirectoryStudents.filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="lm-badge bg-emerald-950/70 border-emerald-500/40 text-emerald-300"><CheckIcon className="w-3.5 h-3.5" />Enrolled <b className="font-mono">{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
+                      <span className="lm-badge bg-blue-950/70 border-blue-500/40 text-blue-300"><CheckCircleIcon className="w-3.5 h-3.5" />Available <b className="font-mono">{classDirectoryStudents.filter(st => !activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</b></span>
                       <button 
                         type="button" 
                         onClick={() => {
@@ -1882,16 +1999,19 @@ const LabroomDetail = () => {
                             .map(st => st.rollNo);
                           setSelectedDirectoryRolls(unenrolled);
                         }} 
-                        className="text-blue-400 underline font-bold cursor-pointer hover:text-blue-300"
+                        className="lm-btn-ghost text-blue-300 border border-blue-500/30"
                       >
                         Select All Unenrolled
                       </button>
                     </div>
                   </div>
 
-                  <div className="max-h-56 overflow-y-auto space-y-2 bg-[#080507] border border-slate-800 p-3 rounded-2xl">
+                  <div className="lm-inset max-h-56 overflow-y-auto space-y-2 p-3">
                     {loadingDirectory ? (
-                      <p className="text-center text-xs text-slate-500 py-6">Scanning class directory...</p>
+                      <div className="flex flex-col items-center gap-3 py-6 text-center">
+                        <div className="lm-bar"></div>
+                        <p className="text-xs text-slate-500">Scanning class directory...</p>
+                      </div>
                     ) : classDirectoryStudents.length === 0 ? (
                       <p className="text-center text-xs text-slate-500 py-6 italic">No registered user accounts found matching prefix {labroom?.sectionPrefix}. Try shorthand or range mode.</p>
                     ) : (
@@ -1916,33 +2036,29 @@ const LabroomDetail = () => {
                                 setSelectedDirectoryRolls([...selectedDirectoryRolls, st.rollNo]);
                               }
                             }}
-                            className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                            className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs transition-all ${
                               alreadyEnrolled 
                                 ? 'bg-slate-950/40 border-slate-900/60 opacity-40 cursor-not-allowed select-none' 
                                 : isSelected 
-                                  ? 'bg-blue-950/60 border-blue-500/50 text-white cursor-pointer' 
-                                  : 'bg-[#130910] border-slate-800 hover:border-slate-700 text-slate-300 cursor-pointer'
+                                  ? 'bg-blue-950/60 border-blue-500/50 text-slate-100 cursor-pointer' 
+                                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-300 cursor-pointer'
                             }`}
                           >
-                            <div className="flex items-center gap-2.5 truncate">
+                            <div className="flex items-center gap-2.5 min-w-0 truncate">
                               <input 
                                 type="checkbox" 
                                 checked={isSelected || alreadyEnrolled} 
                                 disabled={alreadyEnrolled}
                                 onChange={() => {}} 
-                                className={`rounded accent-blue-500 ${alreadyEnrolled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
+                                className={`rounded accent-blue-500 shrink-0 ${alreadyEnrolled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`} 
                               />
-                              <div className="truncate">
-                                <p className={`font-bold truncate ${alreadyEnrolled ? 'text-slate-500 line-through' : 'text-white'}`}>{st.name}</p>
-                                <p className="font-mono text-cyan-400 text-[11px]">{st.rollNo}</p>
+                              <div className="truncate min-w-0">
+                                <p className={`font-bold truncate ${alreadyEnrolled ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{st.name}</p>
+                                <p className="font-mono text-cyan-400 text-[10px] sm:text-[11px] break-all">{st.rollNo}</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold ${
-                                alreadyEnrolled 
-                                  ? 'bg-slate-900 text-slate-500 border border-slate-800' 
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}>
+                              <span className={`lm-badge ${alreadyEnrolled ? 'text-slate-500' : 'text-slate-400'}`}>
                                 {alreadyEnrolled ? 'Enrolled' : 'Available'}
                               </span>
                               {!alreadyEnrolled && (
@@ -1950,10 +2066,12 @@ const LabroomDetail = () => {
                                   type="button"
                                   disabled={rejectingRoll === st.rollNo}
                                   onClick={(e) => { e.stopPropagation(); handleToggleRejectStudent(st.rollNo); }}
+                                  aria-label="âœ• Reject"
                                   title="Hide from Smart Add (manual enrollment still available)"
-                                  className="px-2 py-0.5 bg-red-950/70 hover:bg-red-900 border border-red-500/40 text-red-300 rounded-lg text-[9px] font-bold uppercase cursor-pointer disabled:opacity-50 transition-all"
+                                  className="lm-btn-ghost !px-2 !py-0.5 text-red-300 border border-red-500/40"
                                 >
-                                  {rejectingRoll === st.rollNo ? '…' : '✕ Reject'}
+                                  <XMarkIcon className="w-3.5 h-3.5" />
+                                  {rejectingRoll === st.rollNo ? 'â€¦' : 'Reject'}
                                 </button>
                               )}
                             </div>
@@ -1964,8 +2082,11 @@ const LabroomDetail = () => {
                   </div>
 
                   {rejectedRolls.length > 0 && (
-                    <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-2.5 space-y-1.5">
-                      <p className="text-[9px] font-bold uppercase tracking-wider text-red-300">⚠ Hidden from Smart Add ({rejectedRolls.length}) — add these manually if needed</p>
+                    <div className="lm-inset p-3 space-y-2 border-red-500/40 bg-red-950/40">
+                      <p className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-300 flex items-start gap-1.5">
+                        <ExclamationTriangleIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>Hidden from Smart Add ({rejectedRolls.length}) â€” add these manually if needed</span>
+                      </p>
                       <div className="flex flex-wrap gap-1.5">
                         {rejectedRolls.map((roll, i) => (
                           <button 
@@ -1973,22 +2094,24 @@ const LabroomDetail = () => {
                             type="button" 
                             disabled={rejectingRoll === roll}
                             onClick={() => handleToggleRejectStudent(roll)}
+                            aria-label={`â†º ${roll}`}
                             title="Restore into Smart Add"
-                            className="px-2 py-0.5 bg-[#080507] hover:bg-slate-800 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-mono cursor-pointer disabled:opacity-50 transition-all"
+                            className="lm-btn-ghost !px-2 !py-0.5 text-red-300 border border-red-500/30 font-mono !text-[10px]"
                           >
-                            {rejectingRoll === roll ? '…' : `↺ ${roll}`}
+                            <ArrowPathIcon className="w-3.5 h-3.5" />
+                            {rejectingRoll === roll ? 'â€¦' : roll}
                           </button>
                         ))}
                       </div>
                     </div>
                   )}
-                  <p className="text-[10px] text-slate-500">Selected: <strong className="text-emerald-400 font-mono">{selectedDirectoryRolls.length}</strong> new students ready to enroll.</p>
+                  <p className="text-[10px] sm:text-xs text-slate-500">Selected: <strong className="text-emerald-400 font-mono">{selectedDirectoryRolls.length}</strong> new students ready to enroll.</p>
                 </div>
               )}
 
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="w-1/2 py-3 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" disabled={addingStudent || (addModeType === 'batch' && !lookupTargetStudent)} className="w-1/2 py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-2">
+                <button type="button" onClick={() => { setIsAddStudentModalOpen(false); setLookupTargetStudent(null); setAddDropInput(''); }} className="lm-btn-ghost w-full sm:w-1/2 uppercase">Cancel</button>
+                <button type="submit" disabled={addingStudent || (addModeType === 'batch' && !lookupTargetStudent)} className="lm-btn w-full sm:w-1/2">
                   {addingStudent ? 'Processing...' : (addModeType === 'batch' ? 'Confirm Enrollment' : 'Enroll Students')}
                 </button>
               </div>
@@ -1999,26 +2122,35 @@ const LabroomDetail = () => {
 
       {/* 5. Add TA Modal */}
       {isTaModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-blue-300 uppercase">Assign Teaching Assistant</h3>
-              <button onClick={() => setIsTaModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <UserGroupIcon className="w-4 h-4 shrink-0" />
+                Assign Teaching Assistant
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setIsTaModalOpen(false)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             <form onSubmit={handleLookupTa} className="space-y-3">
-              <input type="text" required placeholder="Enter student roll number" value={taRollNo} onChange={(e) => setTaRollNo(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono uppercase" />
-              <button type="submit" disabled={taSearching} className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 font-bold uppercase text-xs rounded-xl cursor-pointer">
+              <input type="text" required placeholder="Enter student roll number" value={taRollNo} onChange={(e) => setTaRollNo(e.target.value)} className="lm-field font-mono uppercase" />
+              <button type="submit" disabled={taSearching} className="lm-btn-ghost w-full text-blue-300 border border-blue-500/30">
+                <MagnifyingGlassIcon className="w-4 h-4" />
                 {taSearching ? 'Searching...' : 'Lookup Student'}
               </button>
             </form>
             {taLookupResult && (
-              <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
+              <div className="lm-inset p-4 space-y-3">
                 {taLookupResult.status === 'not_found' ? (
-                  <p className="text-red-400 text-xs">{taLookupResult.message}</p>
+                  <p className="text-red-300 text-xs flex items-start gap-2">
+                    <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-px" />
+                    <span>{taLookupResult.message}</span>
+                  </p>
                 ) : (
                   <div className="space-y-2">
-                    <p className="text-xs text-white">Found: <strong className="text-blue-400">{taLookupResult.user.name}</strong> ({taLookupResult.user.rollNo})</p>
-                    <button type="button" onClick={() => handleConfirmAddTa(taLookupResult.user._id)} className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Assign as TA</button>
+                    <p className="text-xs text-slate-100 break-words">Found: <strong className="text-blue-400">{taLookupResult.user.name}</strong> ({taLookupResult.user.rollNo})</p>
+                    <button type="button" onClick={() => handleConfirmAddTa(taLookupResult.user._id)} className="lm-btn w-full uppercase">Assign as TA</button>
                   </div>
                 )}
               </div>
@@ -2029,26 +2161,35 @@ const LabroomDetail = () => {
 
       {/* 6. Assign Instructor Modal */}
       {isAssignTeacherModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-purple-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-purple-300 uppercase">Assign Instructor</h3>
-              <button onClick={() => setIsAssignTeacherModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-purple-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <AcademicCapIcon className="w-4 h-4 shrink-0" />
+                Assign Instructor
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setIsAssignTeacherModalOpen(false)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             <form onSubmit={handleLookupTeacher} className="space-y-3">
-              <input type="text" required placeholder="Enter teacher email or ID" value={teacherRollNo} onChange={(e) => setTeacherRollNo(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
-              <button type="submit" disabled={teacherSearching} className="w-full py-2.5 bg-purple-950 text-purple-200 border border-purple-500/40 font-bold uppercase text-xs rounded-xl cursor-pointer">
+              <input type="text" required placeholder="Enter teacher email or ID" value={teacherRollNo} onChange={(e) => setTeacherRollNo(e.target.value)} className="lm-field font-mono" />
+              <button type="submit" disabled={teacherSearching} className="lm-btn-ghost w-full text-purple-300 border border-purple-500/40">
+                <MagnifyingGlassIcon className="w-4 h-4" />
                 {teacherSearching ? 'Searching...' : 'Lookup Teacher'}
               </button>
             </form>
             {teacherLookupResult && (
-              <div className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-3">
+              <div className="lm-inset p-4 space-y-3">
                 {teacherLookupResult.status === 'not_found' ? (
-                  <p className="text-red-400 text-xs">{teacherLookupResult.message}</p>
+                  <p className="text-red-300 text-xs flex items-start gap-2">
+                    <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-px" />
+                    <span>{teacherLookupResult.message}</span>
+                  </p>
                 ) : (
                   <div className="space-y-2">
-                    <p className="text-xs text-white">Found: <strong className="text-purple-400">{teacherLookupResult.user.name}</strong> ({teacherLookupResult.user.email})</p>
-                    <button type="button" onClick={() => handleConfirmAssignTeacher(teacherLookupResult.user._id)} className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer">Confirm Assignment</button>
+                    <p className="text-xs text-slate-100 break-all">Found: <strong className="text-purple-300">{teacherLookupResult.user.name}</strong> ({teacherLookupResult.user.email})</p>
+                    <button type="button" onClick={() => handleConfirmAssignTeacher(teacherLookupResult.user._id)} className="lm-btn w-full uppercase">Confirm Assignment</button>
                   </div>
                 )}
               </div>
@@ -2059,40 +2200,45 @@ const LabroomDetail = () => {
 
       {/* 7. Settings Modal with Strict Backend Options */}
       {isSettingsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl my-auto max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-extrabold text-white uppercase">Lab Settings & Activities</h3>
-              <button onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-slate-100 uppercase flex items-center gap-2 min-w-0 break-words">
+                <Cog6ToothIcon className="w-4 h-4 shrink-0" />
+                Lab Settings &amp; Activities
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setIsSettingsModalOpen(false)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             <form onSubmit={handleUpdateLabSettings} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Lab Name</label>
-                <input type="text" required value={editLabName} onChange={(e) => setEditLabName(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                <input type="text" required value={editLabName} onChange={(e) => setEditLabName(e.target.value)} className="lm-field" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Section Prefix</label>
-                  <input type="text" required value={editSectionPrefix} onChange={(e) => setEditSectionPrefix(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs uppercase font-mono" />
+                  <input type="text" required value={editSectionPrefix} onChange={(e) => setEditSectionPrefix(e.target.value)} className="lm-field uppercase font-mono" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Max Capacity</label>
-                  <input type="number" required value={editMaxCapacity} onChange={(e) => setEditMaxCapacity(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono" />
+                  <input type="number" required value={editMaxCapacity} onChange={(e) => setEditMaxCapacity(e.target.value)} className="lm-field font-mono" />
                 </div>
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Placeholder Teacher Name</label>
-                <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="w-full px-3 py-2 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs" />
+                <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="lm-field" />
               </div>
 
               {/* Dynamic Sessional Activities Manager with Backend Options Only */}
-              <div className="pt-3 border-t border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-blue-400 uppercase">Lab Activities & Mark Weights</p>
+              <div className="pt-4 border-t border-white/5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-blue-400 uppercase min-w-0 break-words">Lab Activities &amp; Mark Weights</p>
                   <button 
                     type="button" 
                     onClick={() => setEditSessionalActivities([...editSessionalActivities, { category: 'Lab Tasks', allocatedMarks: 20 }])}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-blue-500/30 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
+                    className="lm-chip"
                   >
                     + Add Activity
                   </button>
@@ -2103,7 +2249,7 @@ const LabroomDetail = () => {
                     const presetCategories = ['Lab Tasks', 'Vivas', 'Lab Tests', 'Projects', 'Quizzes', 'Assignments'];
 
                     return (
-                      <div key={index} className="flex items-center gap-2 bg-[#080507] p-2 rounded-xl border border-slate-800">
+                      <div key={index} className="lm-inset flex items-center gap-2 p-2">
                         <select
                           value={act.category}
                           onChange={(e) => {
@@ -2112,7 +2258,7 @@ const LabroomDetail = () => {
                             updated[index].category = val;
                             setEditSessionalActivities(updated);
                           }}
-                          className="flex-1 px-2.5 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono uppercase"
+                          className="lm-field flex-1 min-w-0 !rounded-lg !py-1.5 !px-2.5 font-mono uppercase !text-xs"
                         >
                           {!presetCategories.includes(act.category) && (
                             <option value={act.category} key={`current-${act.category}`}>{act.category}</option>
@@ -2131,19 +2277,21 @@ const LabroomDetail = () => {
                             updated[index].allocatedMarks = Number(e.target.value);
                             setEditSessionalActivities(updated);
                           }}
-                          className="w-16 px-2 py-1.5 bg-[#130910] border border-slate-700 rounded-lg text-white text-xs font-mono" 
+                          className="lm-field !rounded-lg !py-1.5 !px-2 font-mono !text-xs w-20 shrink-0" 
                           min="1"
                           required
                         />
                         <button 
-                          type="button" 
+                          type="button"
+                          aria-label="Remove Activity"
+                          title="Remove Activity"
                           onClick={() => {
                             const updated = editSessionalActivities.filter((_, i) => i !== index);
                             setEditSessionalActivities(updated);
                           }}
-                          className="px-2 py-1.5 bg-red-950/80 hover:bg-red-900 text-red-300 rounded-lg text-xs font-bold"
+                          className="lm-btn-ghost !px-2 !py-1.5 text-red-300 border border-red-500/40 shrink-0"
                         >
-                          ✕
+                          <TrashIcon className="w-4 h-4" />
                         </button>
                       </div>
                     );
@@ -2151,21 +2299,25 @@ const LabroomDetail = () => {
                 </div>
               </div>
 
-              <div className="pt-3 flex gap-3">
-                <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="w-1/2 py-2.5 bg-slate-800 text-slate-300 font-bold uppercase text-xs rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" disabled={updatingSettings} className="w-1/2 py-2.5 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+              <div className="pt-3 flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <button type="button" onClick={() => setIsSettingsModalOpen(false)} className="lm-btn-ghost w-full sm:w-1/2 uppercase">Cancel</button>
+                <button type="submit" disabled={updatingSettings} className="lm-btn w-full sm:w-1/2">
                   {updatingSettings ? 'Saving...' : 'Save Settings'}
                 </button>
               </div>
             </form>
 
-            <div className="pt-4 border-t border-red-950/60 space-y-3">
-              <p className="text-xs font-bold text-red-400 uppercase">Danger Zone</p>
+            <div className="pt-4 border-t border-white/5 space-y-3">
+              <p className="text-xs font-bold text-red-300 uppercase flex items-center gap-2">
+                <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />
+                Danger Zone
+              </p>
               <form onSubmit={handleDeleteLabroomSubmit} className="space-y-3">
                 {error && <p className="text-red-300 text-xs">{error}</p>}
-                <p className="text-xs text-slate-300">Type <strong className="text-white">{labroom.labName}</strong> to confirm deletion:</p>
-                <input type="text" value={deleteInputName} onChange={(e) => setDeleteInputName(e.target.value)} placeholder="Enter exact lab name" className="w-full px-3 py-2 bg-[#080507] border border-red-500/40 rounded-xl text-white text-xs" />
-                <button type="submit" disabled={deletingLab || deleteInputName.trim() !== labroom.labName.trim()} className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white text-xs uppercase font-extrabold rounded-xl cursor-pointer disabled:opacity-50">
+                <p className="text-xs text-slate-300 break-words">Type <strong className="text-slate-100">{labroom.labName}</strong> to confirm deletion:</p>
+                <input type="text" value={deleteInputName} onChange={(e) => setDeleteInputName(e.target.value)} placeholder="Enter exact lab name" className="lm-field" />
+                <button type="submit" disabled={deletingLab || deleteInputName.trim() !== labroom.labName.trim()} className="lm-btn w-full bg-red-600 hover:bg-red-500 text-white">
+                  <TrashIcon className="w-4 h-4" />
                   {deletingLab ? 'Deleting...' : 'Permanently Delete Lab'}
                 </button>
               </form>
@@ -2176,15 +2328,21 @@ const LabroomDetail = () => {
 
       {/* 8. Anonymous Feedback / Complaints Modal */}
       {isComplaintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-blue-300 uppercase">Anonymous Complaint Box</h3>
-              <button onClick={() => setIsComplaintModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <EnvelopeIcon className="w-4 h-4 shrink-0" />
+                Anonymous Complaint Box
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setIsComplaintModalOpen(false)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             <form onSubmit={handleSendComplaint} className="space-y-3">
-              <textarea rows="4" required placeholder="Write your anonymous query or complaint..." value={complaintText} onChange={(e) => setComplaintText(e.target.value)} className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs resize-none" />
-              <button type="submit" disabled={sendingComplaint} className="w-full py-3 bg-blue-500 hover:bg-blue-400 text-black font-extrabold uppercase text-xs rounded-xl cursor-pointer disabled:opacity-50">
+              <textarea rows="4" required placeholder="Write your anonymous query or complaint..." value={complaintText} onChange={(e) => setComplaintText(e.target.value)} className="lm-field resize-none" />
+              <button type="submit" disabled={sendingComplaint} className="lm-btn w-full">
+                <PaperAirplaneIcon className="w-4 h-4" />
                 {sendingComplaint ? 'Submitting...' : 'Send Anonymously'}
               </button>
             </form>
@@ -2194,40 +2352,52 @@ const LabroomDetail = () => {
 
       {/* 9. View Complaints Modal (Staff/Admin) */}
       {isViewComplaintsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-lg bg-[#130910] border border-blue-500/40 rounded-3xl p-6 space-y-4 shadow-2xl my-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-blue-300 uppercase">Anonymous Submissions</h3>
-              <button onClick={() => setIsViewComplaintsModalOpen(false)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-base font-extrabold text-blue-300 uppercase flex items-center gap-2 min-w-0 break-words">
+                <MegaphoneIcon className="w-4 h-4 shrink-0" />
+                Anonymous Submissions
+              </h3>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setIsViewComplaintsModalOpen(false)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
             {loadingComplaints ? (
-              <p className="text-center text-xs text-slate-400 py-6">Loading submissions...</p>
+              <div className="lm-inset flex flex-col items-center gap-3 p-6 text-center">
+                <div className="lm-bar"></div>
+                <p className="text-xs text-slate-400">Loading submissions...</p>
+              </div>
             ) : complaintsList.length === 0 ? (
-              <p className="text-center text-xs text-slate-500 py-6 italic">No feedback submissions received yet.</p>
+              <div className="lm-inset p-6 text-center">
+                <p className="text-xs text-slate-500 italic">No feedback submissions received yet.</p>
+              </div>
             ) : (
               <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
                 {complaintsList.map((c, i) => (
-                  <div key={i} className="bg-[#080507] border border-slate-800 p-4 rounded-2xl space-y-1">
-                    <p className="text-xs text-white leading-relaxed">{c.message}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
+                  <div key={i} className="lm-card-flat p-4 space-y-1.5">
+                    <p className="text-xs text-slate-100 leading-relaxed break-words">{c.message}</p>
+                    <p className="text-[10px] sm:text-xs text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
                   </div>
                 ))}
               </div>
             )}
-            <button onClick={() => setIsViewComplaintsModalOpen(false)} className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold uppercase cursor-pointer">Close</button>
+            <button type="button" onClick={() => setIsViewComplaintsModalOpen(false)} className="lm-btn-ghost w-full uppercase">Close</button>
           </div>
         </div>
       )}
 
       {/* 10. Focused Attachment / Photo Inspection Modal */}
       {selectedActivityItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl px-4 overflow-y-auto py-6">
-          <div className="w-full max-w-md bg-[#130910] border border-blue-500/55 rounded-3xl p-5 space-y-4 shadow-2xl my-auto text-center">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-xs font-bold text-blue-400 uppercase font-mono">
-                {selectedActivityItem.item.title} — Attachment Inspection
+        <div className="lm-scrim">
+          <div className="lm-modal max-w-md p-4 sm:p-5 space-y-4 text-center">
+            <div className="flex items-start justify-between gap-3 text-left">
+              <h3 className="text-xs font-bold text-blue-400 uppercase font-mono min-w-0 break-words">
+                {selectedActivityItem.item.title} â€” Attachment Inspection
               </h3>
-              <button onClick={() => setSelectedActivityItem(null)} className="text-slate-400 hover:text-white font-bold cursor-pointer">✕</button>
+              <button type="button" aria-label="Close" title="Close" onClick={() => setSelectedActivityItem(null)} className="lm-btn-ghost shrink-0 !px-2.5 !py-2">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
             </div>
 
             {(() => {
@@ -2237,19 +2407,20 @@ const LabroomDetail = () => {
               const fileObj = sScore?.file || selectedActivityItem.scoreData?.file;
 
               return fileObj?.url ? (
-                <div className="bg-[#080507] border border-slate-800 rounded-2xl p-3 overflow-hidden space-y-2">
+                <div className="lm-inset p-3 space-y-2">
                   {fileObj.fileType === 'image' || fileObj.url.match(/\.(jpeg|jpg|png|gif)$/i) ? (
-                    <img src={fileObj.url} alt="Activity Script" className="max-h-[60vh] mx-auto rounded-xl border border-slate-700 object-contain" />
+                    <img src={fileObj.url} alt="Activity Script" className="max-h-[60vh] mx-auto rounded-xl border border-white/10 object-contain" />
                   ) : (
-                    <a href={fileObj.url} target="_blank" rel="noreferrer" className="block py-6 text-xs font-mono text-emerald-400 underline">
-                      📄 Download Attached Script ({fileObj.fileName || 'File'})
+                    <a href={fileObj.url} target="_blank" rel="noreferrer" className="lm-btn-ghost w-full py-6 text-emerald-300 underline break-words">
+<DocumentTextIcon className="w-4 h-4" />
+                      Download Attached Script ({fileObj.fileName || 'File'})
                     </a>
                   )}
                 </div>
               ) : (
-                <div className="bg-[#080507] border border-slate-800 p-6 rounded-2xl space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase">Your Obtained Score</p>
-                  <p className="text-2xl font-black font-mono text-emerald-400">
+                <div className="lm-inset p-6 space-y-1.5">
+                  <p className="text-[10px] sm:text-xs text-slate-400 uppercase">Your Obtained Score</p>
+                  <p className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 break-words">
                     {sScore ? (sScore.isAbsent ? 'Marked Absent' : `${sScore.obtainedMarks} / ${selectedActivityItem.item.totalMarks}`) : 'Pending Evaluation'}
                   </p>
                 </div>
@@ -2257,9 +2428,11 @@ const LabroomDetail = () => {
             })()}
 
             <button 
+              type="button"
               onClick={() => setSelectedActivityItem(null)} 
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold uppercase text-xs rounded-xl cursor-pointer transition-all"
+              className="lm-btn-ghost w-full uppercase"
             >
+              <XMarkIcon className="w-4 h-4" />
               Close
             </button>
           </div>
@@ -2268,7 +2441,7 @@ const LabroomDetail = () => {
 
       {/* Footer */}
       <footer className="relative z-10 mt-8 text-center text-xs text-slate-500">
-        <p>© 2026 PUCIT Lab Portal • All Rights Reserved</p>
+        <p>Â© 2026 PUCIT Lab Portal â€¢ All Rights Reserved</p>
       </footer>
     </div>
   );

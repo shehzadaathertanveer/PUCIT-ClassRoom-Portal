@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
+import { ArrowPathIcon, LightBulbIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
 const OtpVerify = () => {
   const [otp, setOtp] = useState('');
@@ -85,37 +86,41 @@ const OtpVerify = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-8 overflow-hidden selection:bg-orange-400 selection:text-black">
-      
-      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-orange-500/20 rounded-full blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-rose-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+    <div className="lm-canvas relative min-h-dvh w-full overflow-x-hidden flex flex-col items-center justify-between px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <div className="lm-topline" />
+      <div className="lm-ambient" />
 
-      <div className="hidden sm:block"></div>
+      <div className="hidden sm:block" />
 
-      <div className="relative z-10 w-full max-w-md bg-[#130910]/85 backdrop-blur-2xl border border-orange-500/30 rounded-3xl shadow-[0_0_50px_rgba(249,115,22,0.12)] p-6 sm:p-10 space-y-6">
-        
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-rose-300 to-pink-400">
-            PUCIT Classroom
-          </h1>
-          <p className="text-xs font-medium uppercase tracking-widest text-slate-400">
-            Two-Factor Verification
-          </p>
+      <div className="lm-card relative z-10 w-full max-w-md p-5 sm:p-8 space-y-5">
+
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="lm-inset flex h-12 w-12 items-center justify-center text-orange-200">
+            <ShieldCheckIcon className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="lm-title text-2xl sm:text-3xl font-black tracking-tight">
+              PUCIT Classroom
+            </h1>
+            <p className="lm-eyebrow">
+              Two-Factor Verification
+            </p>
+          </div>
         </div>
 
-        <div className="text-center px-2">
-          <p className={`text-xs font-medium tracking-wide leading-relaxed py-3 px-3 rounded-xl border transition-all ${
-            isSuccess 
-              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' 
-              : 'bg-orange-950/30 border-orange-500/20 text-orange-300/95'
+        <div className="text-center">
+          <p className={`text-xs font-medium leading-relaxed py-2.5 px-3.5 transition-all break-words ${
+            isSuccess
+              ? 'rounded-[0.875rem] border border-emerald-500/40 bg-emerald-950/60 text-emerald-300'
+              : 'lm-inset text-slate-300'
           }`}>
             {statusMessage}
             {deliveryEmail && !isSuccess && (
-              <span className="block mt-1.5 text-[11px]">
+              <span className="mt-1.5 block text-[11px]">
                 <span className="text-slate-400">Code sent to</span>{' '}
-                <span className="font-mono text-orange-300">{deliveryEmail}</span>
+                <span className="lm-num break-all text-orange-200">{deliveryEmail}</span>
                 {email && email !== deliveryEmail && (
-                  <span className="block mt-1 text-slate-500">(your official account email is <span className="font-mono text-slate-400">{email}</span>)</span>
+                  <span className="mt-1 block text-slate-500">(your official account email is <span className="lm-num break-all text-slate-400">{email}</span>)</span>
                 )}
               </span>
             )}
@@ -123,9 +128,9 @@ const OtpVerify = () => {
 
           {/* Spam/Junk Notice Box */}
           {!isSuccess && (
-            <div className="mt-3 flex items-center justify-center gap-2 bg-[#080507]/60 border border-slate-800/80 rounded-xl py-2 px-3 text-[11px] text-slate-400">
-              <span>💡</span>
-              <p>Can't find it? Check your <span className="text-slate-200 font-semibold">Spam</span> or <span className="text-slate-200 font-semibold">Junk</span> folder.</p>
+            <div className="lm-inset mt-3 flex items-center justify-center gap-2 px-3 py-2.5 text-left text-[11px] text-slate-400 sm:text-center">
+              <LightBulbIcon className="w-4 h-4 flex-none text-amber-300" />
+              <p className="min-w-0">Can't find it? Check your <span className="font-semibold text-slate-200">Spam</span> or <span className="font-semibold text-slate-200">Junk</span> folder.</p>
             </div>
           )}
         </div>
@@ -133,7 +138,7 @@ const OtpVerify = () => {
         {!isSuccess ? (
           <form onSubmit={handleVerifyOtp} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
                 Verification Code (6 Digits)
               </label>
               <input 
@@ -142,7 +147,7 @@ const OtpVerify = () => {
                 value={otp} 
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} 
                 required 
-                className="w-full px-4 py-3.5 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-center tracking-[0.5em] font-mono text-xl sm:text-2xl transition-all shadow-inner" 
+                className="lm-field font-mono w-full min-w-0 text-center text-xl tracking-[0.5em] transition-all sm:text-2xl" 
                 placeholder="••••••" 
               />
             </div>
@@ -150,16 +155,16 @@ const OtpVerify = () => {
             <button 
               type="submit" 
               disabled={loading || otp.length !== 6} 
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 hover:to-rose-400 active:scale-[0.99] text-black font-extrabold tracking-wide rounded-2xl shadow-lg shadow-orange-500/25 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed text-sm sm:text-base uppercase cursor-pointer"
+              className="lm-btn w-full min-h-[2.75rem] cursor-pointer text-sm sm:text-base"
             >
               {loading ? 'Verifying...' : 'Confirm Code'}
             </button>
           </form>
         ) : (
-          <div className="space-y-4 pt-2">
+          <div className="pt-1">
             <Link 
               to="/login"
-              className="block w-full py-3.5 px-4 text-center bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 active:scale-[0.99] text-black font-extrabold tracking-wide rounded-2xl shadow-lg shadow-emerald-500/25 transition-all duration-200 text-sm sm:text-base uppercase cursor-pointer"
+              className="lm-btn w-full min-h-[2.75rem] cursor-pointer text-sm sm:text-base"
             >
               Proceed to Login
             </Link>
@@ -167,10 +172,10 @@ const OtpVerify = () => {
         )}
 
         {!isSuccess && (
-          <div className="text-center text-sm text-slate-400 space-y-2">
-            <p className="text-slate-400">Didn't receive the code?</p>
+          <div className="space-y-2 text-center text-sm text-slate-400">
+            <p>Didn't receive the code?</p>
             {countdown > 0 ? (
-              <span className="text-xs text-orange-400/70 block font-mono">
+              <span className="lm-num block text-xs text-orange-300/70">
                 Resend available in {countdown}s
               </span>
             ) : (
@@ -178,8 +183,9 @@ const OtpVerify = () => {
                 type="button"
                 onClick={handleResendOtp}
                 disabled={resending}
-                className="text-xs font-bold uppercase tracking-wider text-orange-400 hover:text-orange-300 underline transition-all disabled:opacity-50 cursor-pointer"
+                className="lm-btn-ghost mx-auto cursor-pointer disabled:cursor-not-allowed"
               >
+                <ArrowPathIcon className="w-4 h-4" />
                 {resending ? 'Resending...' : 'Resend Code'}
               </button>
             )}
@@ -188,9 +194,9 @@ const OtpVerify = () => {
 
       </div>
 
-      <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
+      <footer className="relative z-10 mt-8 space-y-1 px-1 text-center text-xs text-slate-500">
         <p>© 2026 PUCIT Classroom (Non-Official) • All Rights Reserved</p>
-        <p className="text-slate-600">Designed & Administered by <span className="text-orange-400/80 font-semibold">Shehzada Ather</span></p>
+        <p className="text-slate-600">Designed & Administered by <span className="font-semibold text-orange-300/80">Shehzada Ather</span></p>
       </footer>
 
     </div>

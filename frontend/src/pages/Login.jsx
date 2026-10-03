@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
+import { EyeIcon, EyeSlashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
 const Login = () => {
   const [rollNo, setRollNo] = useState('');
@@ -92,43 +93,46 @@ const Login = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-8 overflow-hidden selection:bg-orange-400 selection:text-black">
-      
-      {/* Background Ambient Glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-orange-500/20 rounded-full blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-rose-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+    <div className="lm-canvas relative min-h-dvh w-full overflow-x-hidden flex flex-col items-center justify-between px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <div className="lm-topline" />
+      <div className="lm-ambient" />
 
-      <div className="hidden sm:block"></div>
+      <div className="hidden sm:block" />
 
-      {/* Main Glassmorphic Card */}
-      <div className="relative z-10 w-full max-w-md bg-[#130910]/80 backdrop-blur-2xl border border-orange-500/30 rounded-3xl shadow-[0_0_50px_rgba(249,115,22,0.12)] p-6 sm:p-10 space-y-4">
-        
+      {/* Main steel panel */}
+      <div className="lm-card relative z-10 w-full max-w-md p-5 sm:p-8 space-y-5">
+
         {/* Header Branding */}
-        <div className="text-center space-y-1">
-          <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-rose-300 to-pink-400">
-            PUCIT Classroom
-          </h1>
-          <p className="text-xs font-medium uppercase tracking-widest text-slate-400">
-            Secure Portal Gateway
-          </p>
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="lm-inset flex h-12 w-12 items-center justify-center text-orange-200">
+            <ShieldCheckIcon className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="lm-title text-2xl sm:text-3xl font-black tracking-tight">
+              PUCIT Classroom
+            </h1>
+            <p className="lm-eyebrow">
+              Secure Portal Gateway
+            </p>
+          </div>
         </div>
 
         {/* Dynamic State Box */}
-        <div className="text-center px-1">
-          <p className={`text-xs font-medium tracking-wide leading-relaxed py-2.5 px-3 rounded-xl border transition-all shadow-md ${
-            isErrorState 
-              ? 'bg-red-950/90 border-red-500/60 text-red-200 font-bold' 
-              : 'bg-orange-950/30 border-orange-500/20 text-orange-300/90'
+        <div className="text-center">
+          <p className={`text-xs font-medium leading-relaxed py-2.5 px-3.5 transition-all break-words ${
+            isErrorState
+              ? 'rounded-[0.875rem] border border-red-500/40 bg-red-950/60 text-red-300 font-bold'
+              : 'lm-inset text-slate-300'
           }`}>
             {helperText}
           </p>
         </div>
 
         {/* Form Inputs */}
-        <form onSubmit={handleLogin} className="space-y-3">
+        <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-1.5">
-              Roll Number {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed)</span>}
+            <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">
+              Roll Number {isRollNoDisabled && <span className="text-slate-500 font-normal normal-case tracking-normal">(bypassed)</span>}
             </label>
             <input 
               type="text" 
@@ -138,22 +142,22 @@ const Login = () => {
                 if (isErrorState) setIsErrorState(false);
               }} 
               disabled={isRollNoDisabled}
-              className={`w-full px-4 py-3 border rounded-2xl text-sm sm:text-base transition-all shadow-inner uppercase ${
-                isRollNoDisabled 
-                  ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
-                  : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
+              className={`lm-field w-full min-w-0 uppercase transition-all ${
+                isRollNoDisabled ? 'opacity-55 cursor-not-allowed' : ''
               }`} 
               placeholder="BITF26A001" 
             />
           </div>
 
-          <div className="text-center text-[9px] uppercase font-bold tracking-widest text-slate-500 my-[-2px]">
-            - OR -
+          <div className="flex items-center gap-3">
+            <hr className="lm-divider flex-1" />
+            <span className="lm-eyebrow">- OR -</span>
+            <hr className="lm-divider flex-1" />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-1.5">
-              Email Address {isEmailDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed)</span>}
+            <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">
+              Email Address {isEmailDisabled && <span className="text-slate-500 font-normal normal-case tracking-normal">(bypassed)</span>}
             </label>
             <input 
               type="email" 
@@ -163,21 +167,19 @@ const Login = () => {
                 if (isErrorState) setIsErrorState(false);
               }} 
               disabled={isEmailDisabled}
-              className={`w-full px-4 py-3 border rounded-2xl text-sm sm:text-base transition-all shadow-inner lowercase ${
-                isEmailDisabled 
-                  ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
-                  : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
+              className={`lm-field w-full min-w-0 lowercase transition-all ${
+                isEmailDisabled ? 'opacity-55 cursor-not-allowed' : ''
               }`} 
               placeholder="teacher.name@pucit.edu.pk or personal email" 
             />
           </div>
 
           <div>
-            <div className="flex justify-between items-center mb-1.5">
-              <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
                 Password
               </label>
-              <Link to="/forgot-password" className="text-xs text-orange-400/60 hover:text-orange-300 transition-colors font-medium">
+              <Link to="/forgot-password" className="text-xs font-medium text-orange-300 transition-colors hover:text-orange-200">
                 Forgot Password?
               </Link>
             </div>
@@ -189,14 +191,15 @@ const Login = () => {
                   setPassword(e.target.value);
                   if (isErrorState) setIsErrorState(false);
                 }} 
-                className="w-full px-4 py-3 pr-12 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm sm:text-base transition-all shadow-inner" 
+                className="lm-field w-full min-w-0 pr-24 transition-all" 
                 placeholder="••••••••" 
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-orange-400 transition-colors text-xs font-medium uppercase tracking-wider focus:outline-none cursor-pointer"
+                className="absolute right-1.5 top-1/2 inline-flex h-9 -translate-y-1/2 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-100 cursor-pointer"
               >
+                {showPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                 {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
@@ -205,15 +208,17 @@ const Login = () => {
           <button 
             type="submit" 
             disabled={loading} 
-            className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 hover:to-rose-400 active:scale-[0.99] text-black font-extrabold tracking-wide rounded-2xl shadow-lg shadow-orange-500/25 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed text-sm sm:text-base uppercase mt-2 cursor-pointer"
+            className="lm-btn w-full min-h-[2.75rem] cursor-pointer text-sm sm:text-base"
           >
             {loading ? 'Authenticating...' : 'Login'}
           </button>
         </form>
 
-        <p className="text-center text-sm text-slate-400 pt-1">
+        <hr className="lm-divider" />
+
+        <p className="text-center text-sm text-slate-400">
           Don't have an account?{' '}
-          <Link to="/register" className="text-orange-400 hover:text-orange-300 font-semibold transition-colors underline decoration-orange-400/40 underline-offset-4">
+          <Link to="/register" className="font-semibold text-orange-300 underline decoration-white/25 underline-offset-4 transition-colors hover:text-orange-200">
             Register
           </Link>
         </p>
@@ -221,9 +226,9 @@ const Login = () => {
       </div>
 
       {/* Admin Attribution & Non-Official Footer */}
-      <footer className="relative z-10 mt-6 text-center text-xs text-slate-500 space-y-1">
+      <footer className="relative z-10 mt-6 space-y-1 px-1 text-center text-xs text-slate-500">
         <p>© 2026 PUCIT Classroom (Non-Official) • All Rights Reserved</p>
-        <p className="text-slate-600">Designed & Administered by <span className="text-orange-400/80 font-semibold">Shehzada Ather</span></p>
+        <p className="text-slate-600">Designed & Administered by <span className="font-semibold text-orange-300/80">Shehzada Ather</span></p>
       </footer>
 
     </div>

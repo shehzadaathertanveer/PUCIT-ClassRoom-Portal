@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
+import { EnvelopeIcon, ExclamationTriangleIcon, EyeIcon, EyeSlashIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
 const Register = () => {
   const [rollNo, setRollNo] = useState('');
@@ -225,29 +226,33 @@ const Register = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-between bg-[#080507] px-4 sm:px-6 lg:px-8 py-8 overflow-hidden selection:bg-orange-400 selection:text-black">
-      
-      <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-orange-500/20 rounded-full blur-[120px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-rose-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+    <div className="lm-canvas relative min-h-dvh w-full overflow-x-hidden flex flex-col items-center justify-between px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <div className="lm-topline" />
+      <div className="lm-ambient" />
 
-      <div className="hidden sm:block"></div>
+      <div className="hidden sm:block" />
 
-      <div className="relative z-10 w-full max-w-md bg-[#130910]/80 backdrop-blur-2xl border border-orange-500/30 rounded-3xl shadow-[0_0_50px_rgba(249,115,22,0.12)] p-6 sm:p-10 space-y-5">
-        
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-rose-300 to-pink-400">
-            PUCIT Classroom
-          </h1>
-          <p className="text-xs font-medium uppercase tracking-widest text-slate-400">
-            Create Your Account
-          </p>
+      <div className="lm-card relative z-10 w-full max-w-md p-5 sm:p-8 space-y-5">
+
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="lm-inset flex h-12 w-12 items-center justify-center text-orange-200">
+            <ShieldCheckIcon className="w-6 h-6" />
+          </div>
+          <div className="space-y-1.5">
+            <h1 className="lm-title text-2xl sm:text-3xl font-black tracking-tight">
+              PUCIT Classroom
+            </h1>
+            <p className="lm-eyebrow">
+              Create Your Account
+            </p>
+          </div>
         </div>
 
-        <div className="text-center px-2">
-          <p className={`text-xs font-medium tracking-wide leading-relaxed py-2.5 px-3 rounded-xl border transition-all shadow-md ${
-            isErrorState 
-              ? 'bg-red-950/90 border-red-500/60 text-red-200 font-bold' 
-              : 'bg-orange-950/30 border-orange-500/20 text-orange-300/90'
+        <div className="text-center">
+          <p className={`text-xs font-medium leading-relaxed py-2.5 px-3.5 transition-all break-words ${
+            isErrorState
+              ? 'rounded-[0.875rem] border border-red-500/40 bg-red-950/60 text-red-300 font-bold'
+              : 'lm-inset text-slate-300'
           }`}>
             {helperText}
           </p>
@@ -255,8 +260,8 @@ const Register = () => {
 
         <form onSubmit={handleRegister} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
-              Roll Number / Section Prefix {isRollNoDisabled && <span className="text-slate-500 font-normal lowercase">(bypassed for teacher)</span>} {fresherBlocked && <span className="text-red-400 font-normal lowercase">(full roll number required)</span>}
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+              Roll Number / Section Prefix {isRollNoDisabled && <span className="font-normal normal-case tracking-normal text-slate-500">(bypassed for teacher)</span>} {fresherBlocked && <span className="font-normal normal-case tracking-normal text-red-300">(full roll number required)</span>}
             </label>
             <input 
               type="text" 
@@ -270,17 +275,15 @@ const Register = () => {
               autoCorrect="off"
               spellCheck="false"
               autoComplete="off"
-              className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner uppercase ${
-                isRollNoDisabled 
-                  ? 'bg-[#1a0f15]/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-60' 
-                  : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
+              className={`lm-field w-full min-w-0 uppercase transition-all ${
+                isRollNoDisabled ? 'opacity-55 cursor-not-allowed' : ''
               }`} 
               placeholder="BITF26A or BITF26A004" 
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Full Name
             </label>
             <input 
@@ -290,14 +293,14 @@ const Register = () => {
                 setName(e.target.value);
                 if (isErrorState) setIsErrorState(false);
               }} 
-              className="w-full px-4 py-3.5 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm sm:text-base transition-all shadow-inner" 
+              className="lm-field w-full min-w-0 transition-all" 
               placeholder="Enter your full name" 
             />
           </div>
 
           {!isEmailDisabled && (
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
                 Email Address
               </label>
               <input 
@@ -311,10 +314,8 @@ const Register = () => {
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck="false"
-                className={`w-full px-4 py-3.5 border rounded-2xl text-sm sm:text-base transition-all shadow-inner ${
-                  isEmailDisabled
-                    ? 'bg-[#1a0f15] border-orange-500/30 text-orange-200 cursor-not-allowed opacity-90' 
-                    : 'bg-[#080507]/80 border-slate-700/80 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400'
+                className={`lm-field w-full min-w-0 transition-all ${
+                  isEmailDisabled ? 'cursor-not-allowed border-white/20 text-orange-200 opacity-90' : ''
                 }`} 
                 placeholder="teacher.name@pucit.edu.pk" 
               />
@@ -323,14 +324,17 @@ const Register = () => {
 
           {/* Senior students: official inbox is auto-linked to their roll number */}
           {isSenior && (
-            <div className="bg-sky-950/20 border border-sky-500/20 p-4 rounded-2xl animate-fadeIn">
-              <p className="text-[11px] text-sky-300 font-bold uppercase tracking-wider mb-1">
-                Official University Email <span className="text-slate-500 font-normal lowercase">(auto-configured)</span>
-              </p>
-              <p className="text-xs sm:text-sm text-sky-100 font-mono break-all">
+            <div className="lm-inset p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <EnvelopeIcon className="w-4 h-4 flex-none text-cyan-300" />
+                <p className="min-w-0 text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-300">
+                  Official University Email <span className="font-normal normal-case tracking-normal text-slate-500">(auto-configured)</span>
+                </p>
+              </div>
+              <p className="lm-num break-all text-xs text-cyan-200 sm:text-sm">
                 {rollNo.trim().toLowerCase()}@pucit.edu.pk
               </p>
-              <p className="text-[11px] text-slate-400 leading-snug mt-2">
+              <p className="mt-2 text-[11px] leading-snug text-slate-400">
                 Your verification code will be sent to this official inbox. It cannot be changed.
               </p>
             </div>
@@ -338,11 +342,14 @@ const Register = () => {
 
           {/* Prefix-only entry rejected while the admin has fresher mode OFF */}
           {fresherBlocked && (
-            <div className="bg-red-950/40 border border-red-500/40 p-4 rounded-2xl animate-fadeIn">
-              <p className="text-[11px] text-red-300 font-bold uppercase tracking-wider mb-1">
-                Fresher Registration Disabled
-              </p>
-              <p className="text-xs text-red-200/80 leading-snug">
+            <div className="rounded-2xl border border-red-500/40 bg-red-950/60 p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <ExclamationTriangleIcon className="w-4 h-4 flex-none text-red-300" />
+                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-red-300">
+                  Fresher Registration Disabled
+                </p>
+              </div>
+              <p className="text-xs leading-snug text-red-200/80">
                 Prefix-only registration is currently off. Please enter your full Roll Number (e.g. BITF26A004) to register.
               </p>
             </div>
@@ -350,10 +357,10 @@ const Register = () => {
 
           {/* Conditional Freshers Registration Number & Personal Email Fields (Triggered only when section prefix only is typed AND fresher mode is ON, e.g. BITF26A) */}
           {isFresherPrefixOnly && (
-            <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
+            <div className="lm-card-flat space-y-3.5 p-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
-                  University Registration Number <span className="text-rose-400">*</span>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                  University Registration Number <span className="text-rose-300">*</span>
                 </label>
                 <input 
                   type="text" 
@@ -364,16 +371,16 @@ const Register = () => {
                   }} 
                   required
                   autoCapitalize="characters"
-                  className="w-full px-4 py-3 bg-[#080507] border border-orange-500/40 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all uppercase" 
+                  className="lm-field w-full min-w-0 uppercase transition-all" 
                   placeholder="e.g., 2026-NTS-001" 
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
-                  Personal Notification Email <span className="text-rose-400">*</span>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                  Personal Notification Email <span className="text-rose-300">*</span>
                 </label>
-                <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                <p className="mb-2 text-[11px] leading-snug text-slate-400">
                   Only for freshers (fresher registration is enabled). Must be a personal, non-university email — your official @pucit.edu.pk inbox cannot be used here.
                 </p>
                 <input 
@@ -385,14 +392,15 @@ const Register = () => {
                   }} 
                   required
                   autoCapitalize="none"
-                  className={`w-full px-4 py-3 bg-[#080507] border rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase ${
-                    personalEmailIsPucit ? 'border-red-500' : 'border-orange-500/40'
+                  className={`lm-field w-full min-w-0 lowercase transition-all ${
+                    personalEmailIsPucit ? 'border-red-500/70' : ''
                   }`} 
                   placeholder="your.personal@gmail.com" 
                 />
                 {personalEmailIsPucit && (
-                  <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
-                    ⚠️ Official university emails cannot be used as your personal email.
+                  <p className="mt-1.5 flex items-start gap-1.5 text-[11px] font-bold text-red-300">
+                    <ExclamationTriangleIcon className="lm-ico mt-px" />
+                    Official university emails cannot be used as your personal email.
                   </p>
                 )}
               </div>
@@ -401,12 +409,12 @@ const Register = () => {
 
           {/* Conditional Freshers Personal Email ONLY Box (Triggered when full fresher roll number is typed AND fresher mode is ON, e.g. BITF26A004) */}
           {isFresherWithRoll && (
-            <div className="bg-orange-950/20 border border-orange-500/20 p-4 rounded-2xl space-y-3.5 animate-fadeIn">
+            <div className="lm-card-flat space-y-3.5 p-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-orange-400 mb-1.5">
-                  Personal Notification Email <span className="text-rose-400">*</span>
+                <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                  Personal Notification Email <span className="text-rose-300">*</span>
                 </label>
-                <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                <p className="mb-2 text-[11px] leading-snug text-slate-400">
                   Only for freshers (fresher registration is enabled). Must be a personal, non-university email — your official @pucit.edu.pk inbox cannot be used here.
                 </p>
                 <input 
@@ -418,14 +426,15 @@ const Register = () => {
                   }} 
                   required
                   autoCapitalize="none"
-                  className={`w-full px-4 py-3 bg-[#080507] border rounded-xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm transition-all lowercase ${
-                    personalEmailIsPucit ? 'border-red-500' : 'border-orange-500/40'
+                  className={`lm-field w-full min-w-0 lowercase transition-all ${
+                    personalEmailIsPucit ? 'border-red-500/70' : ''
                   }`} 
                   placeholder="your.personal@gmail.com" 
                 />
                 {personalEmailIsPucit && (
-                  <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
-                    ⚠️ Official university emails cannot be used as your personal email.
+                  <p className="mt-1.5 flex items-start gap-1.5 text-[11px] font-bold text-red-300">
+                    <ExclamationTriangleIcon className="lm-ico mt-px" />
+                    Official university emails cannot be used as your personal email.
                   </p>
                 )}
               </div>
@@ -433,7 +442,7 @@ const Register = () => {
           )}
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Password
             </label>
             <div className="relative">
@@ -444,21 +453,22 @@ const Register = () => {
                   setPassword(e.target.value);
                   if (isErrorState) setIsErrorState(false);
                 }} 
-                className="w-full px-4 py-3.5 pr-12 bg-[#080507]/80 border border-slate-700/80 rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 text-sm sm:text-base transition-all shadow-inner" 
+                className="lm-field w-full min-w-0 pr-24 transition-all" 
                 placeholder="••••••••" 
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-orange-400 transition-colors text-xs font-medium uppercase tracking-wider focus:outline-none cursor-pointer"
+                className="absolute right-1.5 top-1/2 inline-flex h-9 -translate-y-1/2 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-100 cursor-pointer"
               >
+                {showPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                 {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-orange-400/80 mb-2">
+            <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
               Confirm Password
             </label>
             <div className="relative">
@@ -469,25 +479,25 @@ const Register = () => {
                   setConfirmPassword(e.target.value);
                   if (isErrorState) setIsErrorState(false);
                 }} 
-                className={`w-full px-4 py-3.5 pr-12 bg-[#080507]/80 border rounded-2xl text-white placeholder-slate-600 focus:outline-none focus:ring-2 text-sm sm:text-base transition-all shadow-inner ${
-                  confirmPassword.length > 0 && password !== confirmPassword 
-                    ? 'border-red-500 focus:ring-red-400' 
-                    : 'border-slate-700/80 focus:ring-orange-400 focus:border-orange-400'
+                className={`lm-field w-full min-w-0 pr-24 transition-all ${
+                  confirmPassword.length > 0 && password !== confirmPassword ? 'border-red-500/70' : ''
                 }`} 
                 placeholder="••••••••" 
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-orange-400 transition-colors text-xs font-medium uppercase tracking-wider focus:outline-none cursor-pointer"
+                className="absolute right-1.5 top-1/2 inline-flex h-9 -translate-y-1/2 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-100 cursor-pointer"
               >
+                {showConfirmPassword ? <EyeSlashIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                 {showConfirmPassword ? 'Hide' : 'Show'}
               </button>
             </div>
             {/* Live Password Mismatch Error Indicator */}
             {confirmPassword.length > 0 && password !== confirmPassword && (
-              <p className="text-[11px] text-red-400 font-bold mt-1.5 ml-1">
-                ⚠️ Passwords do not match
+              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] font-bold text-red-300">
+                <ExclamationTriangleIcon className="lm-ico mt-px" />
+                Passwords do not match
               </p>
             )}
           </div>
@@ -495,24 +505,26 @@ const Register = () => {
           <button 
             type="submit" 
             disabled={loading || !isFormValid} 
-            className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-400 to-rose-500 hover:from-orange-300 hover:to-rose-400 active:scale-[0.99] text-black font-extrabold tracking-wide rounded-2xl shadow-lg shadow-orange-500/25 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed text-sm sm:text-base uppercase mt-2 cursor-pointer"
+            className="lm-btn w-full min-h-[2.75rem] cursor-pointer text-sm sm:text-base"
           >
             {loading ? 'Processing...' : 'Sign Up'}
           </button>
         </form>
 
+        <hr className="lm-divider" />
+
         <p className="text-center text-sm text-slate-400">
           Already have an account?{' '}
-          <Link to="/login" className="text-orange-400 hover:text-orange-300 font-semibold transition-colors underline decoration-orange-400/40 underline-offset-4">
+          <Link to="/login" className="font-semibold text-orange-300 underline decoration-white/25 underline-offset-4 transition-colors hover:text-orange-200">
             Login
           </Link>
         </p>
 
       </div>
 
-      <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
+      <footer className="relative z-10 mt-8 space-y-1 px-1 text-center text-xs text-slate-500">
         <p>© 2026 PUCIT Classroom (Non-Official) • All Rights Reserved</p>
-        <p className="text-slate-600">Designed & Administered by <span className="text-orange-400/80 font-semibold">Shehzada Ather</span></p>
+        <p className="text-slate-600">Designed & Administered by <span className="font-semibold text-orange-300/80">Shehzada Ather</span></p>
       </footer>
 
     </div>

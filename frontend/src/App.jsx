@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { ShieldCheckIcon } from "@heroicons/react/24/outline";
 import { useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -19,16 +20,21 @@ const ProtectedRoute = ({ children }) => {
 
   if (loading) {
     return (
-      <div className="relative min-h-screen flex flex-col items-center justify-center bg-[#080507] text-slate-200 overflow-hidden">
-        {/* Ambient background glows matching your master theme */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] bg-orange-500/20 rounded-full blur-[120px] pointer-events-none"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-rose-500/15 rounded-full blur-[120px] pointer-events-none"></div>
+      <div className="lm-canvas relative min-h-dvh flex flex-col items-center justify-center overflow-hidden px-4">
+        <div className="lm-ambient" aria-hidden="true"></div>
+        <div className="lm-topline" aria-hidden="true"></div>
 
-        <div className="relative z-10 text-center space-y-3">
-          <div className="inline-block w-8 h-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 animate-pulse">
-            Loading Portal...
-          </p>
+        <div className="relative z-10 w-full max-w-sm text-center">
+          <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-orange-200 shadow-chrome">
+            <ShieldCheckIcon className="h-7 w-7" />
+          </div>
+
+          <div className="lm-card px-6 py-7 sm:px-8">
+            <div className="flex justify-center">
+              <div className="lm-bar" role="status" aria-live="polite"></div>
+            </div>
+            <p className="lm-eyebrow mt-5">Loading Portal...</p>
+          </div>
         </div>
       </div>
     );

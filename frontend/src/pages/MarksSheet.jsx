@@ -1,5 +1,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import {
+  ArrowLeftIcon,
+  ArrowUpTrayIcon,
+  ChartBarIcon,
+  CheckIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  UserGroupIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
@@ -436,137 +446,176 @@ const MarksSheet = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-6 space-y-4">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-mono text-xs text-slate-400">Loading classroom spreadsheet roster...</p>
+      <div className="lm-canvas min-h-dvh overflow-x-hidden flex flex-col items-center justify-center p-6">
+        <div className="lm-ambient" />
+        <div className="lm-topline" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="lm-card relative z-10 w-full max-w-xs px-6 py-10 flex flex-col items-center gap-5 text-center"
+        >
+          <div className="lm-bar" />
+          <p className="lm-eyebrow">Loading classroom spreadsheet roster...</p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#080507] text-white flex flex-col items-center justify-center p-4">
-        <div className="bg-red-950/60 border border-red-500/40 rounded-3xl p-6 text-center max-w-sm w-full space-y-3 shadow-xl">
+      <div className="lm-canvas min-h-dvh overflow-x-hidden flex flex-col items-center justify-center p-4">
+        <div className="lm-ambient" />
+        <div className="lm-topline" />
+        <div
+          role="alert"
+          className="bg-red-950/60 border border-red-500/40 rounded-3xl p-5 sm:p-6 text-center max-w-sm w-full min-w-0 space-y-4 shadow-lift"
+        >
+          <ExclamationTriangleIcon className="w-8 h-8 mx-auto text-red-300" />
           <p className="text-red-300 font-bold text-sm">Error Loading Sheet</p>
-          <p className="text-xs text-slate-300">{error}</p>
-          <Link to={`/classroom/${classroomId}`} className="block py-3 bg-orange-500 text-black font-extrabold text-xs uppercase rounded-xl">Back to Classroom</Link>
+          <p className="text-xs text-slate-300 break-words min-w-0">{error}</p>
+          <Link to={`/classroom/${classroomId}`} className="lm-btn w-full" aria-label="Back to Classroom" title="Back to Classroom">
+            <ArrowLeftIcon className="w-4 h-4" />
+            Back to Classroom
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-[#080507] px-3 sm:px-6 lg:px-8 py-5 selection:bg-orange-400 selection:text-black overflow-x-hidden">
-      
+    <div className="lm-canvas relative min-h-dvh flex flex-col justify-between px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-x-clip text-slate-100 selection:bg-orange-300 selection:text-slate-950">
+
+      <div className="lm-ambient" />
+
       {toastMessage && (
-        <div className="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-4 w-full max-w-sm">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-orange-500/50 bg-[#130910]/95 text-orange-300 shadow-2xl backdrop-blur-xl">
-            <span className="text-xs font-extrabold uppercase tracking-wide text-white">{toastMessage}</span>
+        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm" aria-live="polite" role="status">
+          <div className="lm-toast flex items-center gap-3 px-4 py-3 border-white/10">
+            <CheckIcon className="w-5 h-5 shrink-0 text-orange-300" />
+            <span className="text-xs font-extrabold uppercase tracking-wide text-slate-100 break-words min-w-0">{toastMessage}</span>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <header className="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#130910]/95 backdrop-blur-2xl border border-orange-500/30 rounded-2xl p-4 shadow-xl">
-        <div className="flex items-center justify-between sm:justify-start gap-3">
-          <Link to={`/classroom/${classroomId}`} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase rounded-xl transition-all">
-            ← Back
-          </Link>
-          <div>
-            <h1 className="text-sm sm:text-base font-black text-white uppercase">{classroom?.className}</h1>
-            <p className="text-[11px] text-orange-400 font-mono uppercase">{category} • {itemTitle || itemId}</p>
-          </div>
-        </div>
+      <header className="sticky top-0 z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-3 sm:pt-4 pb-2.5">
+        <div className="lm-topline" />
+        <div className="lm-card w-full max-w-6xl mx-auto px-4 sm:px-5 py-4 backdrop-blur-xl min-w-0">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <Link to={`/classroom/${classroomId}`} className="lm-btn-ghost shrink-0" aria-label="Back" title="Back">
+                <ArrowLeftIcon className="w-4 h-4" />
+                Back
+              </Link>
+              <div className="min-w-0">
+                <h1 className="lm-title text-sm sm:text-lg font-black uppercase break-words leading-tight">{classroom?.className}</h1>
+                <p className="lm-eyebrow font-mono text-orange-300 break-words mt-1">{category} • {itemTitle || itemId}</p>
+              </div>
+            </div>
 
-        <div className="flex flex-wrap items-center gap-2 pt-2 sm:pt-0 border-t sm:border-0 border-slate-800">
-          <button
-            type="button"
-            onClick={handleExportToExcel}
-            className="px-3.5 py-2 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 text-xs font-extrabold uppercase rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            📊 Export Excel
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
-            className={`px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${showUnassignedOnly ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-300 border border-slate-700'}`}
-          >
-            {showUnassignedOnly ? 'Showing Unassigned Only' : `Filter Unassigned (${unassignedStudentIds.size})`}
-          </button>
+            <div className="lm-scroll-x -mx-4 px-4 sm:mx-0 sm:px-0 w-full sm:w-auto shrink-0">
+              <div className="flex items-center gap-2 min-w-max pt-2 sm:pt-0 border-t sm:border-0 border-white/[0.06]">
+                <button
+                  type="button"
+                  onClick={handleExportToExcel}
+                  className="lm-btn-ghost shrink-0 text-cyan-300 hover:text-cyan-200"
+                >
+                  <ChartBarIcon className="w-4 h-4" />
+                  Export Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowUnassignedOnly(!showUnassignedOnly)}
+                  className={`lm-chip shrink-0 ${showUnassignedOnly ? 'lm-chip-active' : ''}`}
+                >
+                  {showUnassignedOnly ? 'Showing Unassigned Only' : `Filter Unassigned (${unassignedStudentIds.size})`}
+                </button>
+              </div>
+            </div>
+          </div>
+          <hr className="lm-divider -mx-4 sm:-mx-5 mt-4" />
         </div>
       </header>
 
       {/* Spreadsheet Main Area */}
-      <main className="relative z-10 w-full max-w-6xl mx-auto my-6 space-y-6 flex-grow">
-        <div className="space-y-4">
-          <div className="bg-[#130910]/90 border border-orange-500/25 rounded-3xl p-5 sm:p-7 shadow-xl space-y-5 backdrop-blur-2xl">
-            
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-              <div className="w-full sm:w-1/3">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1.5">Evaluation Title</label>
-                <input 
-                  type="text" 
-                  value={itemTitle} 
-                  onChange={(e) => setItemTitle(e.target.value)} 
-                  placeholder="e.g. Quiz 1" 
-                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs"
+      <main className="relative z-10 w-full max-w-6xl mx-auto my-5 sm:my-6 flex-grow min-w-0">
+        <section className="lm-card p-4 sm:p-6 space-y-5 min-w-0">
+
+            {/* Evaluation meta + top actions */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-end justify-between gap-4">
+              <div className="w-full lg:w-1/3 min-w-0">
+                <label className="block lm-eyebrow text-orange-300 mb-1.5">Evaluation Title</label>
+                <input
+                  type="text"
+                  value={itemTitle}
+                  onChange={(e) => setItemTitle(e.target.value)}
+                  placeholder="e.g. Quiz 1"
+                  className="lm-field w-full min-w-0 text-xs sm:text-sm"
                 />
               </div>
-              <div className="w-full sm:w-1/4">
-                <label className="block text-xs font-bold uppercase text-orange-400 mb-1.5">Total Marks</label>
-                <input 
-                  type="number" 
-                  min="1" 
+              <div className="w-full lg:w-1/4 min-w-0">
+                <label className="block lm-eyebrow text-orange-300 mb-1.5">Total Marks</label>
+                <input
+                  type="number"
+                  min="1"
                   required
-                  value={totalMarks} 
-                  onChange={(e) => setTotalMarks(e.target.value)} 
-                  className="w-full px-3.5 py-2.5 bg-[#080507] border border-slate-700 rounded-xl text-white text-xs font-mono"
+                  value={totalMarks}
+                  onChange={(e) => setTotalMarks(e.target.value)}
+                  className="lm-field lm-num w-full min-w-0 text-center text-xs sm:text-sm"
                 />
               </div>
-              <div className="w-full sm:w-auto flex items-center gap-2 pt-2 sm:pt-0">
-                <button 
+              <div className="w-full lg:w-auto min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <button
                   type="button"
                   onClick={handleCancelEvaluation}
                   disabled={deleting}
-                  className="flex-1 sm:flex-none px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                  className="lm-btn-ghost w-full sm:w-auto shrink-0 border-red-500/40 bg-red-950/60 text-red-200 hover:bg-red-900/70 hover:border-red-400/60 hover:text-red-100"
                 >
-                  {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
+                  <XMarkIcon className="w-4 h-4" />
+                  {deleting ? 'Cancelling...' : 'Cancel Task'}
                 </button>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={handleSubmitBatch}
                   disabled={saving}
-                  className="flex-1 sm:flex-none px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
+                  className="lm-btn w-full sm:w-auto shrink-0 bg-emerald-600 hover:bg-emerald-500"
                 >
-                  {saving ? 'Saving...' : 'Save All Marks ✓'}
+                  <CheckIcon className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Save All Marks'}
                 </button>
               </div>
             </div>
 
+            <hr className="lm-divider -mx-4 sm:-mx-6" />
+
             {/* Legend + validation hints */}
-            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-mono text-slate-400 pb-1">
-              <span className="border border-dashed border-amber-500/40 text-amber-500/90 rounded-lg px-2 py-1">-99 = Ungraded</span>
-              <span className="border border-red-500/40 text-red-400/90 rounded-lg px-2 py-1">A = Absent</span>
-              <span className="text-slate-500">0 = Scored zero</span>
-              <span className="border border-red-500/60 text-red-400 rounded-lg px-2 py-1">Red glow = Fix this box</span>
+            <div className="lm-inset flex flex-wrap items-center gap-2 p-3 sm:p-3.5 text-[10px] font-mono text-slate-400">
+              <span className="lm-badge border-dashed border-amber-500/40 text-amber-300">-99 = Ungraded</span>
+              <span className="lm-badge border-red-500/40 text-red-300">A = Absent</span>
+              <span className="lm-badge text-slate-500">0 = Scored zero</span>
+              <span className="lm-badge border-red-500/60 text-red-300">Red glow = Fix this box</span>
             </div>
 
             {/* Student Roster Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+            <div className="lm-scroll-x rounded-2xl border border-white/[0.06] shadow-chrome">
+              <table className="lm-table">
                 <thead>
-                  <tr className="border-b border-slate-800 text-[11px] font-mono uppercase text-slate-400">
-                    <th className="py-3 px-3">#</th>
-                    <th className="py-3 px-3">Roll Number</th>
-                    <th className="py-3 px-3">Student Name</th>
-                    <th className="py-3 px-3">Marks (or 'A') / Out of {totalMarks}</th>
-                    <th className="py-3 px-3">Attachment Script</th>
+                  <tr>
+                    <th className="w-10">#</th>
+                    <th>Roll Number</th>
+                    <th>Student Name</th>
+                    <th>Marks (or 'A') / Out of {totalMarks}</th>
+                    <th>Attachment Script</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60 text-xs">
+                <tbody>
                   {displayedStudents.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="text-center py-8 text-slate-500 italic">No students found matching filter.</td>
+                      <td colSpan="5" className="p-0">
+                        <div className="m-2.5 sm:m-3 rounded-2xl border border-dashed border-white/[0.09] bg-slate-950/50 flex flex-col items-center justify-center gap-2.5 px-4 py-12 text-center">
+                          <UserGroupIcon className="w-7 h-7 text-slate-500" />
+                          <span className="text-slate-500 text-xs sm:text-sm italic">No students found matching filter.</span>
+                        </div>
+                      </td>
                     </tr>
                   ) : (
                     displayedStudents.map((student, idx) => {
@@ -575,28 +624,30 @@ const MarksSheet = () => {
                       const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
 
                       return (
-                        <tr key={studentId} className="hover:bg-slate-900/40 transition-all">
-                          <td className="py-3.5 px-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="py-3.5 px-3 font-mono text-orange-400 font-bold">{student.rollNo || 'N/A'}</td>
-                          <td className="py-3.5 px-3 text-white font-medium">{student.name}</td>
-                          <td className="py-3.5 px-3">
-                            <input 
-                              type="text" 
-                              value={inputData.obtainedMarks} 
+                        <tr key={studentId}>
+                          <td className="font-mono text-slate-500">{idx + 1}</td>
+                          <td className="font-mono text-orange-300 font-bold whitespace-nowrap">{student.rollNo || 'N/A'}</td>
+                          <td className="text-slate-100 font-medium whitespace-nowrap">{student.name}</td>
+                          <td>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              value={inputData.obtainedMarks}
                               onFocus={() => handleMarkFocus(studentId)}
                               onBlur={() => handleMarkBlur(studentId)}
-                              onChange={(e) => handleInputChange(studentId, e.target.value)} 
-                              placeholder={UNGRADED_MARK} 
-                              ref={(el) => { inputRefs.current[studentId] = el; }} 
-                              className={`w-28 px-3 py-2 bg-[#080507] border rounded-xl text-white font-mono text-xs focus:ring-1 focus:ring-orange-400 ${inputData.isAbsent ? 'border-red-500 text-red-300 bg-red-950/20' : isUngradedDisplay ? 'border-amber-500/50 text-amber-500/80 bg-amber-950/10 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/30 ring-2 ring-red-500/50 shadow-[0_0_14px_rgba(239,68,68,0.45)] animate-pulse' : 'border-slate-700'}`}
+                              onChange={(e) => handleInputChange(studentId, e.target.value)}
+                              placeholder={UNGRADED_MARK}
+                              ref={(el) => { inputRefs.current[studentId] = el; }}
+                              className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${inputData.isAbsent ? 'border-red-500/70 text-red-300 bg-red-950/40' : isUngradedDisplay ? 'border-amber-500/50 text-amber-300 bg-amber-950/20 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse' : 'border-white/10 text-slate-100'}`}
                             />
                           </td>
-                          <td className="py-3.5 px-3">
+                          <td>
                             <div className="flex items-center gap-2">
                               {inputData.file?.url ? (
-                                <a href={inputData.file.url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 underline font-mono">View File</a>
+                                <a href={inputData.file.url} target="_blank" rel="noreferrer" className="lm-btn-ghost shrink-0 text-emerald-300 hover:text-emerald-200 whitespace-nowrap"><EyeIcon className="w-4 h-4" />View File</a>
                               ) : (
-                                <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase rounded-lg border border-slate-700">
+                                <label className="lm-btn-ghost cursor-pointer shrink-0 whitespace-nowrap">
+                                  <ArrowUpTrayIcon className="w-4 h-4" />
                                   Upload
                                   <input type="file" onChange={(e) => handleFileUpload(studentId, e)} className="hidden" />
                                 </label>
@@ -611,30 +662,34 @@ const MarksSheet = () => {
               </table>
             </div>
 
-            <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-800">
-              <button 
-                type="button"
-                onClick={handleCancelEvaluation}
-                disabled={deleting}
-                className="px-4 py-2.5 bg-red-950/80 hover:bg-red-900 border border-red-500/40 text-red-200 font-extrabold text-xs uppercase rounded-xl transition-all cursor-pointer disabled:opacity-50"
-              >
-                {deleting ? 'Cancelling...' : 'Cancel Task ✕'}
-              </button>
-              <button 
-                type="button" 
-                onClick={handleSubmitBatch}
-                disabled={saving}
-                className="px-6 py-2.5 bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs uppercase rounded-xl shadow-lg transition-all cursor-pointer"
-              >
-                {saving ? 'Saving...' : 'Save All Marks ✓'}
-              </button>
+            {/* Sticky action bar */}
+            <div className="sticky bottom-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+              <div className="lm-card-flat bg-slate-950/85 px-3 sm:px-4 py-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2.5 backdrop-blur-xl">
+                <button
+                  type="button"
+                  onClick={handleCancelEvaluation}
+                  disabled={deleting}
+                  className="lm-btn-ghost w-full sm:w-auto shrink-0 border-red-500/40 bg-red-950/60 text-red-200 hover:bg-red-900/70 hover:border-red-400/60 hover:text-red-100"
+                >
+                  <XMarkIcon className="w-4 h-4" />
+                  {deleting ? 'Cancelling...' : 'Cancel Task'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitBatch}
+                  disabled={saving}
+                  className="lm-btn w-full sm:w-auto shrink-0 bg-emerald-600 hover:bg-emerald-500"
+                >
+                  <CheckIcon className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Save All Marks'}
+                </button>
+              </div>
             </div>
 
-          </div>
-        </div>
+        </section>
       </main>
 
-      <footer className="relative z-10 mt-8 text-center text-xs text-slate-500 space-y-1">
+      <footer className="relative z-10 mt-8 mb-1 text-center text-xs text-slate-500 space-y-1">
         <p>© 2026 PUCIT Classroom Portal • All Rights Reserved</p>
       </footer>
 

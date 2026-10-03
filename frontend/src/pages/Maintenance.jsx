@@ -1,5 +1,10 @@
 import React from 'react';
-import { WrenchScrewdriverIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
+import {
+  ArrowPathIcon,
+  ClockIcon,
+  ShieldCheckIcon,
+  WrenchScrewdriverIcon
+} from '@heroicons/react/24/outline';
 import { useNavigate } from 'react-router-dom';
 
 const Maintenance = ({ maintenanceData }) => {
@@ -8,37 +13,39 @@ const Maintenance = ({ maintenanceData }) => {
   const estimatedEnd = maintenanceData?.estimatedEnd;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 select-none">
-      <div className="max-w-md w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl shadow-2xl p-8 text-center relative overflow-hidden">
-        
-        {/* Subtle background glow effect */}
-        <div className="absolute -top-24 -left-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="lm-canvas relative flex min-h-dvh w-full items-center justify-center overflow-x-hidden px-4 py-6 sm:px-6 sm:py-8">
+      <div className="lm-topline" />
+      <div className="lm-ambient" />
+
+      <div className="lm-card relative z-10 w-full max-w-md p-5 text-center sm:p-8">
 
         {/* Animated Maintenance Icon */}
-        <div className="mx-auto flex items-center justify-center w-16 h-16 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 mb-6 shadow-inner">
+        <div className="lm-inset mx-auto mb-6 flex h-16 w-16 items-center justify-center text-orange-200">
           <WrenchScrewdriverIcon className="w-8 h-8 animate-pulse" />
         </div>
 
-        <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
+        <h1 className="lm-title mb-2 text-2xl font-bold tracking-tight">
           System Maintenance
         </h1>
-        
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-6">
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+
+        <div className="lm-badge mb-6 text-amber-300">
+          <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping"></span>
           Under Maintenance Mode Active
         </div>
 
-        <p className="text-slate-300 text-sm leading-relaxed mb-6">
+        <p className="mb-6 text-sm leading-relaxed text-slate-300">
           {message}
         </p>
 
         {estimatedEnd && (
-          <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 mb-6 text-left">
-            <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold mb-1">
-              Estimated Completion
-            </p>
-            <p className="text-sm font-medium text-indigo-300">
+          <div className="lm-inset mb-6 p-4 text-left">
+            <div className="mb-1 flex items-center gap-2">
+              <ClockIcon className="w-4 h-4 flex-none text-cyan-300" />
+              <p className="min-w-0 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                Estimated Completion
+              </p>
+            </div>
+            <p className="lm-num text-sm font-medium break-words text-cyan-200">
               {new Date(estimatedEnd).toLocaleString()}
             </p>
           </div>
@@ -47,21 +54,24 @@ const Maintenance = ({ maintenanceData }) => {
         <div className="space-y-3">
           <button
             onClick={() => window.location.reload()}
-            className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all shadow-lg shadow-indigo-600/20 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 text-sm"
+            className="lm-btn w-full min-h-[2.75rem] cursor-pointer"
           >
+            <ArrowPathIcon className="w-4 h-4" />
             Check Status Again
           </button>
 
           <button
             onClick={() => navigate('/login')}
-            className="w-full py-2 px-4 bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-slate-200 font-medium rounded-xl transition-all text-xs flex items-center justify-center gap-2"
+            className="lm-btn-ghost w-full min-h-[2.75rem] cursor-pointer"
           >
             <ShieldCheckIcon className="w-4 h-4" />
             Admin / Faculty Bypass Login
           </button>
         </div>
 
-        <div className="mt-8 pt-6 border-t border-slate-800/60 text-xs text-slate-500">
+        <hr className="lm-divider my-6" />
+
+        <div className="text-xs text-slate-500">
           PU Classroom & Labroom Management System
         </div>
       </div>
