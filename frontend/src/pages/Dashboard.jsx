@@ -1263,25 +1263,25 @@ const Dashboard = () => {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 min-w-max">
                 <button
                   onClick={() => setSelectedAnalyticsTab('users')}
-                  className={`${selectedAnalyticsTab === 'users' ? 'lm-chip-active' : 'lm-chip'}`}
+                  className={`lm-chip ${selectedAnalyticsTab === 'users' ? 'lm-chip-active' : ''}`}
                 >
                   Users ({detailedAnalyticsData.users.length})
                 </button>
                 <button
                   onClick={() => setSelectedAnalyticsTab('classrooms')}
-                  className={`${selectedAnalyticsTab === 'classrooms' ? 'lm-chip-active' : 'lm-chip'}`}
+                  className={`lm-chip ${selectedAnalyticsTab === 'classrooms' ? 'lm-chip-active' : ''}`}
                 >
                   Classrooms ({classroomsOnly.length})
                 </button>
                 <button
                   onClick={() => setSelectedAnalyticsTab('labrooms')}
-                  className={`${selectedAnalyticsTab === 'labrooms' ? 'lm-chip-active' : 'lm-chip'}`}
+                  className={`lm-chip ${selectedAnalyticsTab === 'labrooms' ? 'lm-chip-active' : ''}`}
                 >
                   Lab Rooms ({labroomsOnly.length})
                 </button>
                 <button
                   onClick={() => setSelectedAnalyticsTab('pending')}
-                  className={`${selectedAnalyticsTab === 'pending' ? 'lm-chip-active' : 'lm-chip'}`}
+                  className={`lm-chip ${selectedAnalyticsTab === 'pending' ? 'lm-chip-active' : ''}`}
                 >
                   Pending ({pendingTeachers.length})
                 </button>
@@ -1295,7 +1295,7 @@ const Dashboard = () => {
                   <button
                     key={role}
                     onClick={() => setUserRoleFilter(role)}
-                    className={userRoleFilter === role ? 'lm-chip-active' : 'lm-chip'}
+                    className={`lm-chip ${userRoleFilter === role ? 'lm-chip-active' : ''}`}
                   >
                     {role}
                   </button>
@@ -1314,7 +1314,7 @@ const Dashboard = () => {
                   <button
                     key={opt.key}
                     onClick={() => setUserAssignmentFilter(opt.key)}
-                    className={userAssignmentFilter === opt.key ? 'lm-chip-active' : 'lm-chip'}
+                    className={`lm-chip ${userAssignmentFilter === opt.key ? 'lm-chip-active' : ''}`}
                   >
                     {opt.label} ({opt.count})
                   </button>
@@ -2034,7 +2034,7 @@ const Dashboard = () => {
                   <button
                     type="button"
                     onClick={() => handleCourseTypeChange('CLASSROOM')}
-                    className={`py-2.5 px-3 ${newClassData.courseType === 'CLASSROOM' ? 'lm-chip-active' : 'lm-chip'}`}
+                    className={`lm-chip py-2.5 px-3 ${newClassData.courseType === 'CLASSROOM' ? 'lm-chip-active' : ''}`}
                   >
                     <BookOpenIcon className="lm-ico" />
                     Classroom (Theory)
@@ -2042,7 +2042,7 @@ const Dashboard = () => {
                   <button
                     type="button"
                     onClick={() => handleCourseTypeChange('LAB')}
-                    className={`py-2.5 px-3 ${newClassData.courseType === 'LAB' ? 'lm-chip-active' : 'lm-chip'}`}
+                    className={`lm-chip py-2.5 px-3 ${newClassData.courseType === 'LAB' ? 'lm-chip-active' : ''}`}
                   >
                     <BeakerIcon className="lm-ico" />
                     Lab (Practical)

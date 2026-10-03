@@ -1109,3 +1109,22 @@ select:-webkit-autofill {
 [class*="bg-[#0b1016]"] {
   background-color: #0a0f16;
 }
+/* ============================================================
+   10. ICON CONTRAST ON LIGHT FILLS  (unlayered)
+   Selected chips and primary buttons render on a LIGHT metal
+   fill. An icon that inherits the dimmed label colour, or
+   hardcodes a light tint such as `text-slate-400`, vanishes
+   against that fill - which is why icons looked broken the
+   instant a tab or mode button was selected.
+
+   Forced with !important because a colour utility on the icon
+   itself would otherwise win, and kept unlayered so it also
+   beats Tailwind's utilities layer. Deliberately scoped to
+   light-fill controls only: chips at rest and `.lm-btn-ghost`
+   sit on dark surfaces, so the semantic emerald / blue / amber
+   icon coding elsewhere is untouched.
+   ============================================================ */
+.lm-chip-active :where(svg),
+.lm-btn :where(svg) {
+  color: rgb(8 13 20 / 0.82) !important;
+}

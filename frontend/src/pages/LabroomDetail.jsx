@@ -1188,13 +1188,13 @@ const LabroomDetail = () => {
         <div className="lm-card-flat p-2">
           <div className="lm-scroll-x -mx-1 px-1">
             <div className="flex items-center gap-1.5 min-w-max w-max py-0.5">
-              <button onClick={() => setActiveTab('overview')} className={activeTab === 'overview' ? 'lm-chip-active' : 'lm-chip'}>
+              <button onClick={() => setActiveTab('overview')} className={`lm-chip ${activeTab === 'overview' ? 'lm-chip-active' : ''}`}>
                 <ChartBarIcon className="w-3.5 h-3.5" />
                 Overview
               </button>
 
               {isStaffOrAdmin && (
-                <button onClick={() => setActiveTab('leaderboard')} className={activeTab === 'leaderboard' ? 'lm-chip-active' : 'lm-chip'}>
+                <button onClick={() => setActiveTab('leaderboard')} className={`lm-chip ${activeTab === 'leaderboard' ? 'lm-chip-active' : ''}`}>
                   <TrophyIcon className="w-3.5 h-3.5" />
                   Lab Leaderboard
                 </button>
@@ -1204,10 +1204,10 @@ const LabroomDetail = () => {
                 const targetKey = getCategoryTargetKey(act.category);
                 const count = (labroom[targetKey] || []).length;
                 return (
-                  <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={activeTab === act.category.toLowerCase() ? 'lm-chip-active' : 'lm-chip'}>
+                  <button key={act.category} onClick={() => setActiveTab(act.category.toLowerCase())} className={`lm-chip ${activeTab === act.category.toLowerCase() ? 'lm-chip-active' : ''}`}>
                     <FolderIcon className="w-3.5 h-3.5" />
                     <span>{act.category}</span>
-                    <span className={`lm-badge ${activeTab === act.category.toLowerCase() ? 'bg-slate-950/25 text-slate-950 border-white/20' : 'text-slate-300'}`}>
+                    <span className={`lm-badge ${activeTab === act.category.toLowerCase() ? 'bg-slate-900/15 text-slate-950 border-slate-950/30' : 'text-slate-300'}`}>
                       {count}
                     </span>
                   </button>
@@ -1366,7 +1366,7 @@ const LabroomDetail = () => {
                     <button
                       key={filter.key}
                       onClick={() => setLeaderboardFilter(filter.key)}
-                      className={leaderboardFilter === filter.key ? 'lm-chip-active' : 'lm-chip'}
+                      className={`lm-chip ${leaderboardFilter === filter.key ? 'lm-chip-active' : ''}`}
                     >
                       {filter.label}
                     </button>
@@ -1889,12 +1889,12 @@ const LabroomDetail = () => {
             {addStudentError && <div className="lm-inset p-3 bg-red-950/60 border border-red-500/40 text-red-300 text-xs">{addStudentError}</div>}
             
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              <button type="button" onClick={() => setAddModeType('shorthand')} className={`justify-center ${addModeType === 'shorthand' ? 'lm-chip-active' : 'lm-chip'}`}>1. Shorthand</button>
-              <button type="button" onClick={() => setAddModeType('range')} className={`justify-center ${addModeType === 'range' ? 'lm-chip-active' : 'lm-chip'}`}>2. Range</button>
-              <button type="button" onClick={() => setAddModeType('batch')} className={`justify-center ${addModeType === 'batch' ? 'lm-chip-active' : 'lm-chip'}`}>3. Add/Drop</button>
-              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`justify-center ${addModeType === 'smartDetect' ? 'lm-chip-active' : 'lm-chip'}`}>
+              <button type="button" onClick={() => setAddModeType('shorthand')} className={`lm-chip justify-center ${addModeType === 'shorthand' ? 'lm-chip-active' : ''}`}>1. Shorthand</button>
+              <button type="button" onClick={() => setAddModeType('range')} className={`lm-chip justify-center ${addModeType === 'range' ? 'lm-chip-active' : ''}`}>2. Range</button>
+              <button type="button" onClick={() => setAddModeType('batch')} className={`lm-chip justify-center ${addModeType === 'batch' ? 'lm-chip-active' : ''}`}>3. Add/Drop</button>
+              <button type="button" onClick={() => setAddModeType('smartDetect')} className={`lm-chip justify-center ${addModeType === 'smartDetect' ? 'lm-chip-active' : ''}`}>
                 <span className="whitespace-nowrap">4. Smart Add</span>
-                <span className={`lm-badge text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-slate-950/25 text-slate-950 border-white/20' : 'text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span>
+                <span className={`lm-badge text-[9px] font-mono ${addModeType === 'smartDetect' ? 'bg-slate-900/15 text-slate-950 border-slate-950/30' : 'text-emerald-300'}`}>{classDirectoryStudents.filter(st => activeStudents.some(as => as._id?.toString() === st._id?.toString())).length}</span>
               </button>
             </div>
 
