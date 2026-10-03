@@ -15,6 +15,34 @@ import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
 const UNGRADED_MARK = '-99';
+// "B" bypasses this activity: the backend drops it from BOTH the earned and the
+// possible total, so it counts for nothing rather than counting as zero.
+const BYPASS_MARK = 'B';
+
+/**
+ * Decide whether a stored lab mark row represents real grading.
+ *
+ * `isGraded` was added to the schema after the fact, so rows written by older
+ * builds have no such field. A naive `item.isGraded === true` check would make
+ * every pre-existing grade look ungraded and blank out real scores, so legacy
+ * rows fall back to evidence:
+ *
+ *   isGraded === true   -> graded (explicit)
+ *   isGraded === false  -> ungraded (explicit)
+ *   isGraded undefined  -> legacy row: graded if it holds any real evidence
+ *
+ * A legacy row sitting at 0 stays ungraded on purpose. The single-student save
+ * path clamps -99 through Math.max(0, ...), so an old "ungraded" row and an old
+ * "genuine zero" are indistinguishable. Counting an ungraded row as a real 0
+ * would silently fail the student, whereas excluding it only omits a value -
+ * so ungraded is the safer default for the ambiguous case.
+ */
+export const isRowGraded = (item = {}) => {
+  if (item.isGraded === true) return true;
+  if (item.isGraded === false) return false;
+  if (item.isAbsent === true || item.isBypassed === true) return true;
+  return Number(item.obtainedMarks) > 0;
+};
 
 const LabMarksSheet = () => {
   const { labroomId, category, itemId } = useParams();
@@ -128,6 +156,7 @@ const LabMarksSheet = () => {
         
         let obtained = UNGRADED_MARK;
         let isAbsent = false;
+        let isBypassed = false;
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
@@ -138,12 +167,12 @@ const LabMarksSheet = () => {
           );
           if (item) {
             const rawStored = item.obtainedMarks;
-            const stored = String(rawStored ?? '').trim();
-            // Ungraded work is seeded as a bare 0 by the backend, which is
-            // indistinguishable from a real zero score on load. Normalise it
-            // back to the -99 sentinel so every box opens as "ungraded".
-            const hasScore = stored !== '' && stored !== '0';
-            obtained = item.isAbsent ? 'A' : (hasScore ? rawStored : UNGRADED_MARK);
+            // Use the explicit graded flag, with an evidence-based fallback for
+            // rows written before that flag existed. Guessing from the value
+            // alone (treating 0 as "ungraded") erased legitimate zero scores.
+            const hasScore = isRowGraded(item);
+            isBypassed = !!item.isBypassed;
+            obtained = isBypassed ? BYPASS_MARK : (item.isAbsent ? 'A' : (hasScore ? rawStored : UNGRADED_MARK));
             isAbsent = !!item.isAbsent;
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
@@ -154,6 +183,7 @@ const LabMarksSheet = () => {
         initialMap[studentId] = {
           obtainedMarks: obtained,
           isAbsent,
+          isBypassed,
           file: fileObj
         };
       });
@@ -174,7 +204,9 @@ const LabMarksSheet = () => {
   }, [labroomId, category, itemId, fetchSheetData]);
 
   const handleInputChange = (studentId, value) => {
-    const isAbs = value.trim().toUpperCase() === 'A';
+    const upper = value.trim().toUpperCase();
+    const isAbs = upper === 'A';
+    const isByp = upper === BYPASS_MARK;
 
     setErrorStudentIds(prev => {
       if (!prev.size || !prev.has(studentId)) return prev;
@@ -188,7 +220,9 @@ const LabMarksSheet = () => {
       [studentId]: {
         ...prev[studentId],
         obtainedMarks: value,
-        isAbsent: isAbs
+        // A and B are mutually exclusive states.
+        isAbsent: isAbs,
+        isBypassed: isByp
       }
     }));
   };
@@ -196,15 +230,18 @@ const LabMarksSheet = () => {
   // Clicking the marks field clears the ungraded sentinel so a score can be typed.
   // -99 is the canonical "ungraded" value, but older sheets stored a bare 0 for
   // ungraded work - clearing only on -99 left a 0 sitting in the box that had to
-  // be deleted by hand before typing anything.
+  // be deleted by hand before typing anything. 'B' is cleared too so a bypassed
+  // box can be overwritten with a real score.
   const handleMarkFocus = (studentId) => {
     setMarkInputs(prev => {
       const current = prev[studentId] || {};
       const val = String(current.obtainedMarks ?? '').trim();
-      if (val === UNGRADED_MARK || val === '0') {
+      // '0' is deliberately NOT cleared: it is a legitimate score, and wiping
+      // it on focus silently turned real zeros back into ungraded on save.
+      if (val === UNGRADED_MARK || val.toUpperCase() === BYPASS_MARK) {
         return {
           ...prev,
-          [studentId]: { ...current, obtainedMarks: '', isAbsent: false }
+          [studentId]: { ...current, obtainedMarks: '', isAbsent: false, isBypassed: false }
         };
       }
       return prev;
@@ -219,7 +256,7 @@ const LabMarksSheet = () => {
       if (val === '' || val === UNGRADED_MARK) {
         return {
           ...prev,
-          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false }
+          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false, isBypassed: false }
         };
       }
       return prev;
@@ -272,6 +309,7 @@ const LabMarksSheet = () => {
         const rawVal = String(data.obtainedMarks ?? '').trim();
         if (rawVal === '' || rawVal === UNGRADED_MARK) return; // ungraded is allowed
         if (rawVal.toUpperCase() === 'A') return; // absent is allowed
+        if (rawVal.toUpperCase() === BYPASS_MARK) return; // bypassed is allowed
         const num = Number(rawVal);
         if (isNaN(num) || num < 0 || num > parsedTotalMarks) {
           invalidIds.add(studentId);
@@ -291,12 +329,20 @@ const LabMarksSheet = () => {
           const v = String(data.obtainedMarks ?? '').trim();
           return v !== '' && v !== UNGRADED_MARK;
         })
-        .map(([studentId, data]) => ({
-          studentId,
-          obtainedMarks: data.isAbsent ? 'A' : Number(data.obtainedMarks),
-          isAbsent: data.isAbsent,
-          file: data.file?.url ? data.file : null
-        }));
+        .map(([studentId, data]) => {
+          const rawVal = String(data.obtainedMarks).trim();
+          const upper = rawVal.toUpperCase();
+          const isAbs = data.isAbsent || upper === 'A';
+          const isByp = !isAbs && (data.isBypassed || upper === BYPASS_MARK);
+          return {
+            studentId,
+            // 'B' is sent as the literal sentinel - the server decides whether the
+            // bypass is allowed and rejects it when the limit is already met.
+            obtainedMarks: isAbs ? 'A' : (isByp ? BYPASS_MARK : Number(rawVal)),
+            isAbsent: isAbs,
+            file: data.file?.url ? data.file : null
+          };
+        });
 
       if (marksData.length === 0) {
         showToast('No marks entered to submit.');
@@ -362,8 +408,9 @@ const LabMarksSheet = () => {
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
         const rawMark = String(inputData.obtainedMarks ?? '').trim();
         const isUngraded = rawMark === '' || rawMark === UNGRADED_MARK;
-        const score = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : rawMark);
-        const status = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : 'Graded');
+        const isBypassed = !isUngraded && (inputData.isBypassed || rawMark.toUpperCase() === BYPASS_MARK);
+        const score = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : rawMark));
+        const status = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : 'Graded'));
 
         csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
@@ -538,6 +585,7 @@ const LabMarksSheet = () => {
             <div className="lm-inset flex flex-wrap items-center gap-2 p-3 sm:p-3.5 text-[10px] font-mono text-slate-400">
               <span className="lm-badge border-dashed border-amber-500/40 text-amber-300">-99 = Ungraded</span>
               <span className="lm-badge border-red-500/40 text-red-300">A = Absent</span>
+      <span className="lm-badge border-stone-500/50 text-stone-300">B = Bypassed (excluded from grade)</span>
               <span className="lm-badge text-slate-500">0 = Scored zero</span>
               <span className="lm-badge border-red-500/60 text-red-300">Red glow = Fix this box</span>
             </div>
@@ -567,9 +615,25 @@ const LabMarksSheet = () => {
                   ) : (
                     displayedStudents.map((student, idx) => {
                       const studentId = student._id.toString();
-                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, file: {} };
+                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, isBypassed: false, file: {} };
 
-                      const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
+                      const rawMarkValue = String(inputData.obtainedMarks ?? '').trim();
+                      const isUngradedDisplay = rawMarkValue === UNGRADED_MARK;
+                      const isBypassDisplay = !inputData.isAbsent && !isUngradedDisplay &&
+                        (inputData.isBypassed || rawMarkValue.toUpperCase() === BYPASS_MARK);
+
+                      // Bypassed boxes glow brown so they read as "excluded from the
+                      // grade" rather than "scored zero", and stay distinct from
+                      // absent (red) and ungraded (amber).
+                      const markCellClass = isBypassDisplay
+                        ? 'lm-mark-bypass border-stone-400/70 text-stone-100 bg-stone-800/60 font-semibold'
+                        : inputData.isAbsent
+                          ? 'border-red-500/70 text-red-300 bg-red-950/40'
+                          : isUngradedDisplay
+                            ? 'border-amber-500/50 text-amber-300 bg-amber-950/20 italic'
+                            : errorStudentIds.has(studentId)
+                              ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse'
+                              : 'border-white/10 text-slate-100';
 
                       return (
                         <tr key={studentId}>
@@ -586,7 +650,7 @@ const LabMarksSheet = () => {
                               onChange={(e) => handleInputChange(studentId, e.target.value)}
                               placeholder={UNGRADED_MARK}
                               ref={(el) => { inputRefs.current[studentId] = el; }}
-                              className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${inputData.isAbsent ? 'border-red-500/70 text-red-300 bg-red-950/40' : isUngradedDisplay ? 'border-amber-500/50 text-amber-300 bg-amber-950/20 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse' : 'border-white/10 text-slate-100'}`}
+                              className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${markCellClass}`}
                             />
                           </td>
                           <td>

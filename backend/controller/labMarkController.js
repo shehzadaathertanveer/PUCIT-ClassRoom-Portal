@@ -4,6 +4,7 @@ const User = require('../models/userSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
+const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
 
 const VALID_STANDARD_CATEGORIES = [
   'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
@@ -45,6 +46,32 @@ const getRollDigits = (rollNo = '') => {
   if (!digits) return 99999;
   return parseInt(digits.slice(-3), 10);
 };
+
+// ---------------------------------------------------------------------------
+// Bypass ("B") support - shared with the Classroom mark controller so both
+// room types enforce identical limits and cannot drift apart.
+// Every Lab category (including labMids / labFinals / finalProject) is stored
+// as an array of items, so no single-object special case is needed here.
+// ---------------------------------------------------------------------------
+// How many graded activities a labroom category holds. Used to clamp bypass
+// limits so a student can never bypass every activity in a category.
+const countLabSlots = (labroom, categoryKey) => {
+  if (!labroom) return 0;
+  // Every Labroom evaluation category is an array in labSchema.js, including
+  // finalProject / labMids / labFinals. Treating those as single objects made the
+  // count 0, which made getBypassLimit skip its clamp entirely and allowed a TA
+  // to bypass every remaining activity in those categories.
+  return Array.isArray(labroom[categoryKey]) ? labroom[categoryKey].length : 0;
+};
+
+const { canBypass } = createBypassRules({
+  resolveKey: (catName = '') => RESOLVE_LAB_CATEGORY(String(catName || '')),
+  getItems: (markDoc, categoryKey) => {
+    const items = markDoc[categoryKey];
+    return Array.isArray(items) ? items : (items ? [items] : []);
+  },
+  getSlotCount: countLabSlots
+});
 
 // =============================================================================
 // 1. GET BULK LAB MARK SHEET (Sorted 001->040 + Add/Drop)
@@ -305,37 +332,102 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
 
   let sumOverall = 0;
 
+  // ---------------------------------------------------------------------------
+  // Category weighting. This is computed ONCE for the whole room rather than
+  // per student - it was previously rebuilt inside the rankings map, which made
+  // every student's row re-do the same string normalisation and lookups.
+  // ---------------------------------------------------------------------------
+  const normKey = (s) =>
+    String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      .replace(/ies$/, 'y').replace(/sses$/, 'ss').replace(/([^s])s$/, '$1');
+
+  // Exact match wins. Otherwise accept a substring match only when it is
+  // unambiguous - guessing between "projects" and "finalProject" would
+  // silently apply the wrong weight, which is worse than applying none.
+  const resolveCategoryKey = (category) => {
+    const a = normKey(category);
+    if (!a) return null;
+    const exact = VALID_STANDARD_CATEGORIES.find((k) => normKey(k) === a);
+    if (exact) return exact;
+    const partial = VALID_STANDARD_CATEGORIES.filter((k) => {
+      const b = normKey(k);
+      return b.includes(a) || a.includes(b);
+    });
+    return partial.length === 1 ? partial[0] : null;
+  };
+
+  const weightByKey = {};
+  (labroom?.sessionalActivities || []).forEach(act => {
+    const key = resolveCategoryKey(act.category);
+    if (key) weightByKey[key] = Number(act.allocatedMarks || 0);
+  });
+
+  const configuredWeights = Object.values(weightByKey).filter((w) => w > 0);
+  const hasWeights = configuredWeights.length > 0;
+
+  // Categories the teacher never configured a weight for used to fall back to
+  // weight 0, which silently dropped them from the denominator - a student
+  // graded only in those categories scored 0% and appeared to fail. Give them
+  // the mean configured weight instead so they still count, as the comment
+  // ("contribute equally") always promised.
+  //
+  // Only categories that actually hold graded marks (catPoss > 0) enter the
+  // weighted denominator. Folding in the categories a student was never
+  // assessed on would add their weight to the denominator while contributing a
+  // 0% numerator, dragging the overall score toward zero.
+  const meanConfiguredWeight = hasWeights
+    ? configuredWeights.reduce((a, b) => a + b, 0) / configuredWeights.length
+    : 0;
+
   const rankings = validDocs.map(doc => {
-    let totalObtained = 0;
-    let totalPossible = 0;
+    // Real marks, in marks - kept separate from the weighted percentage so the
+    // UI never renders "65 * 40 = 2600 / 10" as a mark total.
+    let marksObtained = 0;
+    let marksPossible = 0;
+    let weightedScore = 0;
+    let weightTotal = 0;
     let catStats = {};
 
     VALID_STANDARD_CATEGORIES.forEach(targetKey => {
       let catObt = 0;
       let catPoss = 0;
 
+      // Skip bypassed entries on BOTH sides - they do not exist for this student.
       const items = doc[targetKey];
       if (Array.isArray(items)) {
         items.forEach(item => {
+          if (item.isBypassed) return;
           if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
             catObt += Number(item.obtainedMarks) || 0;
           }
           catPoss += Number(item.totalMarks) || 0;
         });
-      } else if (items && items.title) {
+      } else if (items && items.title && !items.isBypassed) {
         if (!items.isAbsent && items.obtainedMarks !== undefined && items.obtainedMarks !== null) {
           catObt += Number(items.obtainedMarks) || 0;
         }
         catPoss += Number(items.totalMarks) || 0;
       }
 
-      totalObtained += catObt;
-      totalPossible += catPoss;
       const catPct = catPoss > 0 ? Number(((catObt / catPoss) * 100).toFixed(2)) : 0;
       catStats[targetKey + 'Percentage'] = catPct;
+
+      marksObtained += catObt;
+      marksPossible += catPoss;
+
+      if (hasWeights && catPoss > 0) {
+        const w = weightByKey[targetKey] > 0 ? weightByKey[targetKey] : meanConfiguredWeight;
+        weightedScore += catPct * w;
+        weightTotal += w;
+      }
     });
 
-    const percentage = totalPossible > 0 ? Number(((totalObtained / totalPossible) * 100).toFixed(2)) : 0;
+    // Weighted overall when weights exist; otherwise a plain mark total, which
+    // preserves the behaviour from before weighting was supported.
+    const percentage = hasWeights
+      ? (weightTotal > 0 ? Number((weightedScore / weightTotal).toFixed(2)) : 0)
+      : (marksPossible > 0 ? Number(((marksObtained / marksPossible) * 100).toFixed(2)) : 0);
+
     sumOverall += percentage;
 
     return {
@@ -343,8 +435,9 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
       marksDoc: doc,
       percentage,
       overallPercentage: percentage,
-      totalObtained,
-      totalPossible,
+      isWeighted: hasWeights,
+      totalObtained: marksObtained,
+      totalPossible: marksPossible,
       ...catStats
     };
   });
@@ -354,6 +447,34 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   const classAverages = {
     overallLabPercentage: Number((sumOverall / validDocs.length).toFixed(2))
   };
+
+  // Persist the cached overall percentage. LabMark.studentLabPercentage existed
+  // in the schema but was never assigned, so it always read back as 0 - which
+  // made any consumer of the cached field disagree with the analytics endpoint.
+  const percentageUpdates = rankings
+    .filter((r) => {
+      if (!r.marksDoc || !r.marksDoc._id) return false;
+      // Analytics is a GET, and the leaderboard is re-fetched on every tab switch
+      // and every poll. Writing a row whose value already matches turns a read
+      // into N pointless writes, so only genuinely stale caches are refreshed.
+      const cached = Number(r.marksDoc.studentLabPercentage);
+      return !Number.isFinite(cached) || cached !== r.percentage;
+    })
+    .map((r) => ({
+      updateOne: {
+        filter: { _id: r.marksDoc._id },
+        update: { $set: { studentLabPercentage: r.percentage } }
+      }
+    }));
+
+  if (percentageUpdates.length > 0) {
+    try {
+      await LabMark.bulkWrite(percentageUpdates, { ordered: false });
+    } catch (err) {
+      // Never fail the analytics request over a cache refresh.
+      console.warn('studentLabPercentage cache refresh failed:', err.message);
+    }
+  }
 
   // Per-category class averages (e.g. classAverages['labTasksPercentage'])
   VALID_STANDARD_CATEGORIES.forEach(targetKey => {
@@ -525,6 +646,8 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const rawVal = item.obtainedMarks;
     if (rawVal === undefined || rawVal === null) return false;
     const str = String(rawVal).trim();
+    // "B" requests a bypass, so it must survive this filter.
+    if (str.toUpperCase() === BYPASS_SENTINEL) return true;
     // -99 is the UI sentinel for "ungraded" - never persist it as a real mark.
     if (Number(str) === -99) return false;
     return str !== '' || str.toUpperCase() === 'A';
@@ -548,14 +671,34 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     const studentIdStr = entry.studentId.toString();
     const rawVal = String(entry.obtainedMarks).trim();
     const isAbsent = rawVal.toUpperCase() === 'A';
-    if (!isAbsent && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
+    const isBypass = !isAbsent && rawVal.toUpperCase() === BYPASS_SENTINEL;
+    if (!isAbsent && !isBypass && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
       continue;
     }
-    const parsedObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+    const parsedObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
     const fileData = entry.file || {};
 
     let markDoc = docMap.get(studentIdStr);
     let marksChanged = !markDoc;
+
+    // Bypass is capped per student per category, enforced here so the cap holds
+    // regardless of what the client sends (a TA cannot bypass the UI to exceed it).
+    if (isBypass) {
+      const verdict = canBypass(labroom, markDoc, standardKey, cleanTitle);
+      if (!verdict.allowed) {
+        return res.status(400).json({
+          status: 'fail',
+          message: verdict.message,
+          data: {
+            limit: verdict.limit,
+            used: verdict.used,
+            category: standardKey,
+            studentId: entry.studentId,
+            studentName: studentMap.get(studentIdStr)?.name || 'Unknown'
+          }
+        });
+      }
+    }
 
     if (markDoc) {
       const existingItems = markDoc[standardKey];
@@ -568,8 +711,10 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       } else {
         const oldObtained = Number(existingItem.obtainedMarks) || 0;
         const oldAbsent = existingItem.isAbsent === true;
+        const oldBypassed = existingItem.isBypassed === true;
         const oldTotal = Number(existingItem.totalMarks) || 0;
-        marksChanged = oldObtained !== parsedObtained || oldAbsent !== isAbsent || oldTotal !== parsedTotal;
+        marksChanged = oldObtained !== parsedObtained || oldAbsent !== isAbsent ||
+                       oldBypassed !== isBypass || oldTotal !== parsedTotal;
       }
     }
 
@@ -583,7 +728,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       });
     }
 
-    const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent, file: fileData };
+    // Reaching here means a real value was submitted: a number (including 0), "A",
+    // or "B". The -99/empty ungraded sentinel was already filtered out above, so
+    // mark the row graded - this is what keeps a legitimate 0 score from being
+    // re-read as "ungraded" later.
+    const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isGraded: true, isAbsent, isBypassed: isBypass, file: fileData };
 
     if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
       markDoc[standardKey] = [itemPayload];
@@ -612,12 +761,18 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
         emailList.push({
           email,
           title: `${cleanTitle}`,
-          bodyText: isAbsent 
+          bodyText: isAbsent
             ? `You were marked absent for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong>.`
-            : `Your lab grade for <strong>${cleanTitle}</strong> has been uploaded.`,
+            : isBypass
+              ? `<strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong> was marked as bypassed and is excluded from your grade.`
+              : `Your lab grade for <strong>${cleanTitle}</strong> has been uploaded.`,
           details: [
             { label: 'Lab', value: labroom.labName },
-            { label: 'Score', value: isAbsent ? `Absent (0 / ${parsedTotal})` : `${parsedObtained} / ${parsedTotal}` },
+            { label: 'Score', value: isAbsent
+                ? `Absent (0 / ${parsedTotal})`
+                : isBypass
+                  ? 'Bypassed (excluded from grade)'
+                  : `${parsedObtained} / ${parsedTotal}` },
             { label: 'Graded By', value: req.user.name }
           ]
         });
@@ -695,7 +850,8 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   const currentTotal = totalMarks !== undefined ? Number(totalMarks) : 10;
   const rawVal = String(obtainedMarks).trim();
   const isAbsent = rawVal.toUpperCase() === 'A';
-  const currentObtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+  const isBypass = !isAbsent && rawVal.toUpperCase() === BYPASS_SENTINEL;
+  const currentObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
   const fileData = file || {};
 
   // Only notify the student when their grade actually changes.
@@ -704,15 +860,24 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     ? existingItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
     : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
 
+  if (isBypass) {
+    const verdict = canBypass(labroom, markDoc, standardKey, cleanTitle);
+    if (!verdict.allowed) return next(new AppError(verdict.message, 400));
+  }
+
   let marksChanged = !existingItem;
   if (existingItem) {
     const oldObtained = Number(existingItem.obtainedMarks) || 0;
     const oldAbsent = existingItem.isAbsent === true;
+    const oldBypassed = existingItem.isBypassed === true;
     const oldTotal = Number(existingItem.totalMarks) || 0;
-    marksChanged = oldObtained !== currentObtained || oldAbsent !== isAbsent || oldTotal !== currentTotal;
+    marksChanged = oldObtained !== currentObtained || oldAbsent !== isAbsent ||
+                   oldBypassed !== isBypass || oldTotal !== currentTotal;
   }
 
-  const itemPayload = { title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isAbsent, file: fileData };
+  // Same reasoning as the bulk path: a submitted value means graded, so a real 0
+  // is preserved as a 0 on reload instead of being normalised to ungraded.
+  const itemPayload = { title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isGraded: true, isAbsent, isBypassed: isBypass, file: fileData };
 
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
     markDoc[standardKey] = [itemPayload];
@@ -735,12 +900,18 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
         to: studentEmail,
         subject: `Lab Mark Updated: ${cleanTitle}`,
         title: `Grade Update: ${cleanTitle}`,
-        bodyText: isAbsent 
+        bodyText: isAbsent
           ? `You were marked absent for <strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong>.`
-          : `Your lab grade for <strong>${cleanTitle}</strong> has been updated.`,
+          : isBypass
+            ? `<strong>${cleanTitle}</strong> in lab <strong>${labroom.labName}</strong> is now bypassed and excluded from your grade.`
+            : `Your lab grade for <strong>${cleanTitle}</strong> has been updated.`,
         details: [
           { label: 'Lab Course', value: labroom.labName },
-          { label: 'Updated Score', value: isAbsent ? `Absent (0 / ${currentTotal})` : `${currentObtained} / ${currentTotal}` },
+          { label: 'Updated Score', value: isAbsent
+              ? `Absent (0 / ${currentTotal})`
+              : isBypass
+                ? 'Bypassed (excluded from grade)'
+                : `${currentObtained} / ${currentTotal}` },
           { label: 'Updated By', value: req.user.name }
         ]
       });
@@ -827,5 +998,90 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     message: `Lab evaluation successfully removed.`,
+  });
+});
+// =============================================================================
+// BYPASS LIMIT SETTINGS (Labroom)
+// Mirrors the classroom implementation so both room types behave identically.
+// =============================================================================
+
+// Mongoose Maps do not serialise usefully, so always hand the client a plain
+// object keyed by category.
+const toPlainBypassLimits = (limits) => {
+  const out = {};
+  if (!limits) return out;
+  if (typeof limits.entries === 'function') {
+    for (const [key, value] of limits.entries()) out[key] = value;
+    return out;
+  }
+  return { ...limits };
+};
+
+// Every lab category is stored as an array, including labMids / labFinals /
+// finalProject, so counting activities is a single array-length check.
+const countLabCategorySlots = (labroom, categoryKey) =>
+  (Array.isArray(labroom[categoryKey]) ? labroom[categoryKey] : []).filter(a => a && a.title).length;
+
+exports.getLabBypassLimits = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const labroom = await Labroom.findById(labroomId).select('labName bypassLimits').lean();
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      labName: labroom.labName,
+      limits: toPlainBypassLimits(labroom.bypassLimits)
+    }
+  });
+});
+
+exports.updateLabBypassLimits = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const incoming = req.body && req.body.limits;
+
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return next(new AppError('A "limits" object keyed by category is required.', 400));
+  }
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const limits = {};
+  for (const [rawKey, rawValue] of Object.entries(incoming)) {
+    const key = RESOLVE_LAB_CATEGORY(String(rawKey));
+    if (!key) return next(new AppError(`Invalid category "${rawKey}".`, 400));
+
+    // Accept "off" as an explicit way to disable a category.
+    if (rawValue === 'off' || rawValue === null || rawValue === '') {
+      limits[key] = 0;
+      continue;
+    }
+
+    const n = Number(rawValue);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      return next(new AppError(`Bypass limit for "${rawKey}" must be a whole number of 0 or more.`, 400));
+    }
+
+    // A student must always keep at least one real grade per category.
+    const slots = countLabCategorySlots(labroom, key);
+    const maxAllowed = slots > 0 ? slots - 1 : 0;
+    if (slots > 0 && n > maxAllowed) {
+      return next(new AppError(
+        `"${rawKey}" only has ${slots} activit${slots === 1 ? 'y' : 'ies'}, so at most ${maxAllowed} can be bypassed - every student must keep one real grade.`,
+        400
+      ));
+    }
+
+    limits[key] = n;
+  }
+
+  labroom.bypassLimits = limits;
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Bypass limits updated.',
+    data: { limits: toPlainBypassLimits(labroom.bypassLimits) }
   });
 });

@@ -11,6 +11,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   Cog6ToothIcon,
+  ShieldCheckIcon,
   DocumentTextIcon,
   EnvelopeIcon,
   ExclamationTriangleIcon,
@@ -32,7 +33,10 @@ import {
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
-import NoticeAttachment from '../components/NoticeAttachment';
+import NoticeCard from '../components/NoticeCard';
+import BypassLimitsPanel from '../components/BypassLimitsPanel';
+import RoomColorPicker from '../components/RoomColorPicker';
+import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const LabroomDetail = () => {
   const { labroomId } = useParams();
@@ -68,6 +72,7 @@ const LabroomDetail = () => {
   const [noticeContent, setNoticeContent] = useState('');
   const [noticeFile, setNoticeFile] = useState(null);
   const [postingNotice, setPostingNotice] = useState(false);
+  const [busyNoticeId, setBusyNoticeId] = useState('');
   const [showAllNotices, setShowAllNotices] = useState(false);
 
   // Anonymous Complaint states
@@ -76,6 +81,8 @@ const LabroomDetail = () => {
   const [sendingComplaint, setSendingComplaint] = useState(false);
   const [isViewComplaintsModalOpen, setIsViewComplaintsModalOpen] = useState(false);
   const [complaintsList, setComplaintsList] = useState([]);
+  const [complaintUnreadCount, setComplaintUnreadCount] = useState(0);
+  const [deletingComplaintId, setDeletingComplaintId] = useState('');
   const [loadingComplaints, setLoadingComplaints] = useState(false);
 
   // Create student result / graded item sheet modal state
@@ -139,10 +146,13 @@ const LabroomDetail = () => {
 
   // Lab Settings & Weights modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  // TAs cannot open Labroom Settings, but still need to see the bypass caps.
+  const [isBypassModalOpen, setIsBypassModalOpen] = useState(false);
   const [editLabName, setEditLabName] = useState('');
   const [editSectionPrefix, setEditSectionPrefix] = useState('');
   const [editMaxCapacity, setEditMaxCapacity] = useState(40);
   const [editPlaceholderTeacher, setEditPlaceholderTeacher] = useState('');
+  const [editColorKey, setEditColorKey] = useState(DEFAULT_ROOM_COLOR);
   const [editSessionalActivities, setEditSessionalActivities] = useState([]);
   const [updatingSettings, setUpdatingSettings] = useState(false);
 
@@ -185,6 +195,7 @@ const LabroomDetail = () => {
       setEditSectionPrefix(fetchedLab.sectionPrefix || '');
       setEditMaxCapacity(fetchedLab.maxCapacity || 40);
       setEditPlaceholderTeacher(fetchedLab.placeholderTeacherName || '');
+    setEditColorKey(fetchedLab.colorKey || DEFAULT_ROOM_COLOR);
 
       const defaultActs = [
         { category: 'Lab Tasks', allocatedMarks: 50 },
@@ -269,10 +280,37 @@ const LabroomDetail = () => {
       setLoadingComplaints(true);
       const res = await API.get(`/labrooms/${labroomId}/complaints`);
       setComplaintsList(res.data?.data?.complaints || res.data?.complaints || []);
+      // The backend returns this viewer's own unread count, so the badge is
+      // per-staff-member rather than one shared flag for the whole labroom.
+      setComplaintUnreadCount(res.data?.data?.unreadCount || 0);
     } catch {
       console.warn('Failed to fetch complaints');
     } finally {
       setLoadingComplaints(false);
+    }
+  };
+
+  const markComplaintsRead = async (complaintIds) => {
+    try {
+      await API.patch(`/labrooms/${labroomId}/complaints/read`, { complaintIds });
+      setComplaintUnreadCount(0);
+      setComplaintsList((prev) => prev.map((c) => ({ ...c, read: true })));
+    } catch {
+      // A failed badge clear is cosmetic; do not interrupt the teacher.
+    }
+  };
+
+  const handleDeleteComplaint = async (complaint) => {
+    if (!window.confirm('Delete this anonymous submission? The record is kept only for audit.')) return;
+    try {
+      setDeletingComplaintId(complaint._id);
+      await API.delete(`/labrooms/${labroomId}/complaints/${complaint._id}`);
+      setComplaintsList((prev) => prev.filter((c) => c._id !== complaint._id));
+      showToast('Submission deleted.');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete submission.', 'error');
+    } finally {
+      setDeletingComplaintId('');
     }
   };
 
@@ -308,6 +346,15 @@ const LabroomDetail = () => {
       return;
     }
     setSelectedActivityItem({ item, targetKey, category });
+  };
+
+  // Editing/removing an existing announcement is narrower than posting one:
+  // only the author, this labroom's assigned teacher, or an admin may do it.
+  const canManageNotice = (notice) => {
+    if (isAdmin) return true;
+    if (labroom?.teacher && String(labroom.teacher._id || labroom.teacher) === String(user?._id)) return true;
+    if (notice?.author && String(notice.author) === String(user?._id)) return true;
+    return false;
   };
 
   const handlePostNotice = async (e) => {
@@ -443,6 +490,7 @@ const LabroomDetail = () => {
         sectionPrefix: editSectionPrefix.trim().toUpperCase(),
         maxCapacity: Number(editMaxCapacity),
         placeholderTeacherName: editPlaceholderTeacher.trim(),
+        colorKey: editColorKey,
         sessionalActivities: editSessionalActivities.map(a => ({
           category: a.category.trim(),
           allocatedMarks: Number(a.allocatedMarks) || 0
@@ -1092,9 +1140,20 @@ const LabroomDetail = () => {
             )}
             {isStaffOrAdmin && (
               <>
-                <button onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="lm-btn-ghost uppercase text-cyan-300 border border-cyan-500/30">
+                <button
+                onClick={() => {
+                  setIsViewComplaintsModalOpen(true);
+                  fetchComplaints().then(() => markComplaintsRead());
+                }}
+                className="lm-btn-ghost uppercase text-cyan-300 border border-cyan-500/30 relative"
+              >
                   <ArrowDownTrayIcon className="w-4 h-4" />
                   Feedback
+                  {complaintUnreadCount > 0 && (
+                    <span className="lm-badge border-cyan-400/40 bg-cyan-500/20 text-cyan-200 font-mono">
+                      {complaintUnreadCount}
+                    </span>
+                  )}
                 </button>
                 <button onClick={handleExportExcelSheet} className="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30">
                   <ChartBarIcon className="w-4 h-4" />
@@ -1116,6 +1175,7 @@ const LabroomDetail = () => {
               </>
             )}
             {isTeacherOrAdmin && <button onClick={() => setIsSettingsModalOpen(true)} className="lm-btn-ghost uppercase text-slate-200"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+          {isAssignedTa && !isTeacherOrAdmin && <button type="button" onClick={() => setIsBypassModalOpen(true)} className="lm-btn-ghost uppercase text-slate-200"><ShieldCheckIcon className="w-4 h-4" />Bypass Limits</button>}
           </div>
         </div>
       </header>
@@ -1159,27 +1219,73 @@ const LabroomDetail = () => {
                 <p className="text-slate-500 text-xs italic">No announcements posted yet.</p>
               </div>
             ) : showAllNotices ? (
-              reversedNotices.map((n, idx) => (
-                <div key={n._id || idx} className="lm-card-flat p-4 space-y-2">
-                  <h4 className="text-slate-100 font-bold text-xs sm:text-sm break-words">{n?.title}</h4>
-                  <p className="text-slate-300 text-xs leading-relaxed break-words">{n?.content}</p>
-                  {n?.attachment && n.attachment.url && (
-                    <div className="pt-2">
-                      <NoticeAttachment attachment={n.attachment} />
-                    </div>
-                  )}
-                </div>
+              reversedNotices.map((n) => (
+                <NoticeCard
+                  key={n._id || `${n.createdAt}-${n.title}`}
+                  notice={n}
+                  canManage={canManageNotice(n)}
+                  busy={busyNoticeId === (n._id || '')}
+                  onEdit={async ({ title, content }) => {
+                    setBusyNoticeId(n._id || '');
+                    try {
+                      await API.patch(`/labrooms/${labroomId}/notices/${n._id}`, { title, content });
+                      await fetchLabroomData();
+                      showToast('Notice updated.');
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Failed to update notice.', 'error');
+                      throw err;
+                    } finally {
+                      setBusyNoticeId('');
+                    }
+                  }}
+                  onDelete={async () => {
+                    if (!window.confirm('Delete this notice? This cannot be undone.')) return;
+                    setBusyNoticeId(n._id || '');
+                    try {
+                      await API.delete(`/labrooms/${labroomId}/notices/${n._id}`);
+                      await fetchLabroomData();
+                      showToast('Notice deleted.');
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Failed to delete notice.', 'error');
+                    } finally {
+                      setBusyNoticeId('');
+                    }
+                  }}
+                />
               ))
             ) : (
-              <div className="lm-card-flat p-4 space-y-2">
-                <h4 className="text-slate-100 font-bold text-sm sm:text-base break-words">{latestNotice?.title}</h4>
-                <p className="text-slate-300 text-xs leading-relaxed break-words">{latestNotice?.content}</p>
-                {latestNotice?.attachment && latestNotice.attachment.url && (
-                  <div className="pt-2">
-                    <NoticeAttachment attachment={latestNotice.attachment} />
-                  </div>
-                )}
-              </div>
+              <NoticeCard
+                notice={latestNotice}
+                compact
+                canManage={canManageNotice(latestNotice)}
+                busy={busyNoticeId === (latestNotice?._id || '')}
+                onEdit={async ({ title, content }) => {
+                  setBusyNoticeId(latestNotice?._id || '');
+                  try {
+                    await API.patch(`/labrooms/${labroomId}/notices/${latestNotice?._id}`, { title, content });
+                    await fetchLabroomData();
+                    showToast('Notice updated.');
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Failed to update notice.', 'error');
+                    throw err;
+                  } finally {
+                    setBusyNoticeId('');
+                  }
+                }}
+                onDelete={async () => {
+                  if (!window.confirm('Delete this notice? This cannot be undone.')) return;
+                  setBusyNoticeId(latestNotice?._id || '');
+                  try {
+                    await API.delete(`/labrooms/${labroomId}/notices/${latestNotice?._id}`);
+                    await fetchLabroomData();
+                    showToast('Notice deleted.');
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Failed to delete notice.', 'error');
+                  } finally {
+                    setBusyNoticeId('');
+                  }
+                }}
+              />
             )}
           </div>
         </section>
@@ -2199,6 +2305,31 @@ const LabroomDetail = () => {
       )}
 
       {/* 7. Settings Modal with Strict Backend Options */}
+      {/* Read-only bypass limits for TAs, who cannot open Labroom Settings. */}
+      {isBypassModalOpen && (
+        <div className="lm-scrim" onClick={() => setIsBypassModalOpen(false)}>
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-3">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-100 uppercase break-words">Bypass Limits</h3>
+                <p className="text-[11px] text-slate-400 mt-1">Read-only &mdash; a teacher or admin sets these caps.</p>
+              </div>
+              <button type="button" onClick={() => setIsBypassModalOpen(false)} aria-label="Close" title="Close" className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors cursor-pointer">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <BypassLimitsPanel
+              apiBase="/labmarks"
+              roomId={labroomId}
+              roomType="labroom"
+              customCategories={editSessionalActivities}
+              canEdit={false}
+              showToast={showToast}
+            />
+          </div>
+        </div>
+      )}
+
       {isSettingsModalOpen && (
         <div className="lm-scrim">
           <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-5">
@@ -2230,6 +2361,25 @@ const LabroomDetail = () => {
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Placeholder Teacher Name</label>
                 <input type="text" value={editPlaceholderTeacher} onChange={(e) => setEditPlaceholderTeacher(e.target.value)} className="lm-field" />
               </div>
+
+              <div className="pt-3 border-t border-white/[0.06]">
+                <RoomColorPicker
+                  value={editColorKey}
+                  onChange={setEditColorKey}
+                  disabled={updatingSettings}
+                />
+              </div>
+
+              {/* Bypass ("B") limits - caps how many activities per category a
+                  student may bypass. Teacher/admin editable; TAs see it read-only. */}
+              <BypassLimitsPanel
+                apiBase="/labmarks"
+                roomId={labroomId}
+                roomType="labroom"
+                customCategories={editSessionalActivities}
+                canEdit={isTeacherOrAdmin}
+                showToast={showToast}
+              />
 
               {/* Dynamic Sessional Activities Manager with Backend Options Only */}
               <div className="pt-4 border-t border-white/5 space-y-3">
@@ -2374,10 +2524,24 @@ const LabroomDetail = () => {
               </div>
             ) : (
               <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
-                {complaintsList.map((c, i) => (
-                  <div key={i} className="lm-card-flat p-4 space-y-1.5">
+                {complaintsList.map((c) => (
+                  <div key={c._id || `${c.createdAt}-${c.message}`} className="lm-card-flat p-4 space-y-1.5">
                     <p className="text-xs text-slate-100 leading-relaxed break-words">{c.message}</p>
-                    <p className="text-[10px] sm:text-xs text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[10px] sm:text-xs text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteComplaint(c)}
+                          disabled={deletingComplaintId === c._id}
+                          className="lm-btn-icon hover:!border-rose-400/50 hover:!text-rose-200"
+                          aria-label="Delete submission"
+                          title="Delete submission (admin only)"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

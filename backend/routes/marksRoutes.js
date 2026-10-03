@@ -1,6 +1,6 @@
 const express = require('express');
 const markController = require('../controller/markController'); // Fixed typo from markContoller
-const { protect, restrictToClassStaff } = require('../middleware/authMiddleware');
+const { protect, restrictTo, restrictToClassStaff } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -42,5 +42,14 @@ router.patch('/update-single-item', restrictToClassStaff, markController.updateS
 
 // Delete / Cancel an evaluation entry across the entire classroom (CRITICAL FIX)
 router.delete('/delete-evaluation', restrictToClassStaff, markController.deleteEvaluationEntry);
+
+// =============================================================================
+// BYPASS LIMIT SETTINGS
+// Staff can read the caps; only the course teacher or an admin may change them,
+// so a TA can see the rules but cannot raise their own budget.
+// =============================================================================
+
+router.get('/bypass-limits/:classroomId', restrictToClassStaff, markController.getBypassLimits);
+router.put('/bypass-limits/:classroomId', restrictTo('TEACHER', 'ADMIN'), markController.updateBypassLimits);
 
 module.exports = router;

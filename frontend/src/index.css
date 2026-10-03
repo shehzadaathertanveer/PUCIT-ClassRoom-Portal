@@ -462,6 +462,27 @@ select:-webkit-autofill {
     letter-spacing: -0.02em;
   }
 
+  /* Bypassed ("B") mark boxes glow brown so they read as "excluded from the
+     grade" rather than "scored zero", and stay legible on the dark field. */
+  .lm-mark-bypass {
+    border-color: rgb(168 162 158 / 0.7) !important;
+    background-color: rgb(87 83 78 / 0.45) !important;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 0 0 1px rgb(120 113 108 / 0.35),
+      0 0 14px -2px rgb(146 115 84 / 0.55);
+  }
+
+  .lm-mark-bypass:focus {
+    border-color: rgb(214 199 178 / 0.95) !important;
+    background-color: rgb(96 88 80 / 0.6) !important;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.1),
+      0 0 0 2px rgb(146 115 84 / 0.65),
+      0 0 20px -2px rgb(180 140 100 / 0.7);
+  }
+
+
   /* ---------- 5. Controls ---------- */
 
   .lm-field {
@@ -607,9 +628,45 @@ select:-webkit-autofill {
   .lm-btn-ghost:active:not(:disabled) {
     transform: translateY(1px);
   }
-  .lm-btn-ghost:disabled {
+.lm-btn-ghost:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  /* Square icon-only action button (edit/delete rows, small tools) */
+  .lm-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.625rem;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    background-color: #141a23;
+    color: #98a6b8;
+    cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      color 0.18s ease,
+      border-color 0.18s ease,
+      transform 0.14s ease;
+  }
+  .lm-btn-icon:hover:not(:disabled) {
+    background-color: #1d2531;
+    color: #f6f8fb;
+    border-color: rgb(255 255 255 / 0.2);
+  }
+  .lm-btn-icon:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .lm-btn-icon:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  :where(.lm-btn-icon) :where(.lm-ico) {
+    width: 1rem;
+    height: 1rem;
   }
 
   /* Pill toggle / tab / filter chip */

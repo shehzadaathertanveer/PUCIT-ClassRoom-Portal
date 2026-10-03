@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ROOM_COLOR_KEYS, DEFAULT_ROOM_COLOR } = require('../utils/roomColors');
 
 const labRoomSchema = new mongoose.Schema(
   {
@@ -23,6 +24,22 @@ const labRoomSchema = new mongoose.Schema(
     // Lab Grading Scheme (100% Continuous Sessional Weight by default, fully flexible)
     gradingScheme: {
       sessionalWeight: { type: Number, default: 100, min: 0, max: 100 }
+    },
+    
+    // Max bypasses ("B") allowed per student, per category. Same semantics as
+    // the classroom field: 0/absent means the category cannot be bypassed.
+    bypassLimits: {
+      type: Map,
+      of: Number,
+      default: () => new Map()
+    },
+
+    // Same palette as Classroom so a course's theory and practical halves can be
+    // paired; the room type is distinguished by the hinge treatment, not colour.
+    colorKey: {
+      type: String,
+      enum: ROOM_COLOR_KEYS,
+      default: DEFAULT_ROOM_COLOR
     },
     
     // Dynamic Activity Categories Configured by Teacher
@@ -87,6 +104,7 @@ const labRoomSchema = new mongoose.Schema(
       author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       authorName: { type: String, trim: true },
       authorRole: { type: String, trim: true },
+      updatedAt: { type: Date },
       attachment: {
         url: { type: String, default: '' },
         public_id: { type: String, default: '' },
@@ -97,9 +115,16 @@ const labRoomSchema = new mongoose.Schema(
     }],
 
     // ANONYMOUS COMPLAINT / FEEDBACK BOX
+    // Feedback stays anonymous: no author is stored. `readBy` tracks which staff
+    // have seen each item so every TA gets their own unread count instead of one
+    // shared flag, and `deletedBy`/`deletedAt` keep a soft-delete audit trail
+    // without needing a second collection.
     complaints: [{
       message: { type: String, required: true, trim: true },
-      createdAt: { type: Date, default: Date.now }
+      createdAt: { type: Date, default: Date.now },
+      readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+      deletedAt: { type: Date, default: null },
+      deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
     }],
 
     // 🚀 FULLY EXPANDED LAB EVALUATION STORAGE ARRAYS

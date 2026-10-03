@@ -24,6 +24,8 @@ import {
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
+import RoomColorPicker from '../components/RoomColorPicker';
+import { DEFAULT_ROOM_COLOR, roomCardStyle, roomRowStyle } from '../utils/roomColors';
 
 const Dashboard = () => {
   const { user, logout, updateUser, maintenance, setMaintenance } = useAuth();
@@ -61,6 +63,7 @@ const Dashboard = () => {
     creditHours: 3,
     sectionPrefix: '',
     maxCapacity: 50,
+    colorKey: DEFAULT_ROOM_COLOR,
     sessionalWeight: 25,
     midsWeight: 35,
     finalsWeight: 40
@@ -373,6 +376,7 @@ const Dashboard = () => {
       creditHours: Number(newClassData.creditHours) || 3,
       sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
       maxCapacity: Number(newClassData.maxCapacity) || 50,
+      colorKey: newClassData.colorKey,
       gradingScheme: {
         sessionalWeight: sWeight,
         midsWeight: mWeight,
@@ -393,6 +397,7 @@ const Dashboard = () => {
       creditHours: Number(newClassData.creditHours) || 1,
       sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
       maxCapacity: Number(newClassData.maxCapacity) || 40,
+      colorKey: newClassData.colorKey,
       sessionalActivities: labActivities.map(act => ({
         category: act.category,
         allocatedMarks: Number(act.allocatedMarks) || 0
@@ -418,16 +423,17 @@ const Dashboard = () => {
       await fetchDashboardData();
       setIsModalOpen(false);
       
-      setNewClassData({
-        name: '',
-        courseType: 'CLASSROOM',
-        creditHours: 3,
-        sectionPrefix: '',
-        maxCapacity: 50,
-        sessionalWeight: 25,
-        midsWeight: 35,
-        finalsWeight: 40
-      });
+        setNewClassData({
+          name: '',
+          courseType: 'CLASSROOM',
+          creditHours: 3,
+          sectionPrefix: '',
+          maxCapacity: 50,
+          colorKey: DEFAULT_ROOM_COLOR,
+          sessionalWeight: 25,
+          midsWeight: 35,
+          finalsWeight: 40
+        });
       setSessionalActivities([
         { category: 'Quiz', customCategory: '', allocatedMarks: 10 },
         { category: 'Assignment', customCategory: '', allocatedMarks: 15 }
@@ -1089,7 +1095,8 @@ const Dashboard = () => {
                 return (
                   <div 
                     key={courseId}
-                    className={`lm-card ${isLab ? 'lm-acc-lab' : 'lm-acc-classroom'} p-4 sm:p-6 space-y-4 transition-all duration-200 flex flex-col justify-between hover:-translate-y-px hover:brightness-110`}
+                    className={`lm-card ${isLab ? 'lm-acc-lab' : 'lm-acc-classroom'} lm-room-card p-4 sm:p-6 space-y-4 transition-all duration-200 flex flex-col justify-between hover:-translate-y-px hover:brightness-110`}
+                    style={roomCardStyle(cls.colorKey, isLab ? 'labroom' : 'classroom')}
                   >
                     <div
                       aria-hidden="true"
@@ -1396,7 +1403,11 @@ const Dashboard = () => {
                     const creatorName = cls.teacher?.name || cls.placeholderTeacherName || 'System Admin / TBA';
                     const creatorEmail = cls.teacher?.email || '';
                     return (
-                      <div key={idx} className="lm-inset p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div
+                        key={idx}
+                        className="lm-inset lm-room-row p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        style={roomRowStyle(cls.colorKey, 'classroom')}
+                      >
                         <div className="space-y-1 min-w-0">
                           <h4 className="text-slate-100 font-bold text-sm break-words">{cls.className}</h4>
                           <p className="text-xs text-slate-400">
@@ -1429,7 +1440,11 @@ const Dashboard = () => {
                     const creatorName = lab.teacher?.name || lab.placeholderTeacherName || 'System Admin / TBA';
                     const creatorEmail = lab.teacher?.email || '';
                     return (
-                      <div key={idx} className="lm-inset p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div
+                        key={idx}
+                        className="lm-inset lm-room-row p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        style={roomRowStyle(lab.colorKey, 'labroom')}
+                      >
                         <div className="space-y-1 min-w-0">
                           <h4 className="text-slate-100 font-bold text-sm break-words">{lab.className}</h4>
                           <p className="text-xs text-slate-400">
@@ -2107,6 +2122,14 @@ const Dashboard = () => {
                   value={newClassData.maxCapacity}
                   onChange={(e) => setNewClassData({ ...newClassData, maxCapacity: e.target.value })}
                   className="lm-field font-mono"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-white/10">
+                <RoomColorPicker
+                  value={newClassData.colorKey}
+                  onChange={(colorKey) => setNewClassData({ ...newClassData, colorKey })}
+                  disabled={creating}
                 />
               </div>
 

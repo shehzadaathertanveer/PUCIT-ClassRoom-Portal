@@ -1,73 +1,179 @@
-import { useEffect, useState } from 'react';
-import { ArrowDownTrayIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
+import { ArrowDownTrayIcon, DocumentTextIcon, EyeIcon } from '@heroicons/react/24/outline';
 
-// Cloudinary URLs can be mis-stored with the wrong resource-type segment
-// (/image/upload/ vs /raw/upload/) from earlier builds. HEAD-check the stored URL
-// and fall back to the sibling segment so already-posted attachments still open
-// instead of hitting Cloudinary's broken "landing page".
-const resolveUrl = async (url = '') => {
-  if (!url) return url;
-  const alt = url.includes('/image/upload/')
-    ? url.replace('/image/upload/', '/raw/upload/')
-    : url.replace('/raw/upload/', '/image/upload/');
-  if (alt === url) return url;
+/**
+ * Cloudinary delivery URLs for notice attachments.
+ *
+ * Two problems this solves, both of which used to break real notices:
+ *
+ * 1. Attachments were uploaded to Cloudinary as `raw`, but some were stored (and
+ *    some were re-saved by older builds) with an `/image/upload/` segment. For a
+ *    PDF that resolves to the wrong resource, and Cloudinary answers with its
+ *    generic landing page instead of the file.
+ * 2. `fl_attachment` forces a download rather than inline delivery, so embedding
+ *    a PDF either downloaded it or showed nothing at all.
+ *
+ * Rather than probing the network and hoping, we rebuild the delivery URL
+ * deterministically: correct resource type for the file kind, and no
+ * attachment-forcing flag. This also means zero extra HTTP requests per
+ * attachment, which matters because every notice in a room renders them.
+ */
 
-  const check = async (u) => {
-    try {
-      const res = await fetch(u, { method: 'HEAD' });
-      return res.ok ? u : null;
-    } catch {
-      return null;
-    }
-  };
+const CLOUDINARY_UPLOAD_RE =
+  /^(https?:\/\/res\.cloudinary\.com\/)([^/]+)\/(image|raw|video|auto|multi)\/upload\/(.+)$/i;
 
-  return (await check(url)) || (await check(alt)) || url;
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'];
+const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov', 'm4v'];
+const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga'];
+
+/** Extension from the file name, lowercased, without the dot. */
+export const attachmentExtension = (fileName = '') => {
+  const clean = String(fileName).split('?')[0];
+  const parts = clean.split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : '';
 };
 
-const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '' }) => {
-  const { url = '', fileName = '', fileType = '' } = attachment || {};
-  const [resolved, setResolved] = useState(url);
-  const [imgSrc, setImgSrc] = useState(url);
+export const formatFileSize = (bytes) => {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
 
-  useEffect(() => {
-    let active = true;
-    setResolved(url);
-    setImgSrc(url);
-    if (!url) return undefined;
-    resolveUrl(url).then((u) => {
-      if (active) {
-        setResolved(u);
-        setImgSrc(u);
-      }
-    });
-    return () => { active = false; };
-  }, [url]);
+/**
+ * Classify an attachment from its declared type first, falling back to the
+ * extension. Declared types win because teachers can rename a file to `.pdf`
+ * and Cloudinary still holds a video.
+ */
+export const describeAttachment = (attachment = {}) => {
+  const { fileType = '', fileName = '' } = attachment;
+  const ext = attachmentExtension(fileName);
+  const declared = String(fileType).toLowerCase();
 
-  if (!resolved) return null;
+  let kind = 'file';
+  if (declared === 'image' || IMAGE_EXTS.includes(ext)) kind = 'image';
+  else if (declared === 'video' || VIDEO_EXTS.includes(ext)) kind = 'video';
+  else if (declared === 'audio' || AUDIO_EXTS.includes(ext)) kind = 'audio';
+  else if (declared === 'pdf' || ext === 'pdf') kind = 'pdf';
 
-  const ext = (fileName.split('.').pop() || '').toLowerCase();
-  const isImage = fileType === 'image' || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
+  // A PDF is the one non-image kind we can render inline reliably.
+  const canPreviewInline = kind === 'image' || kind === 'pdf' || kind === 'video';
+
+  return { ext, kind, canPreviewInline, isPdf: kind === 'pdf', isImage: kind === 'image' };
+};
+
+/**
+ * Rebuild a Cloudinary upload URL into a URL that actually delivers the file.
+ *
+ * Anything that is not an HTTPS Cloudinary upload URL returns '' and the
+ * component renders nothing. Notices can only be created through
+ * uploadToCloudinary, and the backend validates the same allowlist, so a
+ * non-Cloudinary value can only be legacy or hand-edited data - rendering it
+ * would turn the attachment into a javascript:/data:/plain-http XSS vector.
+ */
+export const buildDeliveryUrl = (rawUrl, kind = 'file') => {
+  const url = String(rawUrl || '').trim();
+  if (!url) return '';
+
+  const match = CLOUDINARY_UPLOAD_RE.exec(url);
+  if (!match) return '';
+
+  const [, , cloudName, , rest] = match;
+
+  // Cloudinary transformations are comma-separated flags in their own path
+  // segment ("q_auto,f_jpg"). Drop attachment/download flags and empty out any
+  // segment left with nothing, but keep folder segments intact so the public_id
+  // (and therefore the file) still resolves.
+  const cleaned = rest
+    .split('/')
+    .map((segment) => {
+      if (!segment || segment.startsWith('v') && /^v\d+$/.test(segment)) return segment;
+      if (!segment.includes(',')) return segment;
+      const flags = segment
+        .split(',')
+        .filter((f) => f && !/^fl_(attachment|attachment_filename)$/i.test(f));
+      return flags.join(',');
+    })
+    .filter((segment) => segment.length > 0);
+
+  if (!cleaned.length) return '';
+
+  // Images are addressable via /image/, everything else (PDF, docs, archives)
+  // must come from /raw/ or Cloudinary serves its landing page instead.
+  const resourceType = kind === 'image' ? 'image' : 'raw';
+
+  return `https://res.cloudinary.com/${cloudName}/${resourceType}/upload/${cleaned.join('/')}`;
+};
+
+const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '', showPreview = true }) => {
+  const { url = '', fileName = '', size = '' } = attachment || {};
+
+  const { ext, kind, canPreviewInline, isPdf, isImage } = describeAttachment(attachment);
+
+  // Derived during render: no effect, no HEAD probe, no extra request.
+  const deliveryUrl = buildDeliveryUrl(url, kind);
+
+  if (!deliveryUrl) return null;
+
+  const sizeLabel = formatFileSize(size);
+
+  const meta = (
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-semibold text-slate-100 break-words">
+        {fileName || (isPdf ? 'Document.pdf' : 'Attachment')}
+      </p>
+      <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
+        {[ext && ext.toUpperCase(), sizeLabel].filter(Boolean).join(' • ') || 'FILE'}
+      </p>
+    </div>
+  );
 
   if (isImage) {
-    const fallbackSrc = imgSrc.includes('/raw/upload/')
-      ? imgSrc.replace('/raw/upload/', '/image/upload/')
-      : imgSrc.replace('/image/upload/', '/raw/upload/');
     return (
       <a
-        href={resolved}
+        href={deliveryUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="block w-full min-w-0 lm-inset rounded-xl border border-white/5 p-2 transition-all duration-200 hover:-translate-y-px hover:border-white/15 active:scale-[0.99]"
       >
         <img
-          src={imgSrc}
-          alt="Attachment"
+          src={deliveryUrl}
+          alt={fileName || 'Notice attachment'}
+          loading="lazy"
           className={imageClassName || 'w-full max-h-40 object-cover rounded-lg border border-white/[0.06] bg-slate-950'}
-          onError={() => {
-            if (fallbackSrc && fallbackSrc !== imgSrc) setImgSrc(fallbackSrc);
-          }}
         />
       </a>
+    );
+  }
+
+  // PDFs render inline. sandbox + no allow-scripts keeps a hostile PDF from
+  // reaching the app's origin, and the download link is the escape hatch for
+  // viewers where the embed is blocked.
+  if (isPdf && showPreview) {
+    return (
+      <div className="w-full min-w-0 lm-inset rounded-xl border border-white/5 p-2 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {meta}
+          <a
+            href={deliveryUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkClassName || 'lm-btn-ghost shrink-0'}
+          >
+            <EyeIcon className="w-4 h-4 shrink-0" />
+            Open
+            <ArrowDownTrayIcon className="w-4 h-4 shrink-0" />
+          </a>
+        </div>
+        <iframe
+          src={deliveryUrl}
+          title={fileName || 'Attachment preview'}
+          loading="lazy"
+          sandbox=""
+          referrerPolicy="no-referrer"
+          className="w-full h-56 sm:h-72 rounded-lg border border-white/[0.06] bg-slate-950"
+        />
+      </div>
     );
   }
 
@@ -78,14 +184,15 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '' 
           {ext}
         </span>
       )}
+      {meta}
       <a
-        href={resolved}
+        href={deliveryUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className={linkClassName || 'lm-btn-ghost min-w-0 break-words text-left text-slate-200 hover:text-slate-50'}
+        className={linkClassName || 'lm-btn-ghost shrink-0'}
       >
         <DocumentTextIcon className="w-4 h-4 shrink-0" />
-        <span className="min-w-0 break-words">Open {fileName || 'Document / PDF'}</span>
+        Open
         <ArrowDownTrayIcon className="w-4 h-4 shrink-0" />
       </a>
     </div>

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ROOM_COLOR_KEYS, DEFAULT_ROOM_COLOR } = require('../utils/roomColors');
 
 const evaluationItemSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
@@ -35,6 +36,22 @@ const classroomSchema = new mongoose.Schema(
       sessionalWeight: { type: Number, default: 25, min: 0 },
       midsWeight: { type: Number, default: 35, min: 0 },
       finalsWeight: { type: Number, default: 40, min: 0 }
+    },
+    // Max number of activities per category that a single student may have
+    // bypassed ("B"). Keyed by the normalised category key so it lines up with
+    // the mark arrays. 0 or absent means that category cannot be bypassed.
+    // Enforced server-side so a TA cannot exceed it; editable by teacher/admin.
+    bypassLimits: {
+      type: Map,
+      of: Number,
+      default: () => new Map()
+    },
+    // Room tint so students can tell rooms apart on the dashboard. Validated
+    // against the shared palette so a hand-crafted request cannot inject CSS.
+    colorKey: {
+      type: String,
+      enum: ROOM_COLOR_KEYS,
+      default: DEFAULT_ROOM_COLOR
     },
     sessionalActivities: [{
       category: { type: String, required: true, trim: true },
@@ -96,6 +113,7 @@ const classroomSchema = new mongoose.Schema(
       author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       authorName: { type: String, trim: true },
       authorRole: { type: String, trim: true },
+      updatedAt: { type: Date },
       attachment: {
         url: { type: String, default: '' },
         public_id: { type: String, default: '' },
@@ -106,9 +124,16 @@ const classroomSchema = new mongoose.Schema(
     }],
 
     // ANONYMOUS COMPLAINT BOX
+    // Feedback stays anonymous: no author is stored. `readBy` tracks which staff
+    // have seen each item so every TA gets their own unread count instead of one
+    // shared flag, and `deletedBy`/`deletedAt` keep a soft-delete audit trail
+    // without needing a second collection.
     complaints: [{
       message: { type: String, required: true, trim: true },
-      createdAt: { type: Date, default: Date.now }
+      createdAt: { type: Date, default: Date.now },
+      readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+      deletedAt: { type: Date, default: null },
+      deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
     }],
 
     // =========================================================================

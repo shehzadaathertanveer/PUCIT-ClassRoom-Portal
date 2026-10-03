@@ -156,9 +156,29 @@ router
   .route("/:labroomId/notices")
   .post(restrictToLabStaff, labController.postLabNotice);
 
+// Editing/removing an existing announcement is narrower than posting one, so the
+// role gate is looser here and the controller enforces author/teacher/admin.
+// TA is allowed here so a TA who authored a notice can still manage it;
+// canManageNotice enforces author / assigned teacher / admin.
+router
+  .route("/:labroomId/notices/:noticeId")
+  .patch(restrictTo("TEACHER", "TA", "ADMIN"), labController.updateLabNotice)
+  .delete(restrictTo("TEACHER", "TA", "ADMIN"), labController.deleteLabNotice);
+
 router
   .route("/:labroomId/complaints")
   .get(restrictToLabStaff, labController.getLabComplaints)
   .post(restrictTo("STUDENT"), labController.submitLabComplaint);
+
+// Clearing a badge without opening the whole list.
+router
+  .route("/:labroomId/complaints/read")
+  .patch(restrictToLabStaff, labController.markLabComplaintsRead);
+
+// Deleting anonymous feedback is destructive and irreversible for the record, so
+// it stays admin-only even though viewing is open to all staff.
+router
+  .route("/:labroomId/complaints/:complaintId")
+  .delete(restrictTo("ADMIN"), labController.deleteLabComplaint);
 
 module.exports = router;

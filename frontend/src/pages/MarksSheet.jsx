@@ -14,6 +14,9 @@ import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 
 const UNGRADED_MARK = '-99';
+// "B" bypasses this activity: the backend drops it from BOTH the earned and the
+// possible total, so it counts for nothing rather than counting as zero.
+const BYPASS_MARK = 'B';
 
 const CATEGORY_MAP = {
   quiz: 'quizzes',
@@ -184,6 +187,7 @@ const MarksSheet = () => {
         
         let obtained = UNGRADED_MARK;
         let isAbsent = false;
+        let isBypassed = false;
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
@@ -204,7 +208,8 @@ const MarksSheet = () => {
           if (item) {
             const rawStored = item.obtainedMarks;
             const hasStored = rawStored !== undefined && rawStored !== null && String(rawStored).trim() !== '';
-            obtained = item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK);
+            isBypassed = !!item.isBypassed;
+            obtained = isBypassed ? BYPASS_MARK : (item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK));
             isAbsent = !!item.isAbsent;
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
@@ -215,6 +220,7 @@ const MarksSheet = () => {
         initialMap[studentId] = {
           obtainedMarks: obtained,
           isAbsent,
+          isBypassed,
           file: fileObj
         };
       });
@@ -235,7 +241,9 @@ const MarksSheet = () => {
   }, [classroomId, category, itemId, fetchSheetData]);
 
   const handleInputChange = (studentId, value) => {
-    const isAbs = value.trim().toUpperCase() === 'A';
+    const upper = value.trim().toUpperCase();
+    const isAbs = upper === 'A';
+    const isByp = upper === BYPASS_MARK;
     setErrorStudentIds(prev => {
       if (!prev.size || !prev.has(studentId)) return prev;
       const next = new Set(prev);
@@ -247,19 +255,23 @@ const MarksSheet = () => {
       [studentId]: {
         ...prev[studentId],
         obtainedMarks: value,
-        isAbsent: isAbs
+        // A and B are mutually exclusive states.
+        isAbsent: isAbs,
+        isBypassed: isByp
       }
     }));
   };
 
   // Clicking the marks field clears the -99 ungraded placeholder so a score can be typed.
+  // 'B' is cleared too, so clicking a bypassed box lets you type a real score over it.
   const handleMarkFocus = (studentId) => {
     setMarkInputs(prev => {
       const current = prev[studentId] || {};
-      if (String(current.obtainedMarks ?? '').trim() === UNGRADED_MARK) {
+      const val = String(current.obtainedMarks ?? '').trim();
+      if (val === UNGRADED_MARK || val.toUpperCase() === BYPASS_MARK) {
         return {
           ...prev,
-          [studentId]: { ...current, obtainedMarks: '', isAbsent: false }
+          [studentId]: { ...current, obtainedMarks: '', isAbsent: false, isBypassed: false }
         };
       }
       return prev;
@@ -274,7 +286,7 @@ const MarksSheet = () => {
       if (val === '' || val === UNGRADED_MARK) {
         return {
           ...prev,
-          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false }
+          [studentId]: { ...current, obtainedMarks: UNGRADED_MARK, isAbsent: false, isBypassed: false }
         };
       }
       return prev;
@@ -327,6 +339,7 @@ const MarksSheet = () => {
         const rawVal = String(data.obtainedMarks ?? '').trim();
         if (rawVal === '' || rawVal === UNGRADED_MARK) return; // ungraded is allowed
         if (rawVal.toUpperCase() === 'A') return; // absent is allowed
+        if (rawVal.toUpperCase() === BYPASS_MARK) return; // bypassed is allowed
         const num = Number(rawVal);
         if (isNaN(num) || num < 0 || num > parsedTotalMarks) {
           invalidIds.add(studentId);
@@ -348,10 +361,14 @@ const MarksSheet = () => {
         })
         .map(([studentId, data]) => {
           const rawVal = String(data.obtainedMarks).trim();
-          const isAbs = data.isAbsent || rawVal.toUpperCase() === 'A';
+          const upper = rawVal.toUpperCase();
+          const isAbs = data.isAbsent || upper === 'A';
+          const isByp = !isAbs && (data.isBypassed || upper === BYPASS_MARK);
           return {
             studentId,
-            obtainedMarks: isAbs ? 0 : Number(rawVal),
+            // 'B' is sent as the literal sentinel - the server decides whether
+            // the bypass is allowed and rejects it if the limit is already met.
+            obtainedMarks: isAbs ? 0 : (isByp ? BYPASS_MARK : Number(rawVal)),
             isAbsent: isAbs,
             file: data.file?.url ? data.file : null
           };
@@ -418,8 +435,9 @@ const MarksSheet = () => {
         const name = `"${(student.name || '').replace(/"/g, '""')}"`;
         const rawMark = String(inputData.obtainedMarks ?? '').trim();
         const isUngraded = rawMark === '' || rawMark === UNGRADED_MARK;
-        const score = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : rawMark);
-        const status = inputData.isAbsent ? 'Absent' : (isUngraded ? 'Ungraded' : 'Graded');
+        const isBypassed = !isUngraded && (inputData.isBypassed || rawMark.toUpperCase() === BYPASS_MARK);
+        const score = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : rawMark));
+        const status = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : 'Graded'));
 
         csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
@@ -589,8 +607,9 @@ const MarksSheet = () => {
 
             {/* Legend + validation hints */}
             <div className="lm-inset flex flex-wrap items-center gap-2 p-3 sm:p-3.5 text-[10px] font-mono text-slate-400">
-              <span className="lm-badge border-dashed border-amber-500/40 text-amber-300">-99 = Ungraded</span>
-              <span className="lm-badge border-red-500/40 text-red-300">A = Absent</span>
+      <span className="lm-badge border-dashed border-amber-500/40 text-amber-300">-99 = Ungraded</span>
+      <span className="lm-badge border-red-500/40 text-red-300">A = Absent</span>
+      <span className="lm-badge border-stone-500/50 text-stone-300">B = Bypassed (excluded from grade)</span>
               <span className="lm-badge text-slate-500">0 = Scored zero</span>
               <span className="lm-badge border-red-500/60 text-red-300">Red glow = Fix this box</span>
             </div>
@@ -620,8 +639,23 @@ const MarksSheet = () => {
                   ) : (
                     displayedStudents.map((student, idx) => {
                       const studentId = student._id.toString();
-                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, file: {} };
-                      const isUngradedDisplay = String(inputData.obtainedMarks ?? '').trim() === UNGRADED_MARK;
+                      const inputData = markInputs[studentId] || { obtainedMarks: UNGRADED_MARK, isAbsent: false, isBypassed: false, file: {} };
+                      const rawMarkValue = String(inputData.obtainedMarks ?? '').trim();
+                      const isUngradedDisplay = rawMarkValue === UNGRADED_MARK;
+                      const isBypassDisplay = !inputData.isAbsent && !isUngradedDisplay &&
+                        (inputData.isBypassed || rawMarkValue.toUpperCase() === BYPASS_MARK);
+
+                      // Bypassed boxes glow brown so they are visually distinct from
+                      // absent (red) and ungraded (amber) at a glance.
+                      const markCellClass = isBypassDisplay
+                        ? 'lm-mark-bypass border-stone-400/70 text-stone-100 bg-stone-800/60 font-semibold'
+                        : inputData.isAbsent
+                          ? 'border-red-500/70 text-red-300 bg-red-950/40'
+                          : isUngradedDisplay
+                            ? 'border-amber-500/50 text-amber-300 bg-amber-950/20 italic'
+                            : errorStudentIds.has(studentId)
+                              ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse'
+                              : 'border-white/10 text-slate-100';
 
                       return (
                         <tr key={studentId}>
@@ -638,7 +672,7 @@ const MarksSheet = () => {
                               onChange={(e) => handleInputChange(studentId, e.target.value)}
                               placeholder={UNGRADED_MARK}
                               ref={(el) => { inputRefs.current[studentId] = el; }}
-                              className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${inputData.isAbsent ? 'border-red-500/70 text-red-300 bg-red-950/40' : isUngradedDisplay ? 'border-amber-500/50 text-amber-300 bg-amber-950/20 italic' : errorStudentIds.has(studentId) ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse' : 'border-white/10 text-slate-100'}`}
+                              className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${markCellClass}`}
                             />
                           </td>
                           <td>

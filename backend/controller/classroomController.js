@@ -4,10 +4,19 @@ const Mark = require('../models/markSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
+const { normaliseRoomColor } = require('../utils/roomColors');
+const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
 
 // Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
+const STANDARD_CATEGORY_KEYS = ['quizzes','assignments','presentations','projects','homework','classActivities','classParticipation','vivas','specialMarks','mids','finals','finalProject'];
 const getNormalizedTargetKey = (rawType = '') => {
-  const clean = rawType.trim().toLowerCase();
+  // Pass canonical schema keys straight through so the resolver is idempotent.
+  // Without this, resolving an already-resolved key ("classActivities" ->
+  // "classactivities") silently targets the wrong array.
+  const raw = String(rawType || '').trim();
+  if (STANDARD_CATEGORY_KEYS.includes(raw)) return raw;
+  const clean = raw.toLowerCase();
+  if (STANDARD_CATEGORY_KEYS.includes(clean)) return clean;
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
   if (clean.includes('present')) return 'presentations';
@@ -149,6 +158,7 @@ exports.createClassroom = catchAsync(async (req, res, next) => {
     createdBy: req.user._id,
     teacher: assignedTeacherId,
     placeholderTeacherName: finalPlaceholder,
+    colorKey: normaliseRoomColor(req.body.colorKey),
   };
 
   const newClassroom = await Classroom.create(classroomData);
@@ -769,9 +779,102 @@ exports.getClassroomComplaints = catchAsync(async (req, res, next) => {
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to view complaints for this classroom.', 403));
 
+  // Soft-deleted entries stay out of the default view but are recoverable by an
+  // admin asking for `includeDeleted`, which matters because these are anonymous:
+  // a mistaken delete destroys the only copy of who said what.
+  const includeDeleted = req.query.includeDeleted === 'true' && req.user.role === 'ADMIN';
+  const all = classroom.complaints || [];
+  const visible = includeDeleted ? all : all.filter((c) => !c.deletedAt);
+
+  const viewerId = String(req.user._id);
+  const unreadCount = all.filter(
+    (c) => !c.deletedAt && !(c.readBy || []).some((id) => String(id) === viewerId)
+  ).length;
+
+  let changed = false;
+  const complaints = visible.map((c) => {
+    const read = (c.readBy || []).some((id) => String(id) === viewerId);
+    if (!read) {
+      c.readBy.push(req.user._id);
+      changed = true;
+    }
+    return {
+      _id: c._id,
+      message: c.message,
+      createdAt: c.createdAt,
+      read: true,
+      deletedAt: c.deletedAt || null
+    };
+  });
+
+  // Opening the list marks everything visible as read for this viewer only, so
+  // each staff member keeps an independent unread count. The count is computed
+  // above, before that marking, so the badge reflects the pre-open state.
+  if (changed) await classroom.save();
+
   res.status(200).json({
     status: 'success',
-    data: { complaints: classroom.complaints || [] },
+    data: { complaints, unreadCount },
+  });
+});
+
+// PATCH /classrooms/:classroomId/complaints/read
+// Marks specific items read without opening the whole list, so a badge can be
+// cleared while the teacher keeps browsing other tabs.
+exports.markComplaintsRead = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const { complaintIds } = req.body;
+
+  const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to view complaints for this classroom.', 403));
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const viewerId = String(req.user._id);
+  const wanted = Array.isArray(complaintIds) && complaintIds.length
+    ? new Set(complaintIds.map(String))
+    : null;
+
+  for (const c of classroom.complaints || []) {
+    if (c.deletedAt) continue;
+    if (wanted && !wanted.has(String(c._id))) continue;
+    if ((c.readBy || []).some((id) => String(id) === viewerId)) continue;
+    c.readBy.push(req.user._id);
+  }
+
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Feedback marked as read.',
+  });
+});
+
+// DELETE /classrooms/:classroomId/complaints/:complaintId  (admin only)
+exports.deleteComplaint = catchAsync(async (req, res, next) => {
+  const { classroomId, complaintId } = req.params;
+
+  // Removal is destructive and the entry is anonymous, so it is deliberately
+  // narrower than viewing: admins only.
+  if (req.user.role !== 'ADMIN') {
+    return next(new AppError('Only admins can delete anonymous feedback.', 403));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const complaint = (classroom.complaints || []).id(complaintId);
+  if (!complaint) return next(new AppError('Feedback not found!', 404));
+
+  // Soft delete so the audit trail survives and the badge logic can filter it.
+  complaint.deletedAt = new Date();
+  complaint.deletedBy = req.user._id;
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Feedback deleted.',
   });
 });
 
@@ -944,23 +1047,29 @@ exports.postNotice = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findOne({ _id: classroomId, isActive: true }).populate('students', 'email personalNotificationEmail');
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
 
+  // The browser uploads attachments directly to Cloudinary, so the URL arrives
+  // client-controlled. Validate it here rather than trusting it.
+  const attachmentCheck = normaliseNoticeAttachment(attachment);
+  if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
+  const normalisedAttachment = attachmentCheck.attachment;
+
   const newNotice = {
     title: title.trim(),
     content: content.trim(),
     author: req.user._id,
     authorName: req.user.name,
     authorRole: req.user.role,
-    attachment: (attachment && attachment.url) ? {
-      url: attachment.url,
-      public_id: attachment.public_id || '',
-      fileType: attachment.fileType || '',
-      fileName: attachment.fileName || ''
-    } : { url: '', public_id: '', fileType: '', fileName: '' },
+    attachment: normalisedAttachment,
     createdAt: new Date(),
   };
 
   classroom.notices.push(newNotice);
   await classroom.save();
+
+  // Re-read the persisted subdocument. Mongoose assigns _id during save, so the
+  // plain object we pushed has no _id - returning it would hand the client a
+  // notice it cannot later edit or delete.
+  const savedNotice = classroom.notices[classroom.notices.length - 1];
 
   if (classroom.students && classroom.students.length > 0) {
     const noticePromises = classroom.students.map(async (student) => {
@@ -985,7 +1094,81 @@ exports.postNotice = catchAsync(async (req, res, next) => {
   res.status(201).json({
     status: 'success',
     message: 'Notice published successfully!',
-    data: { notice: newNotice },
+    data: { notice: savedNotice },
+  });
+});
+
+// Helper: Who may edit or delete a notice. Posting only needs "is staff", but
+// rewriting or removing somebody else's announcement is a stronger right, so it
+// is limited to the author, the classroom's assigned teacher, or an admin.
+const canManageNotice = (classroom, user) => {
+  if (user.role === 'ADMIN') return true;
+  if (classroom.teacher && classroom.teacher.toString() === user._id.toString()) return true;
+  return false;
+};
+
+// PATCH /classrooms/:classroomId/notices/:noticeId
+exports.updateNotice = catchAsync(async (req, res, next) => {
+  const { classroomId, noticeId } = req.params;
+  const { title, content, attachment } = req.body;
+
+  if (!title || !content) {
+    return next(new AppError('Notice title and content are required!', 400));
+  }
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const notice = classroom.notices.id(noticeId);
+  if (!notice) return next(new AppError('Notice not found!', 404));
+
+  const isAuthor = notice.author && notice.author.toString() === req.user._id.toString();
+  if (!isAuthor && !canManageNotice(classroom, req.user)) {
+    return next(new AppError('You can only edit your own notices.', 403));
+  }
+
+  notice.title = title.trim();
+  notice.content = content.trim();
+
+  // Only re-validate the attachment when one was actually supplied, so editing
+  // just the text does not require re-uploading the file.
+  if (attachment && typeof attachment === 'object' && attachment.url) {
+    const attachmentCheck = normaliseNoticeAttachment(attachment);
+    if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
+    notice.attachment = attachmentCheck.attachment;
+  }
+
+  notice.updatedAt = new Date();
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Notice updated successfully!',
+    data: { notice },
+  });
+});
+
+// DELETE /classrooms/:classroomId/notices/:noticeId
+exports.deleteNotice = catchAsync(async (req, res, next) => {
+  const { classroomId, noticeId } = req.params;
+
+  const classroom = await Classroom.findOne({ _id: classroomId, isActive: true });
+  if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  const notice = classroom.notices.id(noticeId);
+  if (!notice) return next(new AppError('Notice not found!', 404));
+
+  const isAuthor = notice.author && notice.author.toString() === req.user._id.toString();
+  if (!isAuthor && !canManageNotice(classroom, req.user)) {
+    return next(new AppError('You can only delete your own notices.', 403));
+  }
+
+  notice.deleteOne();
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Notice deleted successfully!',
   });
 });
 
@@ -994,7 +1177,7 @@ exports.postNotice = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
-  const { className, sectionPrefix, maxCapacity, placeholderTeacherName, gradingScheme, sessionalActivities } = req.body;
+  const { className, sectionPrefix, maxCapacity, placeholderTeacherName, gradingScheme, sessionalActivities, colorKey } = req.body;
 
   const currentClassroom = await Classroom.findOne({ _id: classroomId, isActive: true }).select('sessionalActivities').lean();
   if (!currentClassroom) return next(new AppError('Active classroom not found!', 404));
@@ -1005,6 +1188,7 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   if (maxCapacity) updateData.maxCapacity = Number(maxCapacity);
   if (placeholderTeacherName !== undefined) updateData.placeholderTeacherName = placeholderTeacherName.trim();
   if (gradingScheme) updateData.gradingScheme = gradingScheme;
+  if (colorKey !== undefined) updateData.colorKey = normaliseRoomColor(colorKey);
   if (Array.isArray(sessionalActivities)) {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
       category: a.category.trim(),

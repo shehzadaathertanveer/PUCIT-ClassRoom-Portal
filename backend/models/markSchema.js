@@ -8,6 +8,11 @@ const getPercentage = (obtained = 0, total = 0) => {
 const getArrayTotals = (items = []) => {
   return items.reduce(
     (acc, curr) => {
+      // A bypassed entry is treated as if it never existed for this student:
+      // it contributes to neither the numerator nor the denominator. Skipping
+      // only the numerator would penalise them; including it in the
+      // denominator would inflate their possible total.
+      if (curr.isBypassed) return acc;
       acc.obtained += (curr.isAbsent ? 0 : (curr.obtainedMarks || 0));
       acc.total += curr.totalMarks || 0;
       return acc;
@@ -44,6 +49,10 @@ const individualMarkSchema = new mongoose.Schema({
   totalMarks: { type: Number, required: true, min: 1 },
   obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
   isAbsent: { type: Boolean, default: false },
+  // Bypass: this activity does not exist for this student. Excluded from BOTH
+  // earned and possible so it cannot dilute their average or inflate the
+  // denominator. Enforced against classroom.bypassLimits at the controller.
+  isBypassed: { type: Boolean, default: false },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: true });
@@ -53,6 +62,7 @@ const customActivityItemSchema = new mongoose.Schema({
   totalMarks: { type: Number, required: true, min: 1 },
   obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
   isAbsent: { type: Boolean, default: false },
+  isBypassed: { type: Boolean, default: false },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: true });
@@ -67,6 +77,7 @@ const singleMarkSchema = new mongoose.Schema({
   totalMarks: { type: Number, default: 0, min: 0 },
   obtainedMarks: { type: Number, default: 0, min: 0 },
   isAbsent: { type: Boolean, default: false },
+  isBypassed: { type: Boolean, default: false },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: false });
@@ -158,6 +169,7 @@ markSchema.pre("save", async function () {
   standardKeys.forEach((key) => {
     if (this[key] && Array.isArray(this[key]) && this[key].length > 0) {
       this[key].forEach((item) => {
+        if (item.isBypassed) { item.percentage = 0; return; }
         if (item.isAbsent) item.obtainedMarks = 0;
         item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
       });
@@ -179,6 +191,7 @@ markSchema.pre("save", async function () {
       const catKey = catName.trim().toLowerCase();
       if (Array.isArray(customCat.items) && customCat.items.length > 0) {
         customCat.items.forEach((item) => {
+          if (item.isBypassed) { item.percentage = 0; return; }
           if (item.isAbsent) item.obtainedMarks = 0;
           item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
         });
@@ -195,20 +208,29 @@ markSchema.pre("save", async function () {
 
   // Process Mids
   if (this.mids) {
-    if (this.mids.isAbsent) this.mids.obtainedMarks = 0;
-    this.mids.percentage = getPercentage(this.mids.obtainedMarks, this.mids.totalMarks);
+    if (this.mids.isBypassed) { this.mids.percentage = 0; }
+    else {
+      if (this.mids.isAbsent) this.mids.obtainedMarks = 0;
+      this.mids.percentage = getPercentage(this.mids.obtainedMarks, this.mids.totalMarks);
+    }
   }
   
   // Process Finals
   if (this.finals) {
-    if (this.finals.isAbsent) this.finals.obtainedMarks = 0;
-    this.finals.percentage = getPercentage(this.finals.obtainedMarks, this.finals.totalMarks);
+    if (this.finals.isBypassed) { this.finals.percentage = 0; }
+    else {
+      if (this.finals.isAbsent) this.finals.obtainedMarks = 0;
+      this.finals.percentage = getPercentage(this.finals.obtainedMarks, this.finals.totalMarks);
+    }
   }
 
   // Process Final Project
   if (this.finalProject) {
-    if (this.finalProject.isAbsent) this.finalProject.obtainedMarks = 0;
-    this.finalProject.percentage = getPercentage(this.finalProject.obtainedMarks, this.finalProject.totalMarks);
+    if (this.finalProject.isBypassed) { this.finalProject.percentage = 0; }
+    else {
+      if (this.finalProject.isAbsent) this.finalProject.obtainedMarks = 0;
+      this.finalProject.percentage = getPercentage(this.finalProject.obtainedMarks, this.finalProject.totalMarks);
+    }
   }
 
   let sessionalWeight = classroom?.gradingScheme?.sessionalWeight ?? 25;
@@ -223,11 +245,14 @@ markSchema.pre("save", async function () {
     weightedScoreSum += calculatedSessionalPct * sessionalWeight;
     activeWeightSum += sessionalWeight;
   }
-  if ((this.mids?.totalMarks || 0) > 0) {
+  // A bypassed exam is excluded from the weighting entirely - it must not
+  // contribute its weight to the denominator either, or the remaining exams
+  // would be dragged down toward zero.
+  if ((this.mids?.totalMarks || 0) > 0 && !this.mids?.isBypassed) {
     weightedScoreSum += (this.mids.percentage || 0) * midsWeight;
     activeWeightSum += midsWeight;
   }
-  if ((this.finals?.totalMarks || 0) > 0) {
+  if ((this.finals?.totalMarks || 0) > 0 && !this.finals?.isBypassed) {
     weightedScoreSum += (this.finals.percentage || 0) * finalsWeight;
     activeWeightSum += finalsWeight;
   }

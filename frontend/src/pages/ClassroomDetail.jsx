@@ -12,6 +12,7 @@ import {
   CheckCircleIcon,
   CheckIcon,
   Cog6ToothIcon,
+  ShieldCheckIcon,
   ExclamationTriangleIcon,
   EyeIcon,
   FolderIcon,
@@ -30,7 +31,10 @@ import {
 import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
-import NoticeAttachment from '../components/NoticeAttachment';
+import NoticeCard from '../components/NoticeCard';
+import BypassLimitsPanel from '../components/BypassLimitsPanel';
+import RoomColorPicker from '../components/RoomColorPicker';
+import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const ClassroomDetail = () => {
   const { classroomId } = useParams();
@@ -66,6 +70,7 @@ const ClassroomDetail = () => {
   const [noticeContent, setNoticeContent] = useState('');
   const [noticeFile, setNoticeFile] = useState(null);
   const [postingNotice, setPostingNotice] = useState(false);
+  const [busyNoticeId, setBusyNoticeId] = useState('');
   const [showAllNotices, setShowAllNotices] = useState(false);
 
   // Anonymous Complaint states
@@ -75,6 +80,8 @@ const ClassroomDetail = () => {
   const [isViewComplaintsModalOpen, setIsViewComplaintsModalOpen] = useState(false);
   const [complaintsList, setComplaintsList] = useState([]);
   const [loadingComplaints, setLoadingComplaints] = useState(false);
+  const [complaintUnreadCount, setComplaintUnreadCount] = useState(0);
+  const [deletingComplaintId, setDeletingComplaintId] = useState('');
 
   // Create student result / graded item sheet modal state
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -142,10 +149,14 @@ const ClassroomDetail = () => {
 
   // Class Settings & Weights modal state
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  // TAs cannot open Classroom Settings, but they still need to see the bypass
+  // caps that constrain what they can mark. Read-only, teacher/admin only to edit.
+  const [isBypassModalOpen, setIsBypassModalOpen] = useState(false);
   const [editClassName, setEditClassName] = useState('');
   const [editSectionPrefix, setEditSectionPrefix] = useState('');
   const [editMaxCapacity, setEditMaxCapacity] = useState(50);
   const [editPlaceholderTeacher, setEditPlaceholderTeacher] = useState('');
+  const [editColorKey, setEditColorKey] = useState(DEFAULT_ROOM_COLOR);
 
   // Grading Weights editing state
   const [editSessionalWeight, setEditSessionalWeight] = useState(25);
@@ -208,6 +219,7 @@ const ClassroomDetail = () => {
       setEditSectionPrefix(fetchedClass.sectionPrefix || '');
       setEditMaxCapacity(fetchedClass.maxCapacity || 50);
       setEditPlaceholderTeacher(fetchedClass.placeholderTeacherName || '');
+      setEditColorKey(fetchedClass.colorKey || DEFAULT_ROOM_COLOR);
 
       if (fetchedClass.gradingScheme) {
         setEditSessionalWeight(fetchedClass.gradingScheme.sessionalWeight || 25);
@@ -258,10 +270,37 @@ const ClassroomDetail = () => {
       setLoadingComplaints(true);
       const res = await API.get(`/classrooms/${classroomId}/complaints`);
       setComplaintsList(res.data?.data?.complaints || res.data?.complaints || []);
+      // The backend returns this viewer's own unread count, so the badge is
+      // per-staff-member rather than one shared flag for the whole room.
+      setComplaintUnreadCount(res.data?.data?.unreadCount || 0);
     } catch {
       console.warn('Failed to fetch complaints');
     } finally {
       setLoadingComplaints(false);
+    }
+  };
+
+  const markComplaintsRead = async (complaintIds) => {
+    try {
+      await API.patch(`/classrooms/${classroomId}/complaints/read`, { complaintIds });
+      setComplaintUnreadCount(0);
+      setComplaintsList((prev) => prev.map((c) => ({ ...c, read: true })));
+    } catch {
+      // A failed badge clear is cosmetic; do not interrupt the teacher.
+    }
+  };
+
+  const handleDeleteComplaint = async (complaint) => {
+    if (!window.confirm('Delete this anonymous submission? The record is kept only for audit.')) return;
+    try {
+      setDeletingComplaintId(complaint._id);
+      await API.delete(`/classrooms/${classroomId}/complaints/${complaint._id}`);
+      setComplaintsList((prev) => prev.filter((c) => c._id !== complaint._id));
+      showToast('Submission deleted.');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete submission.', 'error');
+    } finally {
+      setDeletingComplaintId('');
     }
   };
 
@@ -328,6 +367,15 @@ const ClassroomDetail = () => {
       return;
     }
     setSelectedActivityItem({ item, targetKey, category });
+  };
+
+  // Editing/removing an existing announcement is narrower than posting one:
+  // only the author, this classroom's assigned teacher, or an admin may do it.
+  const canManageNotice = (notice) => {
+    if (isAdmin) return true;
+    if (classroom?.teacher && String(classroom.teacher._id || classroom.teacher) === String(user?._id)) return true;
+    if (notice?.author && String(notice.author) === String(user?._id)) return true;
+    return false;
   };
 
   const handlePostNotice = async (e) => {
@@ -568,6 +616,7 @@ const ClassroomDetail = () => {
         sectionPrefix: editSectionPrefix.trim().toUpperCase(),
         maxCapacity: Number(editMaxCapacity),
         placeholderTeacherName: editPlaceholderTeacher.trim(),
+        colorKey: editColorKey,
         gradingScheme: {
           sessionalWeight: sW,
           midsWeight: mW,
@@ -1135,9 +1184,21 @@ const ClassroomDetail = () => {
               </button>
             )}
             {isStaffOrAdmin && (
-              <button type="button" onClick={() => { setIsViewComplaintsModalOpen(true); fetchComplaints(); }} className="lm-btn-ghost shrink-0 border-amber-500/40 text-amber-200 hover:text-amber-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsViewComplaintsModalOpen(true);
+                  fetchComplaints().then(() => markComplaintsRead());
+                }}
+                className="lm-btn-ghost shrink-0 border-amber-500/40 text-amber-200 hover:text-amber-100 relative"
+              >
                 <ArrowDownTrayIcon className="w-4 h-4" />
                 Feedback
+                {complaintUnreadCount > 0 && (
+                  <span className="lm-badge border-amber-400/40 bg-amber-500/20 text-amber-200 font-mono">
+                    {complaintUnreadCount}
+                  </span>
+                )}
               </button>
             )}
             <button type="button" onClick={() => setIsMembersModalOpen(true)} className="lm-btn-ghost shrink-0 border-cyan-500/40 text-cyan-300 hover:text-cyan-200">
@@ -1161,6 +1222,7 @@ const ClassroomDetail = () => {
               </>
             )}
             {isTeacherOrAdmin && <button type="button" onClick={() => setIsSettingsModalOpen(true)} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+            {isAssignedTa && !isTeacherOrAdmin && <button type="button" onClick={() => setIsBypassModalOpen(true)} className="lm-btn-ghost shrink-0"><ShieldCheckIcon className="w-4 h-4" />Bypass Limits</button>}
           </div>
         </div>
         <hr className="lm-divider mt-1" />
@@ -1208,27 +1270,73 @@ const ClassroomDetail = () => {
                 <p className="text-slate-400 text-xs italic mt-2">No announcements posted yet.</p>
               </div>
             ) : showAllNotices ? (
-              reversedNotices.map((n, idx) => (
-                <div key={idx} className="lm-inset p-4 space-y-2">
-                  <h4 className="text-slate-100 font-bold text-xs sm:text-sm break-words">{n.title}</h4>
-                  <p className="text-slate-300 text-xs leading-relaxed break-words">{n.content}</p>
-                  {n.attachment && n.attachment.url && (
-                    <div className="pt-2">
-                      <NoticeAttachment attachment={n.attachment} />
-                    </div>
-                  )}
-                </div>
+              reversedNotices.map((n) => (
+                <NoticeCard
+                  key={n._id || `${n.createdAt}-${n.title}`}
+                  notice={n}
+                  canManage={canManageNotice(n)}
+                  busy={busyNoticeId === (n._id || '')}
+                  onEdit={async ({ title, content }) => {
+                    setBusyNoticeId(n._id || '');
+                    try {
+                      await API.patch(`/classrooms/${classroomId}/notices/${n._id}`, { title, content });
+                      await fetchClassroomData();
+                      showToast('Notice updated.');
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Failed to update notice.', 'error');
+                      throw err;
+                    } finally {
+                      setBusyNoticeId('');
+                    }
+                  }}
+                  onDelete={async () => {
+                    if (!window.confirm('Delete this notice? This cannot be undone.')) return;
+                    setBusyNoticeId(n._id || '');
+                    try {
+                      await API.delete(`/classrooms/${classroomId}/notices/${n._id}`);
+                      await fetchClassroomData();
+                      showToast('Notice deleted.');
+                    } catch (err) {
+                      showToast(err.response?.data?.message || 'Failed to delete notice.', 'error');
+                    } finally {
+                      setBusyNoticeId('');
+                    }
+                  }}
+                />
               ))
             ) : (
-              <div className="lm-inset p-4 space-y-2">
-                <h4 className="text-slate-100 font-bold text-sm sm:text-base break-words">{latestNotice.title}</h4>
-                <p className="text-slate-300 text-xs leading-relaxed break-words">{latestNotice.content}</p>
-                {latestNotice.attachment && latestNotice.attachment.url && (
-                  <div className="pt-2">
-                    <NoticeAttachment attachment={latestNotice.attachment} />
-                  </div>
-                )}
-              </div>
+              <NoticeCard
+                notice={latestNotice}
+                compact
+                canManage={canManageNotice(latestNotice)}
+                busy={busyNoticeId === (latestNotice._id || '')}
+                onEdit={async ({ title, content }) => {
+                  setBusyNoticeId(latestNotice._id || '');
+                  try {
+                    await API.patch(`/classrooms/${classroomId}/notices/${latestNotice._id}`, { title, content });
+                    await fetchClassroomData();
+                    showToast('Notice updated.');
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Failed to update notice.', 'error');
+                    throw err;
+                  } finally {
+                    setBusyNoticeId('');
+                  }
+                }}
+                onDelete={async () => {
+                  if (!window.confirm('Delete this notice? This cannot be undone.')) return;
+                  setBusyNoticeId(latestNotice._id || '');
+                  try {
+                    await API.delete(`/classrooms/${classroomId}/notices/${latestNotice._id}`);
+                    await fetchClassroomData();
+                    showToast('Notice deleted.');
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'Failed to delete notice.', 'error');
+                  } finally {
+                    setBusyNoticeId('');
+                  }
+                }}
+              />
             )}
           </div>
         </section>
@@ -2292,6 +2400,32 @@ const ClassroomDetail = () => {
       )}
 
       {/* 7. Settings Modal */}
+      {/* Read-only bypass limits for TAs, who cannot open Classroom Settings but
+          still need to see the caps that constrain the grades they can enter. */}
+      {isBypassModalOpen && (
+        <div className="lm-scrim" onClick={() => setIsBypassModalOpen(false)}>
+          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-3">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-100 uppercase break-words">Bypass Limits</h3>
+                <p className="text-[11px] text-slate-400 mt-1">Read-only &mdash; a teacher or admin sets these caps.</p>
+              </div>
+              <button type="button" onClick={() => setIsBypassModalOpen(false)} aria-label="Close" title="Close" className="shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-colors cursor-pointer">
+                <XMarkIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <BypassLimitsPanel
+              apiBase="/classroommarks"
+              roomId={classroomId}
+              roomType="classroom"
+              customCategories={editSessionalActivities}
+              canEdit={false}
+              showToast={showToast}
+            />
+          </div>
+        </div>
+      )}
+
       {isSettingsModalOpen && (
         <div className="lm-scrim">
           <div className="lm-modal max-w-lg p-4 sm:p-6 lg:p-8 space-y-5">
@@ -2338,6 +2472,25 @@ const ClassroomDetail = () => {
                   </div>
                 </div>
               </div>
+
+              <div className="pt-3 border-t border-white/[0.06]">
+                <RoomColorPicker
+                  value={editColorKey}
+                  onChange={setEditColorKey}
+                  disabled={updatingSettings}
+                />
+              </div>
+
+              {/* Bypass ("B") limits - caps how many activities per category a
+                  student may bypass. Teacher/admin editable; TAs see it read-only. */}
+              <BypassLimitsPanel
+                apiBase="/classroommarks"
+                roomId={classroomId}
+                roomType="classroom"
+                customCategories={editSessionalActivities}
+                canEdit={isTeacherOrAdmin}
+                showToast={showToast}
+              />
 
               {/* Strict Preset Sessional Activities Manager */}
               <div className="pt-3 border-t border-white/[0.06] space-y-3">
@@ -2476,10 +2629,24 @@ const ClassroomDetail = () => {
               </div>
             ) : (
               <div className="max-h-[55vh] sm:max-h-[60vh] overflow-y-auto space-y-3 pr-1">
-                {complaintsList.map((c, i) => (
-                  <div key={i} className="lm-inset p-4 rounded-2xl space-y-1">
+                {complaintsList.map((c) => (
+                  <div key={c._id || `${c.createdAt}-${c.message}`} className="lm-inset p-4 rounded-2xl space-y-1">
                     <p className="text-xs text-slate-100 leading-relaxed break-words">{c.message}</p>
-                    <p className="text-[10px] sm:text-xs text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[10px] sm:text-xs text-slate-500 font-mono">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</p>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteComplaint(c)}
+                          disabled={deletingComplaintId === c._id}
+                          className="lm-btn-icon hover:!border-rose-400/50 hover:!text-rose-200"
+                          aria-label="Delete submission"
+                          title="Delete submission (admin only)"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

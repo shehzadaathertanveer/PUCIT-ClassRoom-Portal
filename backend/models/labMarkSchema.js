@@ -14,7 +14,13 @@ const LabItemScoreSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   obtainedMarks: { type: Number, default: 0, min: 0 },
   totalMarks: { type: Number, required: true, min: 1 },
+  // Explicit graded state. Without this a legitimate 0 score is indistinguishable
+  // from "never graded", because obtainedMarks defaults to 0.
+  isGraded: { type: Boolean, default: false },
   isAbsent: { type: Boolean, default: false },
+  // Bypass: this evaluation does not exist for this student. Excluded from
+  // BOTH earned and possible. Enforced against labroom.bypassLimits.
+  isBypassed: { type: Boolean, default: false },
   remarks: { type: String, trim: true, default: '' },
   file: { type: cloudinaryFileSchema, default: () => ({}) } // 👈 Persists file attachments in lab grading sheets
 }, { _id: false });

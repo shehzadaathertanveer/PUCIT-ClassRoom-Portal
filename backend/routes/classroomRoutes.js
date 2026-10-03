@@ -53,8 +53,13 @@ router.post('/:classroomId/bulk-approve-students', restrictToClassStaff, classro
 router.patch('/:classroomId/smart-reject', restrictToClassStaff, classroomController.toggleSmartSearchRejection);
 
 // Anonymous Complaints & Feedback Box
-router.post('/:classroomId/complaints', classroomController.submitComplaint); 
-router.get('/:classroomId/complaints', restrictToClassStaff, classroomController.getClassroomComplaints); 
+router.post('/:classroomId/complaints', classroomController.submitComplaint);
+router.get('/:classroomId/complaints', restrictToClassStaff, classroomController.getClassroomComplaints);
+// Clearing a badge without opening the whole list.
+router.patch('/:classroomId/complaints/read', restrictToClassStaff, classroomController.markComplaintsRead);
+// Deleting anonymous feedback is destructive and irreversible for the record, so
+// it stays admin-only even though viewing is open to all staff.
+router.delete('/:classroomId/complaints/:complaintId', restrictTo('ADMIN'), classroomController.deleteComplaint);
 
 // Graded Items & Result Sheets Creation & Deletion
 router.post('/:classroomId/items', restrictToClassStaff, classroomController.createGradedItem);
@@ -73,6 +78,16 @@ router.delete('/:classroomId/students/:studentId', restrictToClassStaff, classro
 
 // Notice Board Announcements
 router.post('/:classroomId/notices', restrictToClassStaff, classroomController.postNotice);
+
+// Editing/removing an existing announcement is narrower than posting one, so the
+// role gate is looser here and the controller enforces author/teacher/admin.
+// TA is allowed at the route layer because a TA may be the notice author.
+// updateNotice/deleteNotice still enforce the real rule (author, assigned
+// teacher, or admin) via canManageNotice, so this does not widen access.
+router
+  .route('/:classroomId/notices/:noticeId')
+  .patch(restrictTo('TEACHER', 'TA', 'ADMIN'), classroomController.updateNotice)
+  .delete(restrictTo('TEACHER', 'TA', 'ADMIN'), classroomController.deleteNotice);
 
 // =============================================================================
 // 3. SINGLE CLASSROOM DETAILS & DELETION ROUTES

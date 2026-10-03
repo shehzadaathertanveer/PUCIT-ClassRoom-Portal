@@ -4,6 +4,7 @@ const User = require('../models/userSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
+const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
 
 const STANDARD_CATEGORIES = [
   'quizzes', 
@@ -22,7 +23,17 @@ const STANDARD_CATEGORIES = [
 
 // Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
 const getNormalizedTargetKey = (rawType = '') => {
-  const clean = rawType.trim().toLowerCase();
+  const raw = String(rawType || '').trim();
+
+  // Already a canonical schema key (e.g. "classActivities", "mids"). Return it
+  // untouched so this resolver is idempotent. Bypass limits are WRITTEN with
+  // this function and READ back with it, so a lossy round trip would silently
+  // drop the teacher's setting and leave bypassing permanently disabled.
+  if (STANDARD_CATEGORIES.includes(raw)) return raw;
+
+  const clean = raw.toLowerCase();
+  if (STANDARD_CATEGORIES.includes(clean)) return clean;
+
   if (clean.includes('quiz')) return 'quizzes';
   if (clean.includes('assign')) return 'assignments';
   if (clean.includes('present')) return 'presentations';
@@ -94,6 +105,49 @@ const parseCloudinaryFile = (item = {}) => {
   }
   return null;
 };
+
+// ---------------------------------------------------------------------------
+// Bypass ("B") support
+// ---------------------------------------------------------------------------
+// Limits are enforced server side (see utils/bypassRules) so a TA cannot exceed
+// a cap by calling the API directly.
+const SINGLE_ENTRY_KEYS = ['mids', 'finals', 'finalProject'];
+
+// getItems knows where each category actually lives on a Mark doc. Custom
+// (teacher-defined) activities are nested under customActivities[].items rather
+// than being a top-level array, so they need matching on categoryName - without
+// this their bypasses were never counted and the limit never applied.
+const getClassroomCategoryItems = (markDoc, targetCategory) => {
+  if (SINGLE_ENTRY_KEYS.includes(targetCategory)) {
+    return markDoc[targetCategory] ? [markDoc[targetCategory]] : [];
+  }
+  if (Array.isArray(markDoc[targetCategory])) return markDoc[targetCategory];
+
+  const wanted = String(targetCategory || '').trim().toLowerCase();
+  const customCat = (markDoc.customActivities || []).find((c) => {
+    const name = String(c && c.categoryName ? c.categoryName : '').trim().toLowerCase();
+    return name === wanted || getNormalizedTargetKey(name) === targetCategory;
+  });
+  return customCat && Array.isArray(customCat.items) ? customCat.items : [];
+};
+
+// How many graded activities a category holds. mids/finals/finalProject are single
+// objects; everything else is an array. Used to clamp bypass limits so a student
+// can never bypass every activity in a category.
+const countCategorySlots = (room, categoryKey) => {
+  if (!room) return 0;
+  const SINGLE = ['mids', 'finals', 'finalProject'];
+  if (SINGLE.includes(categoryKey)) {
+    return room[categoryKey] && room[categoryKey].title ? 1 : 0;
+  }
+  return Array.isArray(room[categoryKey]) ? room[categoryKey].length : 0;
+};
+
+const { canBypass } = createBypassRules({
+  resolveKey: (catName = '') => getNormalizedTargetKey(String(catName || '')),
+  getItems: getClassroomCategoryItems,
+  getSlotCount: countCategorySlots
+});
 
 // =============================================================================
 // 1. GET BULK SHEET FOR ADDING MARKS (FIXED TO INCLUDE CUSTOM ACTIVITIES)
@@ -400,6 +454,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     evaluationCategories.forEach(cat => {
       if (Array.isArray(doc[cat])) {
         doc[cat].forEach(item => {
+          if (item.isBypassed) return; // excluded from both sides
           if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
           totalTotSessional += (Number(item.totalMarks) || 0);
         });
@@ -410,6 +465,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       doc.customActivities.forEach(customCat => {
         if (Array.isArray(customCat.items)) {
           customCat.items.forEach(item => {
+            if (item.isBypassed) return; // excluded from both sides
             if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
             totalTotSessional += (Number(item.totalMarks) || 0);
           });
@@ -424,13 +480,15 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     }
 
     let midsPercentage = 0;
-    if (doc.mids && doc.mids.totalMarks > 0) {
+    const hasMids = doc.mids && doc.mids.totalMarks > 0 && !doc.mids.isBypassed;
+    if (hasMids) {
       midsPercentage = doc.mids.isAbsent ? 0 : ((Number(doc.mids.obtainedMarks) || 0) / doc.mids.totalMarks) * 100;
       sumMids += midsPercentage; midsCount++;
     }
 
     let finalsPercentage = 0;
-    if (doc.finals && doc.finals.totalMarks > 0) {
+    const hasFinals = doc.finals && doc.finals.totalMarks > 0 && !doc.finals.isBypassed;
+    if (hasFinals) {
       finalsPercentage = doc.finals.isAbsent ? 0 : ((Number(doc.finals.obtainedMarks) || 0) / doc.finals.totalMarks) * 100;
       sumFinals += finalsPercentage; finalsCount++;
     }
@@ -439,9 +497,21 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     const mW = Number(gradingScheme.midsWeight) || 35;
     const fW = Number(gradingScheme.finalsWeight) || 40;
 
-    const overallPercentage = ((sessionalPercentage * sW) + (midsPercentage * mW) + (finalsPercentage * fW)) / 100;
+    // Normalise by the weights actually in play, matching markSchema's
+    // pre-save hook. Dividing by a flat 100 meant a student with perfect
+    // sessionals and no finals entered ranked at 25% here while being stored
+    // as 100% - the letter grade and the leaderboard position disagreed.
+    let weightedSum = 0;
+    let activeWeightSum = 0;
+    if (totalTotSessional > 0) { weightedSum += sessionalPercentage * sW; activeWeightSum += sW; }
+    if (hasMids) { weightedSum += midsPercentage * mW; activeWeightSum += mW; }
+    if (hasFinals) { weightedSum += finalsPercentage * fW; activeWeightSum += fW; }
+
+    const overallPercentage = activeWeightSum > 0 ? weightedSum / activeWeightSum : 0;
     sumOverall += overallPercentage; overallCount++;
 
+    // Tier boundaries aligned with getPucitLetterGrade in markSchema.js so a
+    // student's tier always agrees with the grade shown to them.
     if (overallPercentage >= 80) tiers.excellent++;
     else if (overallPercentage >= 65) tiers.good++;
     else if (overallPercentage >= 50) tiers.average++;
@@ -787,8 +857,12 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 
       const rawVal = m.obtainedMarks !== undefined ? String(m.obtainedMarks).trim() : '';
       const isAbsent = Boolean(m.isAbsent) || rawVal.toUpperCase() === 'A';
+      const isBypass = !isAbsent && rawVal.toUpperCase() === BYPASS_SENTINEL;
       
-      if (!isAbsent && (rawVal === '' || rawVal === null || isNaN(Number(rawVal)))) {
+      // "-99" means ungraded. Skip it rather than letting Number() turn it into
+      // a real number - the old Math.max(0, ...) clamp silently recorded an
+      // ungraded entry as a graded zero.
+      if (!isAbsent && !isBypass && (rawVal === '' || rawVal === null || rawVal === UNGRADED_SENTINEL || isNaN(Number(rawVal)))) {
         continue;
       }
 
@@ -810,7 +884,20 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
         });
       }
 
-      const obtained = isAbsent ? 0 : Math.max(0, Number(rawVal) || 0);
+      // Bypass is capped per student per category, and the cap is enforced
+      // here so it holds regardless of what the client sends.
+      if (isBypass) {
+        const verdict = canBypass(classroom, markDoc, targetCategory, cleanTitle);
+        if (!verdict.allowed) {
+          return res.status(400).json({
+            status: 'fail',
+            message: verdict.message,
+            data: { limit: verdict.limit, used: verdict.used, category: targetCategory }
+          });
+        }
+      }
+
+      const obtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
       const fileData = parseCloudinaryFile(m);
 
       // Only notify students whose grade actually changed (avoids duplicate emails
@@ -850,6 +937,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           totalMarks: parsedTotal,
           obtainedMarks: obtained,
           isAbsent,
+          isBypassed: isBypass,
           file: fileData || markDoc[targetCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
         };
       } else if (isStandard) {
@@ -860,6 +948,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           totalMarks: parsedTotal,
           obtainedMarks: obtained,
           isAbsent,
+          isBypassed: isBypass,
           file: fileData || (entryIndex > -1 ? markDoc[targetCategory][entryIndex].file : { url: '', public_id: '', fileType: '', fileName: '' })
         };
 
@@ -877,7 +966,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
         if (!customCat) {
           markDoc.customActivities.push({
             categoryName: cleanCategory,
-            items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, file: fileData || { url: '' } }]
+            items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, isBypassed: isBypass, file: fileData || { url: '' } }]
           });
         } else {
           if (!Array.isArray(customCat.items)) customCat.items = [];
@@ -887,6 +976,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
             totalMarks: parsedTotal,
             obtainedMarks: obtained,
             isAbsent,
+            isBypassed: isBypass,
             file: fileData || (entryIndex > -1 ? customCat.items[entryIndex].file : { url: '' })
           };
 
@@ -966,6 +1056,8 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       if (!item.studentId) return false;
       const val = item.obtainedMarks;
       const strVal = val !== undefined && val !== null ? String(val).trim() : '';
+      // "B" requests a bypass, so it must survive this filter.
+      if (strVal.toUpperCase() === BYPASS_SENTINEL) return true;
       // -99 is the UI sentinel for "ungraded" - never persist it as a real mark.
       if (strVal !== '' && Number(strVal) === -99) return false;
       return strVal !== '' || item.isAbsent;
@@ -1040,13 +1132,35 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     const studentIdStr = studentId.toString();
     const rawVal = String(obtainedMarks).trim();
     const absentFlag = isAbsent || rawVal.toUpperCase() === 'A';
-    if (!absentFlag && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
+    const bypassFlag = !absentFlag && rawVal.toUpperCase() === BYPASS_SENTINEL;
+    if (!absentFlag && !bypassFlag && (isNaN(Number(rawVal)) || Number(rawVal) < 0)) {
       continue;
     }
-    const parsedObtained = absentFlag ? 0 : Math.max(0, Number(rawVal) || 0);
 
     let markDoc = docMap.get(studentIdStr);
+
+    // Cap bypasses per student per category. Checked before any write so a
+    // rejected request leaves the sheet untouched, and enforced here rather
+    // than in the UI so a TA cannot bypass the cap by calling the API.
+    if (bypassFlag) {
+      const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
+      if (!verdict.allowed) {
+        return res.status(400).json({
+          status: 'fail',
+          message: verdict.message,
+          data: {
+            limit: verdict.limit,
+            used: verdict.used,
+            category: resolvedCategory,
+            studentId,
+            studentName: studentMap.get(studentIdStr)?.name || 'Unknown'
+          }
+        });
+      }
+    }
+
     let marksChanged = !markDoc;
+    const parsedObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal) || 0);
 
     if (markDoc) {
       if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
@@ -1099,6 +1213,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         totalMarks: parsedTotal,
         obtainedMarks: parsedObtained,
         isAbsent: absentFlag,
+        isBypassed: bypassFlag,
         file: file || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
       };
     } else if (isStandard) {
@@ -1110,9 +1225,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         markDoc[resolvedCategory][existingIdx].totalMarks = parsedTotal;
         markDoc[resolvedCategory][existingIdx].obtainedMarks = parsedObtained;
         markDoc[resolvedCategory][existingIdx].isAbsent = absentFlag;
+        markDoc[resolvedCategory][existingIdx].isBypassed = bypassFlag;
         if (file) markDoc[resolvedCategory][existingIdx].file = file;
       } else {
-        const newItem = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag };
+        const newItem = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag };
         if (file) newItem.file = file;
         markDoc[resolvedCategory].push(newItem);
       }
@@ -1125,7 +1241,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       if (!customCat) {
         markDoc.customActivities.push({
           categoryName: cleanCategory,
-          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, file: file || { url: '' } }]
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, file: file || { url: '' } }]
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
@@ -1134,9 +1250,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
           customCat.items[existingItemIdx].totalMarks = parsedTotal;
           customCat.items[existingItemIdx].obtainedMarks = parsedObtained;
           customCat.items[existingItemIdx].isAbsent = absentFlag;
+          customCat.items[existingItemIdx].isBypassed = bypassFlag;
           if (file) customCat.items[existingItemIdx].file = file;
         } else {
-          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, file: file || { url: '' } });
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, file: file || { url: '' } });
         }
       }
     }
@@ -1158,10 +1275,16 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
           title: `${cleanTitle} (${resolvedCategory.toUpperCase()})`,
           bodyText: absentFlag
             ? `You were marked <strong>ABSENT ('A')</strong> for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong>.`
-            : `Your grade for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been uploaded.`,
+            : bypassFlag
+              ? `<strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> was marked as bypassed ('B') and is excluded from your grade.`
+              : `Your grade for <strong>${cleanTitle}</strong> in <strong>${classroom?.className || 'Course'}</strong> has been uploaded.`,
           details: [
             { label: 'Evaluation', value: cleanTitle },
-            { label: 'Score', value: absentFlag ? 'Absent (0 / ' + parsedTotal + ')' : `${parsedObtained} / ${parsedTotal} (${percentage}%)` },
+            { label: 'Score', value: absentFlag
+                ? `Absent (0 / ${parsedTotal})`
+                : bypassFlag
+                  ? 'Bypassed (excluded from grade)'
+                  : `${parsedObtained} / ${parsedTotal} (${percentage}%)` },
             { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
           ]
         });
@@ -1241,6 +1364,12 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     itemTitle = '';
   }
 
+  // Tracked title used for exclusion when re-saving an activity that is already
+  // bypassed. Without this binding every canBypass() call below threw
+  // "cleanTitle is not defined" at runtime, so the single-student grade endpoint
+  // failed on every request that involved a bypass check.
+  const cleanTitle = String(itemTitle || '').trim();
+
   const incomingObtained = req.body.newObtainedMarks !== undefined ? req.body.newObtainedMarks : (req.body.obtainedMarks !== undefined ? req.body.obtainedMarks : req.body.score);
   const incomingTotal = req.body.newTotalMarks !== undefined ? req.body.newTotalMarks : req.body.totalMarks;
   const isAbsentFlag = Boolean(req.body.isAbsent);
@@ -1284,10 +1413,15 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
-    const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+    const bypassFlag = !absentFlag && rawVal.toUpperCase() === BYPASS_SENTINEL;
+    if (bypassFlag) {
+      const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
+      if (!verdict.allowed) return next(new AppError(verdict.message, 400));
+    }
+    const currentObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal));
 
     if (currentTotal <= 0) return next(new AppError('Total marks must be greater than 0!', 400));
-    if (!absentFlag && currentObtained > currentTotal) {
+    if (!absentFlag && !bypassFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
 
@@ -1302,6 +1436,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       totalMarks: currentTotal,
       obtainedMarks: currentObtained,
       isAbsent: absentFlag,
+      isBypassed: bypassFlag,
       file: fileData || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
     };
   } else if (isStandard) {
@@ -1315,10 +1450,15 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (itemIdx > -1 ? markDoc[resolvedCategory][itemIdx].totalMarks : 10);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : (itemIdx > -1 ? String(markDoc[resolvedCategory][itemIdx].obtainedMarks) : '0');
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
-    const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+    const bypassFlag = !absentFlag && rawVal.toUpperCase() === BYPASS_SENTINEL;
+    if (bypassFlag) {
+      const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
+      if (!verdict.allowed) return next(new AppError(verdict.message, 400));
+    }
+    const currentObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal));
 
     if (currentTotal <= 0) return next(new AppError('Total marks must be greater than 0!', 400));
-    if (!absentFlag && currentObtained > currentTotal) {
+    if (!absentFlag && !bypassFlag && currentObtained > currentTotal) {
       return next(new AppError(`Obtained marks (${currentObtained}) cannot exceed Total marks (${currentTotal})!`, 400));
     }
 
@@ -1332,6 +1472,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       markDoc[resolvedCategory][itemIdx].totalMarks = currentTotal;
       markDoc[resolvedCategory][itemIdx].obtainedMarks = currentObtained;
       markDoc[resolvedCategory][itemIdx].isAbsent = absentFlag;
+      markDoc[resolvedCategory][itemIdx].isBypassed = bypassFlag;
       if (fileData) markDoc[resolvedCategory][itemIdx].file = fileData;
     } else {
       markDoc[resolvedCategory].push({
@@ -1339,6 +1480,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
         totalMarks: currentTotal,
         obtainedMarks: currentObtained,
         isAbsent: absentFlag,
+        isBypassed: bypassFlag,
         file: fileData || { url: '', public_id: '', fileType: '', fileName: '' }
       });
     }
@@ -1352,13 +1494,24 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     );
 
     if (!customCat) {
+      // Normalise the sentinels before creating the category, so a bypass
+      // submitted against a brand-new custom activity is validated and stored
+      // the same way as one added to an existing category.
+      const rawNew = incomingObtained !== undefined ? String(incomingObtained).trim() : '';
+      const absentNew = isAbsentFlag || rawNew.toUpperCase() === 'A';
+      const bypassNew = !absentNew && rawNew.toUpperCase() === BYPASS_SENTINEL;
+      if (bypassNew) {
+        const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
+        if (!verdict.allowed) return next(new AppError(verdict.message, 400));
+      }
       markDoc.customActivities.push({
         categoryName: cleanCategory,
         items: [{
           title: itemTitle.trim(),
           totalMarks: Number(incomingTotal) || 10,
-          obtainedMarks: isAbsentFlag ? 0 : (Number(incomingObtained) || 0),
-          isAbsent: isAbsentFlag,
+          obtainedMarks: (absentNew || bypassNew) ? 0 : (Number(rawNew) || 0),
+          isAbsent: absentNew,
+          isBypassed: bypassNew,
           file: fileData || { url: '' }
         }]
       });
@@ -1368,7 +1521,12 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (itemIdx > -1 ? customCat.items[itemIdx].totalMarks : 10);
       const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : (itemIdx > -1 ? String(customCat.items[itemIdx].obtainedMarks) : '0');
       const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
-      const currentObtained = absentFlag ? 0 : Math.max(0, Number(rawVal));
+      const bypassFlag = !absentFlag && rawVal.toUpperCase() === BYPASS_SENTINEL;
+      if (bypassFlag) {
+        const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
+        if (!verdict.allowed) return next(new AppError(verdict.message, 400));
+      }
+      const currentObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal));
 
       const prevItem = itemIdx > -1 ? customCat.items[itemIdx] : null;
       marksChanged = !prevItem ||
@@ -1380,6 +1538,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
         customCat.items[itemIdx].totalMarks = currentTotal;
         customCat.items[itemIdx].obtainedMarks = currentObtained;
         customCat.items[itemIdx].isAbsent = absentFlag;
+        customCat.items[itemIdx].isBypassed = bypassFlag;
         if (fileData) customCat.items[itemIdx].file = fileData;
       } else {
         customCat.items.push({
@@ -1387,6 +1546,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
           totalMarks: currentTotal,
           obtainedMarks: currentObtained,
           isAbsent: absentFlag,
+          isBypassed: bypassFlag,
           file: fileData || { url: '' }
         });
       }
@@ -1530,5 +1690,88 @@ exports.getStudentMarks = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     data: { markDoc },
+  });
+});
+// =============================================================================
+// BYPASS LIMIT SETTINGS
+// Teachers and admins cap how many activities per category a student may
+// bypass. Limits are enforced at grading time in canBypass (see
+// utils/bypassRules), so a TA cannot exceed them by bypassing the UI.
+// =============================================================================
+
+// Mongoose Maps do not serialise usefully, so always hand the client a plain
+// object keyed by category.
+const toPlainBypassLimits = (limits) => {
+  const out = {};
+  if (!limits) return out;
+  if (typeof limits.entries === 'function') {
+    for (const [key, value] of limits.entries()) out[key] = value;
+    return out;
+  }
+  return { ...limits };
+};
+
+exports.getBypassLimits = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const classroom = await Classroom.findById(classroomId).select('className bypassLimits').lean();
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      className: classroom.className,
+      limits: toPlainBypassLimits(classroom.bypassLimits)
+    }
+  });
+});
+
+exports.updateBypassLimits = catchAsync(async (req, res, next) => {
+  const { classroomId } = req.params;
+  const incoming = req.body && req.body.limits;
+
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return next(new AppError('A "limits" object keyed by category is required.', 400));
+  }
+
+  const classroom = await Classroom.findById(classroomId);
+  if (!classroom) return next(new AppError('Classroom not found!', 404));
+
+  const limits = {};
+  for (const [rawKey, rawValue] of Object.entries(incoming)) {
+    const key = getNormalizedTargetKey(String(rawKey));
+    if (!key) return next(new AppError(`Invalid category "${rawKey}".`, 400));
+
+    // Accept "off" as an explicit way to disable a category.
+    if (rawValue === 'off' || rawValue === null || rawValue === '') {
+      limits[key] = 0;
+      continue;
+    }
+
+    const n = Number(rawValue);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      return next(new AppError(`Bypass limit for "${rawKey}" must be a whole number of 0 or more.`, 400));
+    }
+
+    // A student must always keep at least one real grade per category, so the
+    // cap can never reach the number of activities that category has.
+    const slots = countCategorySlots(classroom, key);
+    const maxAllowed = slots > 0 ? slots - 1 : 0;
+    if (slots > 0 && n > maxAllowed) {
+      return next(new AppError(
+        `"${rawKey}" only has ${slots} activit${slots === 1 ? 'y' : 'ies'}, so at most ${maxAllowed} can be bypassed - every student must keep one real grade.`,
+        400
+      ));
+    }
+
+    limits[key] = n;
+  }
+
+  classroom.bypassLimits = limits;
+  await classroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Bypass limits updated.',
+    data: { limits: toPlainBypassLimits(classroom.bypassLimits) }
   });
 });

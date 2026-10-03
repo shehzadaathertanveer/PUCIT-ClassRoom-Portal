@@ -1,6 +1,6 @@
 const express = require('express');
 const labMarkController = require('../controller/labMarkController');
-const { protect, restrictToLabStaff } = require('../middleware/authMiddleware');
+const { protect, restrictTo, restrictToLabStaff } = require('../middleware/authMiddleware');
 const Labroom = require('../models/labSchema');
 
 const router = express.Router();
@@ -47,6 +47,15 @@ router.route('/:labroomId/single').patch(restrictToLabStaff, labMarkController.u
 // Student Marksheet Routes
 router.route('/student/:labroomId/:studentId').get(authMarkStaffOrStudent, labMarkController.getStudentLabMarks);
 router.route('/:labroomId/student/:studentId').get(authMarkStaffOrStudent, labMarkController.getStudentLabMarks);
+
+// =============================================================================
+// BYPASS LIMIT SETTINGS
+// Staff can read the caps; only the course teacher or an admin may change them,
+// so a TA can see the rules but cannot raise their own budget.
+// =============================================================================
+
+router.route('/bypass-limits/:labroomId').get(restrictToLabStaff, labMarkController.getLabBypassLimits);
+router.route('/bypass-limits/:labroomId').put(restrictTo('TEACHER', 'ADMIN'), labMarkController.updateLabBypassLimits);
 
 // =============================================================================
 // HELPER MIDDLEWARES

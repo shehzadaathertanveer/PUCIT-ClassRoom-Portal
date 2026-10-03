@@ -4,6 +4,8 @@ const LabMark = require('../models/labMarkSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
+const { normaliseRoomColor } = require('../utils/roomColors');
+const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
 
 // Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
 const getRollDigits = (rollNo = '') => {
@@ -15,8 +17,13 @@ const getRollDigits = (rollNo = '') => {
 // =============================================================================
 // HELPER: Normalize Lab Target Keys Safely (Mapped to Expanded Lab Schema)
 // =============================================================================
+const LAB_CATEGORY_KEYS = ['labTasks','vivas','labTests','projects','quizzes','assignments','presentations','finalProject','labMids','labFinals','labActivities','labBehavior','labWorksheets','troubleshooting'];
 const getNormalizedLabTargetKey = (rawType = '') => {
-  const clean = rawType.trim().toLowerCase();
+  // Pass canonical schema keys straight through so the resolver is idempotent.
+  const raw = String(rawType || '').trim();
+  if (LAB_CATEGORY_KEYS.includes(raw)) return raw;
+  const clean = raw.toLowerCase();
+  if (LAB_CATEGORY_KEYS.includes(clean)) return clean;
   if (clean.includes('task')) return 'labTasks';
   if (clean.includes('viva')) return 'vivas';
   if (clean.includes('test')) return 'labTests';
@@ -172,6 +179,7 @@ exports.createLabroom = catchAsync(async (req, res, next) => {
     maxCapacity: maxCapacity ? Number(maxCapacity) : 40,
     teacher: assignedTeacherId,
     placeholderTeacherName: finalPlaceholder,
+    colorKey: normaliseRoomColor(req.body.colorKey),
   };
 
   const newLabroom = await Labroom.create(labroomData);
@@ -1327,9 +1335,100 @@ exports.getLabComplaints = catchAsync(async (req, res, next) => {
   const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
   if (!isStaff) return next(new AppError('Unauthorized to view lab feedback.', 403));
 
+  // Soft-deleted entries stay out of the default view but are recoverable by an
+  // admin asking for `includeDeleted`, which matters because these are anonymous:
+  // a mistaken delete destroys the only copy of who said what.
+  const includeDeleted = req.query.includeDeleted === 'true' && req.user.role === 'ADMIN';
+  const all = labroom.complaints || [];
+  const visible = includeDeleted ? all : all.filter((c) => !c.deletedAt);
+
+  const viewerId = String(req.user._id);
+  const unreadCount = all.filter(
+    (c) => !c.deletedAt && !(c.readBy || []).some((id) => String(id) === viewerId)
+  ).length;
+
+  let changed = false;
+  const complaints = visible.map((c) => {
+    const read = (c.readBy || []).some((id) => String(id) === viewerId);
+    if (!read) {
+      c.readBy.push(req.user._id);
+      changed = true;
+    }
+    return {
+      _id: c._id,
+      message: c.message,
+      createdAt: c.createdAt,
+      read: true,
+      deletedAt: c.deletedAt || null
+    };
+  });
+
+  // Opening the list marks everything visible as read for this viewer only, so
+  // each staff member keeps an independent unread count. The count is computed
+  // above, before that marking, so the badge reflects the pre-open state.
+  if (changed) await labroom.save();
+
   res.status(200).json({
     status: 'success',
-    data: { complaints: labroom.complaints || [] },
+    data: { complaints, unreadCount },
+  });
+});
+
+// PATCH /labrooms/:labroomId/complaints/read
+exports.markLabComplaintsRead = catchAsync(async (req, res, next) => {
+  const { labroomId } = req.params;
+  const { complaintIds } = req.body;
+
+  const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
+  if (!isStaff) return next(new AppError('Unauthorized to view lab feedback.', 403));
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const viewerId = String(req.user._id);
+  const wanted = Array.isArray(complaintIds) && complaintIds.length
+    ? new Set(complaintIds.map(String))
+    : null;
+
+  for (const c of labroom.complaints || []) {
+    if (c.deletedAt) continue;
+    if (wanted && !wanted.has(String(c._id))) continue;
+    if ((c.readBy || []).some((id) => String(id) === viewerId)) continue;
+    c.readBy.push(req.user._id);
+  }
+
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Feedback marked as read.',
+  });
+});
+
+// DELETE /labrooms/:labroomId/complaints/:complaintId  (admin only)
+exports.deleteLabComplaint = catchAsync(async (req, res, next) => {
+  const { labroomId, complaintId } = req.params;
+
+  // Removal is destructive and the entry is anonymous, so it is deliberately
+  // narrower than viewing: admins only.
+  if (req.user.role !== 'ADMIN') {
+    return next(new AppError('Only admins can delete anonymous feedback.', 403));
+  }
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const complaint = (labroom.complaints || []).id(complaintId);
+  if (!complaint) return next(new AppError('Feedback not found!', 404));
+
+  // Soft delete so the audit trail survives and the badge logic can filter it.
+  complaint.deletedAt = new Date();
+  complaint.deletedBy = req.user._id;
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Feedback deleted.',
   });
 });
 
@@ -1490,22 +1589,28 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId).populate('students', 'email personalNotificationEmail');
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
+  // The browser uploads attachments directly to Cloudinary, so the URL arrives
+  // client-controlled. Validate it here rather than trusting it.
+  const attachmentCheck = normaliseNoticeAttachment(attachment);
+  if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
+  const normalisedAttachment = attachmentCheck.attachment;
+
   const newNotice = {
     title: title.trim(),
     content: content.trim(),
     author: req.user._id,
     authorName: req.user.name,
-    attachment: (attachment && attachment.url) ? {
-      url: attachment.url,
-      public_id: attachment.public_id || '',
-      fileType: attachment.fileType || '',
-      fileName: attachment.fileName || ''
-    } : { url: '', public_id: '', fileType: '', fileName: '' },
+    attachment: normalisedAttachment,
     createdAt: new Date(),
   };
 
   labroom.notices.push(newNotice);
   await labroom.save();
+
+  // Re-read the persisted subdocument. Mongoose assigns _id during save, so the
+  // plain object we pushed has no _id - returning it would hand the client a
+  // notice it cannot later edit or delete.
+  const savedNotice = labroom.notices[labroom.notices.length - 1];
 
   if (labroom.students && labroom.students.length > 0) {
     const noticePromises = labroom.students.map(async (student) => {
@@ -1530,7 +1635,81 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
   res.status(201).json({
     status: 'success',
     message: 'Lab notice published successfully!',
-    data: { notice: newNotice },
+    data: { notice: savedNotice },
+  });
+});
+
+// Helper: Who may edit or delete a notice. Posting only needs "is staff", but
+// rewriting or removing somebody else's announcement is a stronger right, so it
+// is limited to the author, the labroom's assigned teacher, or an admin.
+const canManageLabNotice = (labroom, user) => {
+  if (user.role === 'ADMIN') return true;
+  if (labroom.teacher && labroom.teacher.toString() === user._id.toString()) return true;
+  return false;
+};
+
+// PATCH /labrooms/:labroomId/notices/:noticeId
+exports.updateLabNotice = catchAsync(async (req, res, next) => {
+  const { labroomId, noticeId } = req.params;
+  const { title, content, attachment } = req.body;
+
+  if (!title || !content) {
+    return next(new AppError('Notice title and content are required!', 400));
+  }
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const notice = labroom.notices.id(noticeId);
+  if (!notice) return next(new AppError('Notice not found!', 404));
+
+  const isAuthor = notice.author && notice.author.toString() === req.user._id.toString();
+  if (!isAuthor && !canManageLabNotice(labroom, req.user)) {
+    return next(new AppError('You can only edit your own notices.', 403));
+  }
+
+  notice.title = title.trim();
+  notice.content = content.trim();
+
+  // Only re-validate the attachment when one was actually supplied, so editing
+  // just the text does not require re-uploading the file.
+  if (attachment && typeof attachment === 'object' && attachment.url) {
+    const attachmentCheck = normaliseNoticeAttachment(attachment);
+    if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
+    notice.attachment = attachmentCheck.attachment;
+  }
+
+  notice.updatedAt = new Date();
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Lab notice updated successfully!',
+    data: { notice },
+  });
+});
+
+// DELETE /labrooms/:labroomId/notices/:noticeId
+exports.deleteLabNotice = catchAsync(async (req, res, next) => {
+  const { labroomId, noticeId } = req.params;
+
+  const labroom = await Labroom.findById(labroomId);
+  if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  const notice = labroom.notices.id(noticeId);
+  if (!notice) return next(new AppError('Notice not found!', 404));
+
+  const isAuthor = notice.author && notice.author.toString() === req.user._id.toString();
+  if (!isAuthor && !canManageLabNotice(labroom, req.user)) {
+    return next(new AppError('You can only delete your own notices.', 403));
+  }
+
+  notice.deleteOne();
+  await labroom.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Lab notice deleted successfully!',
   });
 });
 
@@ -1539,7 +1718,7 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const { labName, sectionPrefix, maxCapacity, placeholderTeacherName, sessionalActivities } = req.body;
+  const { labName, sectionPrefix, maxCapacity, placeholderTeacherName, sessionalActivities, colorKey } = req.body;
 
   const currentLabroom = await Labroom.findOne({ _id: labroomId, isActive: true }).select('sessionalActivities').lean();
   if (!currentLabroom) return next(new AppError('Active labroom not found!', 404));
@@ -1549,6 +1728,7 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   if (sectionPrefix) updateData.sectionPrefix = sectionPrefix.trim().toUpperCase();
   if (maxCapacity) updateData.maxCapacity = Number(maxCapacity);
   if (placeholderTeacherName !== undefined) updateData.placeholderTeacherName = placeholderTeacherName.trim();
+  if (colorKey !== undefined) updateData.colorKey = normaliseRoomColor(colorKey);
   if (Array.isArray(sessionalActivities)) {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
       category: a.category.trim(),
