@@ -522,14 +522,16 @@ select:-webkit-autofill {
   }
 
   /* Primary action: polished chrome bar.
-     Shading is inset box-shadow, so `bg-*` utilities re-tint it cleanly. */
+     Shading is inset box-shadow, so `bg-*` utilities re-tint it cleanly.
+     Note: on a LIGHT fill the edge must be DARK — a white border on a
+     light fill is invisible and the control reads as a flat square. */
   .lm-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     border-radius: 0.875rem;
-    border: 1px solid rgb(255 255 255 / 0.24);
+    border: 1px solid rgb(6 9 14 / 0.45);
     background-color: #aab9cb;
     color: #06090e;
     font-weight: 800;
@@ -538,9 +540,9 @@ select:-webkit-autofill {
     font-size: 0.8125rem;
     cursor: pointer;
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.9),
-      inset 0 14px 22px -14px rgb(255 255 255 / 0.7),
-      inset 0 -3px 0 0 rgb(0 0 0 / 0.24),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.55),
+      inset 0 14px 22px -14px rgb(255 255 255 / 0.45),
+      inset 0 -3px 0 0 rgb(0 0 0 / 0.35),
       0 10px 24px -12px rgb(0 0 0 / 0.9);
     transition:
       filter 0.18s ease,
@@ -552,9 +554,9 @@ select:-webkit-autofill {
   .lm-btn:hover:not(:disabled) {
     filter: brightness(1.08);
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.95),
-      inset 0 14px 22px -14px rgb(255 255 255 / 0.8),
-      inset 0 -3px 0 0 rgb(0 0 0 / 0.22),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.65),
+      inset 0 14px 22px -14px rgb(255 255 255 / 0.55),
+      inset 0 -3px 0 0 rgb(0 0 0 / 0.32),
       0 14px 30px -14px rgb(0 0 0 / 0.95);
   }
   .lm-btn:active:not(:disabled) {
@@ -642,14 +644,18 @@ select:-webkit-autofill {
     border-color: rgb(255 255 255 / 0.18);
     background-color: #151d27;
   }
+  /* Selected state flips to a light metal fill, so the edge and the
+     inset shading must go DARK. A white border here is invisible and
+     makes the selected tab look like a broken square. */
   .lm-chip-active,
   .lm-chip-active:hover {
     color: #06090e;
-    border-color: rgb(255 255 255 / 0.28);
+    border-color: rgb(6 9 14 / 0.4);
     background-color: #b3c1d1;
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.8),
-      inset 0 -2px 0 0 rgb(0 0 0 / 0.18),
+      inset 0 1px 0 0 rgb(255 255 255 / 0.5),
+      inset 0 -2px 0 0 rgb(0 0 0 / 0.3),
+      inset 0 12px 18px -14px rgb(255 255 255 / 0.5),
       0 8px 20px -12px rgb(0 0 0 / 0.9);
   }
 
@@ -668,13 +674,34 @@ select:-webkit-autofill {
     white-space: nowrap;
   }
 
-  /* Sizes an inline icon to the surrounding font-size */
+  /* Sizes an inline icon to the surrounding font-size, with a legibility
+     floor. Chips and eyebrows render at 11px, where a strict 1em icon
+     becomes an 11px speck that reads as a rendering glitch. */
   .lm-ico {
-    width: 1em;
-    height: 1em;
+    width: 1.15em;
+    height: 1.15em;
+    min-width: 14px;
+    min-height: 14px;
     flex: none;
     display: inline-block;
-    vertical-align: -0.125em;
+    vertical-align: -0.15em;
+  }
+
+  /* Icon tint inside controls.
+     Glyphs inherit the label colour, which is dimmed to ~70% so text stays
+     understated - that made every icon read as flat grey and dragged the UI
+     down. Lifting icons just above the label gives them a lit-metal look.
+     `:where()` keeps specificity at 0 so semantic per-icon `text-*` utilities
+     and any `!text-*` override still win. Kept off full brightness so icons
+     stay soft rather than looking like sharp vector stencils. */
+  :where(.lm-btn) :where(.lm-ico) {
+    color: rgb(8 13 20 / 0.82);
+  }
+  :where(.lm-chip) :where(.lm-ico) {
+    color: rgb(219 233 246 / 0.95);
+  }
+  :where(.lm-chip-active) :where(.lm-ico) {
+    color: rgb(8 13 20 / 0.82);
   }
 
   /* ---------- 5b. PAGE ACCENT IDENTITIES ----------
@@ -924,6 +951,39 @@ select:-webkit-autofill {
   @media (max-width: 768px) {
     .lm-table {
       min-width: 44rem;
+    }
+
+    /* Pin the identity columns so the marks input is usable without
+       losing track of whose row you are editing. Without this, a marks
+       table on a 360px screen forces you to scroll sideways and read
+       the roll number before every single entry.
+       Sticky cells need their own opaque fill because `td` is
+       transparent and the striping lives on `tr`. */
+    .lm-table.keep-col thead th:nth-child(1),
+    .lm-table.keep-col tbody td:nth-child(1) {
+      position: sticky;
+      left: 0;
+      z-index: 3;
+      background-color: #0e141c;
+    }
+    .lm-table.keep-col thead th:nth-child(2),
+    .lm-table.keep-col tbody td:nth-child(2) {
+      position: sticky;
+      left: 2.5rem;
+      z-index: 3;
+      background-color: #0e141c;
+      box-shadow: 10px 0 14px -10px rgb(0 0 0 / 0.9);
+    }
+    /* Corner cells sit above both axes of stickiness. */
+    .lm-table.keep-col thead th:nth-child(1),
+    .lm-table.keep-col thead th:nth-child(2) {
+      z-index: 4;
+      background-color: #121924;
+    }
+    /* Keep the pinned cells in step with row striping. */
+    .lm-table.keep-col tbody tr:nth-child(even) td:nth-child(1),
+    .lm-table.keep-col tbody tr:nth-child(even) td:nth-child(2) {
+      background-color: #121924;
     }
   }
 }

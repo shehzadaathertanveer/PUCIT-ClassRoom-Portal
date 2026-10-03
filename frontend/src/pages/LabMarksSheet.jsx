@@ -189,11 +189,15 @@ const LabMarksSheet = () => {
     }));
   };
 
-  // Clicking the marks field clears the -99 ungraded placeholder so a score can be typed.
+  // Clicking the marks field clears the ungraded sentinel so a score can be typed.
+  // -99 is the canonical "ungraded" value, but older sheets stored a bare 0 for
+  // ungraded work - clearing only on -99 left a 0 sitting in the box that had to
+  // be deleted by hand before typing anything.
   const handleMarkFocus = (studentId) => {
     setMarkInputs(prev => {
       const current = prev[studentId] || {};
-      if (String(current.obtainedMarks ?? '').trim() === UNGRADED_MARK) {
+      const val = String(current.obtainedMarks ?? '').trim();
+      if (val === UNGRADED_MARK || val === '0') {
         return {
           ...prev,
           [studentId]: { ...current, obtainedMarks: '', isAbsent: false }
@@ -536,7 +540,7 @@ const LabMarksSheet = () => {
 
             {/* Student Roster Table */}
             <div className="lm-scroll-x rounded-2xl border border-white/[0.06] shadow-chrome">
-              <table className="lm-table">
+                <table className="lm-table keep-col">
                 <thead>
                   <tr>
                     <th className="w-10">#</th>

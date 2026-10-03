@@ -597,7 +597,7 @@ const MarksSheet = () => {
 
             {/* Student Roster Table */}
             <div className="lm-scroll-x rounded-2xl border border-white/[0.06] shadow-chrome">
-              <table className="lm-table">
+                <table className="lm-table keep-col">
                 <thead>
                   <tr>
                     <th className="w-10">#</th>
