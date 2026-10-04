@@ -6,6 +6,7 @@ const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
 const { computeSessionalBreakdown } = require('../utils/sessionalWeights');
+const { getGradeAndGpa } = require('../utils/gradeScale');
 
 const STANDARD_CATEGORIES = [
   'quizzes', 
@@ -474,6 +475,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
 
   let sumSessional = 0, sumMids = 0, sumFinals = 0, sumOverall = 0;
   let sessionalCount = 0, midsCount = 0, finalsCount = 0, overallCount = 0;
+let sumGradePoints = 0, gradePointCount = 0;
 
   const tiers = { excellent: 0, good: 0, average: 0, needsImprovement: 0 };
   const gradingScheme = classroom.gradingScheme || { sessionalWeight: 25, midsWeight: 35, finalsWeight: 40 };
@@ -510,38 +512,73 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     }
 
     let midsPercentage = 0;
-    const hasMids = doc.mids && doc.mids.totalMarks > 0 && !doc.mids.isBypassed;
+    // `midsEntered` tracks whether the exam has actually been keyed in. It is kept
+    // separate from the weighting decision below because the class average for a
+    // component should only average students who were assessed on it, while the
+    // overall percentage must still charge an ungraded exam as 0.
+    const midsEntered = !!(doc.mids && doc.mids.totalMarks > 0);
+    const hasMids = midsEntered && !doc.mids.isBypassed;
     if (hasMids) {
       midsPercentage = doc.mids.isAbsent ? 0 : ((Number(doc.mids.obtainedMarks) || 0) / doc.mids.totalMarks) * 100;
-      sumMids += midsPercentage; midsCount++;
     }
+    // Averaged over every non-bypassed student, with an ungraded exam contributing
+    // 0 - matching how the overall percentage now treats it. Averaging only the
+    // students who were assessed made the component average disagree with the class
+    // overall average.
+    if (!doc.mids?.isBypassed) { sumMids += midsPercentage; midsCount++; }
 
     let finalsPercentage = 0;
-    const hasFinals = doc.finals && doc.finals.totalMarks > 0 && !doc.finals.isBypassed;
+    const finalsEntered = !!(doc.finals && doc.finals.totalMarks > 0);
+    const hasFinals = finalsEntered && !doc.finals.isBypassed;
     if (hasFinals) {
       finalsPercentage = doc.finals.isAbsent ? 0 : ((Number(doc.finals.obtainedMarks) || 0) / doc.finals.totalMarks) * 100;
-      sumFinals += finalsPercentage; finalsCount++;
     }
+    if (!doc.finals?.isBypassed) { sumFinals += finalsPercentage; finalsCount++; }
 
     const sW = Number(gradingScheme.sessionalWeight) || 25;
     const mW = Number(gradingScheme.midsWeight) || 35;
     const fW = Number(gradingScheme.finalsWeight) || 40;
 
-    // Normalise by the weights actually in play, matching markSchema's
-    // pre-save hook. Dividing by a flat 100 meant a student with perfect
-    // sessionals and no finals entered ranked at 25% here while being stored
-    // as 100% - the letter grade and the leaderboard position disagreed.
+    // The grading scheme is the fixed 100-mark split the teacher set up, so all
+    // three categories always stay in the denominator and an exam that has not
+    // been entered yet scores 0%. Normalising by "whatever this student happens
+    // to have entered" inflated anyone part-way through grading: perfect
+    // sessionals with no finals entered reported 100% overall instead of
+    // 25 (25 sessional marks out of 100). It also made a score DROP as more
+    // marks were added. The weights add up to 100 by construction, so dividing
+    // by activeWeightSum is just a guard against a malformed scheme.
+    //
+    // Bypassing is the one exception: a bypassed exam is dropped from BOTH sides so
+    // it neither helps nor hurts. Mids and finals are otherwise charged at 0% while
+    // ungraded, matching how configured sessional activities already behave. Gating
+    // them on hasMids/hasFinals made an ungraded exam vanish from the denominator,
+    // so a student with perfect sessionals and no finals entered showed 100% overall
+    // and then dropped the moment finals were keyed in.
     let weightedSum = 0;
     let activeWeightSum = 0;
-    if (sessionalBreakdown.hasSessionals) { weightedSum += sessionalPercentage * sW; activeWeightSum += sW; }
-    if (hasMids) { weightedSum += midsPercentage * mW; activeWeightSum += mW; }
-    if (hasFinals) { weightedSum += finalsPercentage * fW; activeWeightSum += fW; }
+    if (sW > 0) { weightedSum += sessionalPercentage * sW; activeWeightSum += sW; }
+    if (mW > 0 && !doc.mids?.isBypassed) { weightedSum += midsPercentage * mW; activeWeightSum += mW; }
+    if (fW > 0 && !doc.finals?.isBypassed) { weightedSum += finalsPercentage * fW; activeWeightSum += fW; }
 
     const overallPercentage = activeWeightSum > 0 ? weightedSum / activeWeightSum : 0;
     sumOverall += overallPercentage; overallCount++;
 
-    // Tier boundaries aligned with getPucitLetterGrade in markSchema.js so a
-    // student's tier always agrees with the grade shown to them.
+    // A classroom is worth a fixed 100 solid marks, so the final marks achieved
+    // is the overall percentage resolved against 100. Carried explicitly so the
+    // UI and any export can show "72.25/100" rather than leaving the reader to
+    // work it out from the percentage.
+    const overallMarks = Number(overallPercentage.toFixed(2));
+
+    // Grade letter and grade point for this student, from the shared scale. Same
+    // rule the schema's pre-save hook applied, so the live leaderboard and the
+    // stored transcript always show the same grade.
+    const hasFinalsOrMids = (doc.finals?.totalMarks > 0) || (doc.mids?.totalMarks > 0);
+    const graded = getGradeAndGpa(overallPercentage, hasFinalsOrMids);
+    sumGradePoints += graded.gradePoint;
+    gradePointCount++;
+
+    // Tier boundaries aligned with the grade scale so a student's tier always
+    // agrees with the grade shown to them.
     if (overallPercentage >= 80) tiers.excellent++;
     else if (overallPercentage >= 65) tiers.good++;
     else if (overallPercentage >= 50) tiers.average++;
@@ -553,6 +590,10 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       midsPercentage: Number(midsPercentage.toFixed(2)),
       finalsPercentage: Number(finalsPercentage.toFixed(2)),
       overallPercentage: Number(overallPercentage.toFixed(2)),
+      overallMarks,
+      letterGrade: graded.grade,
+      gradePoint: graded.gradePoint,
+      isFailing: graded.isFailing,
       marksDoc: doc
     };
   });
@@ -564,6 +605,14 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     midsPercentage: midsCount > 0 ? Number((sumMids / midsCount).toFixed(2)) : 0,
     finalsPercentage: finalsCount > 0 ? Number((sumFinals / finalsCount).toFixed(2)) : 0,
     overallPercentage: overallCount > 0 ? Number((sumOverall / overallCount).toFixed(2)) : 0,
+    // Class average expressed as marks out of the 100 solid marks the course is
+    // worth, so staff can read "72.25/100" rather than only a percentage.
+    overallMarks: overallCount > 0 ? Number((sumOverall / overallCount).toFixed(2)) : 0,
+    // Class average grade point, so staff see the cohort's GPA alongside the
+    // average percentage rather than having to average letters by hand.
+    averageGradePoint: gradePointCount > 0 ? Number((sumGradePoints / gradePointCount).toFixed(2)) : 0,
+    gradePointScale: '4.00',
+    totalCourseMarks: 100,
   };
 
   // ===========================================================================

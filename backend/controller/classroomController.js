@@ -5,6 +5,8 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 const { normaliseRoomColor } = require('../utils/roomColors');
+const { recalculateClassroomGrades, activitiesChanged } = require('../utils/recalculateGrades');
+const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
 
 // Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
@@ -1179,7 +1181,11 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
   const { className, sectionPrefix, maxCapacity, placeholderTeacherName, gradingScheme, sessionalActivities, colorKey } = req.body;
 
-  const currentClassroom = await Classroom.findOne({ _id: classroomId, isActive: true }).select('sessionalActivities').lean();
+  // gradingScheme is selected as well so a weight change can be detected and trigger
+  // recalculation of every stored grade.
+  const currentClassroom = await Classroom.findOne({ _id: classroomId, isActive: true })
+    .select('sessionalActivities gradingScheme')
+    .lean();
   if (!currentClassroom) return next(new AppError('Active classroom not found!', 404));
 
   const updateData = {};
@@ -1187,7 +1193,17 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
   if (sectionPrefix) updateData.sectionPrefix = sectionPrefix.trim().toUpperCase();
   if (maxCapacity) updateData.maxCapacity = Number(maxCapacity);
   if (placeholderTeacherName !== undefined) updateData.placeholderTeacherName = placeholderTeacherName.trim();
-  if (gradingScheme) updateData.gradingScheme = gradingScheme;
+  if (gradingScheme) {
+    // Normalised to the same shape the rest of the code reads, so comparing it
+    // against the stored scheme detects a real weight change rather than a
+    // difference in field order or string-vs-number typing.
+    const { sessionalWeight = 25, midsWeight = 35, finalsWeight = 40 } = gradingScheme;
+    updateData.gradingScheme = {
+      sessionalWeight: Number(sessionalWeight),
+      midsWeight: Number(midsWeight),
+      finalsWeight: Number(finalsWeight)
+    };
+  }
   if (colorKey !== undefined) updateData.colorKey = normaliseRoomColor(colorKey);
   if (Array.isArray(sessionalActivities)) {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
@@ -1195,16 +1211,32 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
       allocatedMarks: Number(a.allocatedMarks) || 0
     }));
 
-    // Migrate existing marks when an activity's type changed (edit-in-place).
-    const oldKeys = (currentClassroom.sessionalActivities || []).map(a => getNormalizedTargetKey(a.category));
-    const newKeys = updateData.sessionalActivities.map(a => getNormalizedTargetKey(a.category));
+    // Carry marks over only for a genuine rename. Pairing by index (the previous
+    // behaviour) moved marks into the wrong activity whenever a row was added,
+    // removed or reordered.
+    const migrations = planActivityMigrations(
+      currentClassroom.sessionalActivities,
+      updateData.sessionalActivities,
+      getNormalizedTargetKey
+    );
 
-    await Promise.all(oldKeys.map((oldKey, idx) => {
-      const newKey = newKeys[idx];
-      if (!newKey || newKey === oldKey) return null;
-      return migrateClassroomActivityMarks(classroomId, oldKey, newKey);
-    }));
+    for (const { fromKey, toKey } of migrations) {
+      await migrateClassroomActivityMarks(classroomId, fromKey, toKey);
+    }
   }
+
+  // Set when anything that feeds the grade maths changed - the activity list, an
+  // activity's weightage, or the sessional/mids/finals split - so every stored
+  // percentage, grade and grade point can be re-derived from the new weighting.
+  // This must run AFTER the update below; recalculating first would read the old
+  // weights and change nothing.
+  const activitiesWereEdited =
+    Array.isArray(updateData.sessionalActivities) &&
+    activitiesChanged(currentClassroom.sessionalActivities, updateData.sessionalActivities);
+  const schemeWasEdited =
+    !!updateData.gradingScheme &&
+    JSON.stringify(updateData.gradingScheme) !== JSON.stringify(currentClassroom.gradingScheme);
+  const shouldRecalculateGrades = activitiesWereEdited || schemeWasEdited;
 
   const classroom = await Classroom.findOneAndUpdate(
     { _id: classroomId, isActive: true },
@@ -1217,6 +1249,17 @@ exports.updateClassroomSettings = catchAsync(async (req, res, next) => {
     .populate('createdBy', 'name email role');
 
   if (!classroom) return next(new AppError('Active classroom not found!', 404));
+
+  // Weights are now persisted, so every stored percentage and letter grade can be
+  // re-derived from the new weighting.
+  if (shouldRecalculateGrades) {
+    const { updated, failed } = await recalculateClassroomGrades(classroomId);
+    if (failed > 0) {
+      console.warn(
+        `updateClassroomSettings: ${failed} of ${updated + failed} marks could not be recalculated for classroom ${classroomId}`
+      );
+    }
+  }
 
   res.status(200).json({
     status: 'success',

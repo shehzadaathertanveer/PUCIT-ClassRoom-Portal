@@ -1,21 +1,33 @@
 /**
- * Single source of truth for a labroom's overall percentage.
+ * Single source of truth for a labroom's overall percentage and final marks.
  *
  * Unlike a classroom (which has a fixed Sessionals/Mids/Finals split), a labroom
  * lets the teacher configure ANY set of activities they actually conduct - lab
- * tasks, quizzes, vivas, lab mids, lab finals - and allocate the 100 marks
- * across them however they like. So there is no fixed three-way split here; the
- * overall is a weighted blend over whatever was configured:
+ * tasks, quizzes, vivas, presentations, lab mids, lab finals - and split the
+ * total across them however they like. There is no fixed three-way split here.
  *
- *   overall% = SUM(categoryPct * allocatedMarks) / SUM(allocatedMarks)
+ * What the teacher allocates is NOT marks, it is each activity's PERCENTAGE of
+ * the room's total solid marks, and the percentages are meant to add up to 100:
  *
- * where each categoryPct is that category's marks combined, out of 100.
+ *   lab task 45% + lab quiz 7% + ... = 100%
  *
- * The weighting matters most when raw mark counts and allocated weights point
- * in different directions. A lab with Lab Tasks allocated 60 but worth 100 raw
- * marks, and Lab Quizzes allocated 40 but worth 10 raw marks, is NOT a 90/10
- * split by marks. Pooling the raw marks instead of blending by weight is what
- * made the downloaded result sheet disagree with the on-screen leaderboard.
+ *   overall%    = SUM(categoryPct * weight) / SUM(weight)
+ *   final marks = overall% / 100 * labroom.totalMarks
+ *
+ * totalMarks defaults to 100 but is editable, because a lab can be worth 100,
+ * 50 or 40 solid marks. The percentage is unaffected by that choice - only the
+ * marks the student is awarded scale with it.
+ *
+ * A CONFIGURED activity always joins the blend, scoring 0% until its marks are
+ * entered, exactly like a classroom's sessional activities. Weights are fixed
+ * when the room is created, so this keeps a student's score climbing as marks
+ * arrive instead of dropping when the next activity is filled in.
+ *
+ * The weighting matters most when raw mark counts and allocated percentages
+ * point in different directions. A lab with Lab Tasks allocated 45% but worth
+ * 100 raw marks, and Lab Quizzes allocated 7% but worth 10 raw marks, is NOT a
+ * ~91/9 split by marks. Pooling the raw marks instead of blending by weight is
+ * what made the downloaded result sheet disagree with the on-screen leaderboard.
  */
 
 // Must stay in sync with VALID_STANDARD_CATEGORIES in labMarkController.
@@ -68,10 +80,10 @@ const sumCategory = (entries) => {
 };
 
 /**
- * @param {Object} labroom  The labroom document (needs sessionalActivities).
+ * @param {Object} labroom  The labroom document (needs sessionalActivities, optional totalMarks).
  * @param {Object} doc  A LabMark document for one student.
- * @returns {{ percentage:number, marksObtained:number, marksPossible:number,
- *             hasWeights:boolean, categoryPercentages:Object<string,number> }}
+ * @returns {{ percentage:number, marksObtained:number, marksPossible:number, totalMarks:number,
+ *             finalMarks:number, hasWeights:boolean, categoryPercentages:Object<string,number> }}
  */
 const computeLabWeightedPercentage = (labroom, doc) => {
   const weightByKey = {};
@@ -84,10 +96,16 @@ const computeLabWeightedPercentage = (labroom, doc) => {
   const configuredWeights = Object.values(weightByKey);
   const hasWeights = configuredWeights.length > 0;
 
-  // Categories the teacher never gave a weight to used to fall back to 0, which
-  // silently dropped them from the denominator - a student graded only in those
-  // categories scored 0% and appeared to fail. Give them the mean configured
-  // weight instead so they still count.
+  // The room's total solid marks. Defaults to 100 so a lab that has never had
+  // its total edited keeps behaving as a 100-mark lab.
+  const totalMarks = Number(labroom && labroom.totalMarks) > 0
+    ? Number(labroom.totalMarks)
+    : 100;
+
+  // Categories the teacher never gave a percentage to used to fall back to 0,
+  // which silently dropped them from the denominator - a student graded only in
+  // those categories scored 0% and appeared to fail. Give them the mean
+  // configured percentage instead so they still count.
   const meanConfiguredWeight = hasWeights
     ? configuredWeights.reduce((a, b) => a + b, 0) / configuredWeights.length
     : 0;
@@ -102,16 +120,20 @@ const computeLabWeightedPercentage = (labroom, doc) => {
     const { obtained, possible } = sumCategory(doc ? doc[targetKey] : null);
     marksObtained += obtained;
     marksPossible += possible;
-    if (possible <= 0) return;
 
-    const catPct = Number(((obtained / possible) * 100).toFixed(2));
+    const hasEntries = possible > 0;
+    const isConfigured = weightByKey[targetKey] > 0;
+
+    // Configured activities always count, so an activity whose marks have not
+    // been entered yet scores 0% while still holding its share of the total.
+    // An activity the teacher never configured and never assessed is ignored.
+    if (!hasEntries && !isConfigured) return;
+
+    const catPct = hasEntries ? Number(((obtained / possible) * 100).toFixed(2)) : 0;
     categoryPercentages[targetKey] = catPct;
 
-    // Only categories this student was actually assessed on enter the weighted
-    // denominator. Folding in a category they have no marks for would add its
-    // weight while contributing a 0% numerator, dragging the score toward zero.
     if (hasWeights) {
-      const w = weightByKey[targetKey] > 0 ? weightByKey[targetKey] : meanConfiguredWeight;
+      const w = isConfigured ? weightByKey[targetKey] : meanConfiguredWeight;
       if (w > 0) {
         weightedScore += catPct * w;
         weightTotal += w;
@@ -123,10 +145,16 @@ const computeLabWeightedPercentage = (labroom, doc) => {
     ? (weightTotal > 0 ? Number((weightedScore / weightTotal).toFixed(2)) : 0)
     : (marksPossible > 0 ? Number(((marksObtained / marksPossible) * 100).toFixed(2)) : 0);
 
+  // Percentage -> marks out of the room's (editable) total. A student at 70%
+  // in a 50-mark lab is awarded 35 of 50.
+  const finalMarks = Number(((percentage / 100) * totalMarks).toFixed(2));
+
   return {
     percentage,
     marksObtained,
     marksPossible,
+    totalMarks,
+    finalMarks,
     hasWeights,
     categoryPercentages
   };

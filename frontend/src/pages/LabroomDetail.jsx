@@ -35,6 +35,7 @@ import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import NoticeCard from '../components/NoticeCard';
 import BypassLimitsPanel from '../components/BypassLimitsPanel';
+import GradeBadge from '../components/GradeBadge';
 import RoomColorPicker from '../components/RoomColorPicker';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
@@ -154,6 +155,9 @@ const LabroomDetail = () => {
   const [editLabName, setEditLabName] = useState('');
   const [editSectionPrefix, setEditSectionPrefix] = useState('');
   const [editMaxCapacity, setEditMaxCapacity] = useState(40);
+  // Total solid marks this lab is worth. Activity weights below are percentages
+  // OF this number, so it only rescales the marks awarded, never the percentage.
+  const [editTotalMarks, setEditTotalMarks] = useState(100);
   const [editPlaceholderTeacher, setEditPlaceholderTeacher] = useState('');
   const [editColorKey, setEditColorKey] = useState(DEFAULT_ROOM_COLOR);
   const [editSessionalActivities, setEditSessionalActivities] = useState([]);
@@ -197,6 +201,7 @@ const LabroomDetail = () => {
       setEditLabName(fetchedLab.labName || '');
       setEditSectionPrefix(fetchedLab.sectionPrefix || '');
       setEditMaxCapacity(fetchedLab.maxCapacity || 40);
+      setEditTotalMarks(fetchedLab.totalMarks || 100);
       setEditPlaceholderTeacher(fetchedLab.placeholderTeacherName || '');
     setEditColorKey(fetchedLab.colorKey || DEFAULT_ROOM_COLOR);
 
@@ -492,6 +497,7 @@ const LabroomDetail = () => {
         labName: editLabName.trim(),
         sectionPrefix: editSectionPrefix.trim().toUpperCase(),
         maxCapacity: Number(editMaxCapacity),
+        totalMarks: Number(editTotalMarks) || 100,
         placeholderTeacherName: editPlaceholderTeacher.trim(),
         colorKey: editColorKey,
         sessionalActivities: editSessionalActivities.map(a => ({
@@ -681,76 +687,42 @@ const LabroomDetail = () => {
     }
   };
 
-  const handleExportExcelSheet = () => {
+  const [isExportingSheet, setIsExportingSheet] = useState(false);
+
+  // Fetches the result sheet from the server rather than rebuilding it in the
+  // browser. The client-side version only emitted the activity columns and the
+  // overall percentage, so total obtained marks, grade and grade point were missing
+  // even though the backend already computed them correctly. One source of truth.
+  const handleExportExcelSheet = async () => {
+    if (isExportingSheet) return;
+    setIsExportingSheet(true);
     try {
-      let rankings = labAnalytics?.rankings || [];
-      if (rankings.length === 0) {
-        showToast('No student ranking data available to export.', 'error');
-        return;
-      }
-
-      let allEvaluationItems = [];
-      sessionalActivitiesList.forEach(act => {
-        const targetKey = getCategoryTargetKey(act.category);
-        const items = labroom[targetKey] || [];
-        items.forEach(item => {
-          allEvaluationItems.push({
-            targetKey,
-            title: item.title,
-            totalMarks: item.totalMarks || 10
-          });
-        });
+      const res = await API.get(`/labmarks/export-excel/${labroomId}`, {
+        responseType: 'blob'
       });
 
-      let headers = ['Roll Number', 'Student Name'];
-      allEvaluationItems.forEach(ev => {
-        headers.push(`${ev.title} (${ev.totalMarks})`);
-      });
-      headers.push('Overall Percentage');
+      // Prefer the filename the server chose so it stays in step with the room.
+      const disposition = res.headers['content-disposition'] || '';
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      const fileName = match
+        ? match[1]
+        : `${labroom?.labName || 'Lab'}_${labroom?.sectionPrefix || ''}_Result_Sheet.csv`;
 
-      let csvRows = [headers.join(',')];
-
-      const sortedRankings = [...rankings].sort((a, b) => {
-        const rollA = (a.student?.rollNo || '').toString().toLowerCase();
-        const rollB = (b.student?.rollNo || '').toString().toLowerCase();
-        return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
-      });
-
-      sortedRankings.forEach((r) => {
-        const student = r.student || {};
-        const marksDoc = r.marksDoc || r;
-        const row = [
-          `"${student.rollNo || 'N/A'}"`,
-          `"${student.name || 'Unknown'}"`
-        ];
-
-        allEvaluationItems.forEach(ev => {
-          const scoresList = marksDoc[ev.targetKey] || r[ev.targetKey] || [];
-          const match = scoresList.find(s => s.title?.trim().toLowerCase() === ev.title?.trim().toLowerCase());
-          row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
-        });
-
-        const calcObj = getStudentAnalyticsData();
-        const overallPct = r.overallPercentage || r.percentage || calcObj.overall || 0;
-        row.push(`${Number(overallPct).toFixed(2)}%`);
-
-        csvRows.push(row.join(','));
-      });
-
-      const csvString = csvRows.join('\n');
-      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8;' }));
       const link = document.createElement('a');
       link.setAttribute('href', url);
-      link.setAttribute('download', `${labroom.labName}_${labroom.sectionPrefix}_Result_Sheet.csv`);
+      link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
-      showToast('Excel/CSV sheet exported successfully!');
+      showToast('Result sheet exported successfully!');
     } catch (err) {
       console.error(err);
-      showToast('Failed to export lab results file.', 'error');
+      showToast(err.response?.data?.message || 'Failed to export lab results file.', 'error');
+    } finally {
+      setIsExportingSheet(false);
     }
   };
 
@@ -821,7 +793,7 @@ const LabroomDetail = () => {
 //      side of the ratio. Folding its weight into the denominator while adding a
 //      0% numerator made early-term students look like they had failed.
   const calculateStudentPercentages = (markDoc) => {
-    if (!markDoc) return { overall: '0.00', categories: {} };
+    if (!markDoc) return { overall: '0.00', letterGrade: '', gradePoint: 0, categories: {} };
 
     let totalActiveWeight = 0;
     let weightedEarnedSum = 0;
@@ -857,6 +829,11 @@ const LabroomDetail = () => {
     const overallPct = totalActiveWeight > 0 ? (weightedEarnedSum / totalActiveWeight) : 0;
     return {
       overall: overallPct.toFixed(2),
+      // Best-effort local fallback only, for the rare case where the analytics row
+      // is missing (e.g. offline). The server value wins whenever it is present,
+      // so the two can never disagree about a graded student.
+      letterGrade: markDoc.letterGrade || '',
+      gradePoint: Number(markDoc.gradePoint ?? 0) || 0,
       categories: catPercentages
     };
   };
@@ -947,6 +924,32 @@ const LabroomDetail = () => {
     return graded;
   };
 
+  // The lab's allocated total solid marks, and the sum of the configured activity
+  // percentages. Teachers are not forced to make the percentages add up to
+  // exactly 100, so every contribution below is expressed relative to whatever
+  // they actually entered - that keeps the displayed marks reconciling with the
+  // overall percentage instead of quietly disagreeing with it.
+  const labTotalMarks = Number(labroom?.totalMarks) || 100;
+  const labWeightTotal = (() => {
+    const sum = (Array.isArray(labroom?.sessionalActivities) ? labroom.sessionalActivities : [])
+      .reduce((acc, a) => acc + (Number(a.allocatedMarks) || 0), 0);
+    return sum > 0 ? sum : 100;
+  })();
+
+  // A student's final marks out of the lab total. The analytics row carries them
+  // already; derive from the row's percentage if an older payload is missing the
+  // field. Reads only from `rankings` so it stays safe to evaluate here, before
+  // studentAnalyticsData is declared further down the component body.
+  const studentLabMarks = (() => {
+    const rankings = labAnalytics?.rankings || [];
+    const me = rankings.find(r => (r.student?._id || r.student)?.toString() === user?._id?.toString());
+    if (!me) return (0).toFixed(2);
+    const rowTotal = Number(me.totalMarks) || labTotalMarks;
+    if (me.finalMarks !== undefined && me.finalMarks !== null) return Number(me.finalMarks).toFixed(2);
+    const pct = Number(me.overallPercentage ?? me.percentage ?? 0);
+    return ((pct / 100) * rowTotal).toFixed(2);
+  })();
+
   const getCategoryClassAverage = (targetKey, act) => {
     const ca = labAnalytics?.classAverages || {};
     const directKey = targetKey + 'Percentage';
@@ -1033,6 +1036,10 @@ const LabroomDetail = () => {
 
     return {
       overall: Number(overallVal).toFixed(2),
+      // Server-authoritative, with the stored doc as a fallback for records saved
+      // before lab grades were cached.
+      letterGrade: found.letterGrade || doc.letterGrade || '',
+      gradePoint: Number(found.gradePoint ?? doc.gradePoint ?? 0) || 0,
       categories: catPercentages
     };
   };
@@ -1091,6 +1098,10 @@ const LabroomDetail = () => {
       email: student?.email || studentsInLab?.email || '',
       rank: foundIdx >= 0 ? `#${foundIdx + 1}` : 'Pending',
       overall: Number(found?.overallPercentage || found?.percentage || categPcts.overall || 0).toFixed(2),
+      // Server-authoritative grade point, with the stored doc as a fallback for
+      // records saved before lab grades were cached.
+      letterGrade: found?.letterGrade || marksDoc.letterGrade || '',
+      gradePoint: Number(found?.gradePoint ?? marksDoc.gradePoint ?? 0) || 0,
       categories: categPcts.categories,
       marksDoc
     });
@@ -1184,9 +1195,13 @@ const LabroomDetail = () => {
                     </span>
                   )}
                 </button>
-                <button onClick={handleExportExcelSheet} className="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30">
+                <button
+                  onClick={handleExportExcelSheet}
+                  disabled={isExportingSheet}
+                  className="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
                   <ChartBarIcon className="w-4 h-4" />
-                  Export Excel
+                  {isExportingSheet ? 'Preparing...' : 'Export Result Sheet'}
                 </button>
               </>
             )}
@@ -1364,6 +1379,12 @@ const LabroomDetail = () => {
                     <div className="lm-card p-4 sm:p-5 space-y-2 rounded-2xl border-blue-500/30">
                       <p className="text-xs text-blue-400 uppercase font-extrabold tracking-widest">Overall Lab Percentage</p>
                       <p className="text-3xl sm:text-4xl lg:text-5xl font-black font-mono text-blue-300 tracking-tight">{studentAnalyticsData.overall}%</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
+                        Final marks: {studentLabMarks}/{labTotalMarks}
+                      </p>
+                      <div className="pt-1">
+                        <GradeBadge grade={studentAnalyticsData.letterGrade} gradePoint={studentAnalyticsData.gradePoint} />
+                      </div>
                     </div>
                     <div className="lm-card p-4 sm:p-5 space-y-2 rounded-2xl border-cyan-500/30">
                       <p className="text-xs text-cyan-400 uppercase font-extrabold tracking-widest">Lab Standing & Rank</p>
@@ -1375,12 +1396,22 @@ const LabroomDetail = () => {
                     <p className="text-xs font-bold uppercase text-slate-300">Activity Category Breakdown</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {sessionalActivitiesList.map((act, i) => {
-                        const catPct = studentAnalyticsData.categories?.[act.category] || '0.00';
+                        const catPct = Number(studentAnalyticsData.categories?.[act.category] || 0);
+                        const weight = Number(act.allocatedMarks) || 0;
+                        // The activity's own percentage resolved against its share
+                        // of the lab total, i.e. how many of the lab's marks it
+                        // actually contributed.
+                        const contrib = (labTotalMarks * (catPct / 100) * (weight / labWeightTotal));
                         return (
                           <div key={i} className="lm-card-flat p-3.5 flex flex-col justify-between space-y-2">
                             <span className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold truncate">{act.category}</span>
-                            <span className="font-mono font-black text-emerald-400 text-xl sm:text-2xl">{catPct}%</span>
-                            <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono">Weight: {act.allocatedMarks} Marks</span>
+                            <span className="font-mono font-black text-emerald-400 text-xl sm:text-2xl">{catPct.toFixed(2)}%</span>
+                            <span className="text-[9px] sm:text-[10px] text-slate-500 font-mono">
+                              weight {weight}% of {labTotalMarks} marks
+                            </span>
+                            <span className="text-[9px] sm:text-[10px] text-slate-300 font-mono">
+                              contributes {contrib.toFixed(2)}/{(labTotalMarks * weight / labWeightTotal).toFixed(2)} marks
+                            </span>
                           </div>
                         );
                       })}
@@ -1388,11 +1419,25 @@ const LabroomDetail = () => {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+<div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="lm-inset p-4 space-y-1">
                       <p className="text-[10px] sm:text-xs text-blue-400 uppercase font-extrabold tracking-wider">Overall Lab Average %</p>
                       <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-blue-300 break-words">{labAnalytics?.classAverages?.overallLabPercentage ?? labAnalytics?.classAverages?.overallPercentage ?? labAnalytics?.averageOverallPercentage ?? '0.00'}%</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
+                        Class average marks: {Number(labAnalytics?.classAverages?.overallMarks ?? 0).toFixed(2)}/{Number(labroom?.totalMarks) || 100}
+                      </p>
+                    </div>
+                    {/* Cohort GPA on the same 4.00 scale as the classroom, so a
+                        student's practical and theory grade points can be compared
+                        or averaged directly. */}
+                    <div className="lm-inset p-4 space-y-1">
+                      <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Class Average GPA</p>
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-slate-100">
+                        {Number(labAnalytics?.classAverages?.averageGradePoint ?? 0).toFixed(2)}
+                        <span className="text-[10px] sm:text-xs text-slate-500 font-bold"> / 4.00</span>
+                      </p>
+                      <p className="text-[10px] sm:text-xs text-slate-500 font-mono">Mean of student grade points</p>
                     </div>
                     <div className="lm-inset p-4 space-y-1">
                       <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold">Evaluated Students</p>
@@ -1408,11 +1453,19 @@ const LabroomDetail = () => {
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
                       {sessionalActivitiesList.map((act, i) => {
                         const targetKey = getCategoryTargetKey(act.category);
-                        const avgVal = getCategoryClassAverage(targetKey, act);
+                        const avgVal = Number(getCategoryClassAverage(targetKey, act)) || 0;
+                        const weight = Number(act.allocatedMarks) || 0;
+                        const contrib = (labTotalMarks * (avgVal / 100) * (weight / labWeightTotal));
                         return (
-                          <div key={i} className="lm-card-flat p-2.5 min-w-0">
+                          <div key={i} className="lm-card-flat p-2.5 min-w-0 space-y-0.5">
                             <span className="text-[10px] sm:text-xs text-slate-400 block uppercase truncate">{act.category} Avg</span>
-                            <span className="font-mono font-bold text-blue-400 text-sm">{Number(avgVal).toFixed(2)}%</span>
+                            <span className="font-mono font-bold text-blue-400 text-sm">{avgVal.toFixed(2)}%</span>
+                            <span className="block text-[9px] sm:text-[10px] text-slate-500 font-mono">
+                              weight {weight}% of {labTotalMarks}
+                            </span>
+                            <span className="block text-[9px] sm:text-[10px] text-slate-300 font-mono">
+                              class avg {contrib.toFixed(2)}/{(labTotalMarks * weight / labWeightTotal).toFixed(2)} marks
+                            </span>
                           </div>
                         );
                       })}
@@ -1517,13 +1570,14 @@ const LabroomDetail = () => {
                     <th>Rank</th>
                     <th>Roll Number</th>
                     <th>Student Name</th>
+                    <th>Grade / GPA</th>
                     <th className="text-right">Score Percentage</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getSortedLeaderboard().length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="text-center py-10 text-slate-500 italic">No lab evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
+                      <td colSpan="5" className="text-center py-10 text-slate-500 italic">No lab evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
                     </tr>
                   ) : (
                     getSortedLeaderboard().map((entry, idx) => {
@@ -1557,8 +1611,16 @@ const LabroomDetail = () => {
                               )}
                             </div>
                           </td>
+                          <td className="whitespace-nowrap">
+                            <GradeBadge grade={entry.letterGrade || doc.letterGrade} gradePoint={entry.gradePoint ?? doc.gradePoint ?? 0} compact />
+                          </td>
                           <td className="font-mono font-extrabold text-emerald-400 text-right whitespace-nowrap">
                             {Number(currentScore || 0).toFixed(2)}%
+                            {leaderboardFilter === 'overall' && (
+                              <span className="block text-[9px] sm:text-[10px] text-slate-400 font-normal">
+                                {Number(entry.finalMarks ?? (Number(currentScore || 0) / 100) * (Number(labroom?.totalMarks) || 100)).toFixed(2)}/{Number(entry.totalMarks) || Number(labroom?.totalMarks) || 100} marks
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1581,7 +1643,7 @@ const LabroomDetail = () => {
             <div key={cat} className="lm-card p-4 sm:p-6 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
                 <h3 className="text-sm sm:text-base font-extrabold text-slate-100 uppercase tracking-wider min-w-0 break-words">{cat} Activity Portal</h3>
-                <span className="text-xs font-mono text-slate-400">Allocated Weight: <strong className="text-blue-400">{act.allocatedMarks} Marks</strong></span>
+                <span className="text-xs font-mono text-slate-400">Allocated Weight: <strong className="text-blue-400">{Number(act.allocatedMarks) || 0}%</strong> of {labTotalMarks} marks</span>
               </div>
               {itemsList.length === 0 ? (
                 <div className="lm-inset p-6 text-center">
@@ -2426,6 +2488,13 @@ const LabroomDetail = () => {
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Max Capacity</label>
                   <input type="number" required value={editMaxCapacity} onChange={(e) => setEditMaxCapacity(e.target.value)} className="lm-field font-mono" />
                 </div>
+                <div className="min-w-0">
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Total Lab Marks</label>
+                  <input type="number" required min="1" value={editTotalMarks} onChange={(e) => setEditTotalMarks(e.target.value)} className="lm-field font-mono" />
+                  <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                    Activity percentages below are percentages of this total. Changing it rescales the marks awarded, not the percentage.
+                  </p>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Placeholder Teacher Name</label>
@@ -2487,8 +2556,9 @@ const LabroomDetail = () => {
                             setEditSessionalActivities(updated);
                           }}
                           className="lm-field !rounded-lg !py-1.5 !px-2 font-mono !text-xs w-20 shrink-0" 
-                          min="1"
-                          required
+                          min="0"
+                          step="0.5"
+                          title="Percentage of the lab's total marks"
                         />
                         <button 
                           type="button"
@@ -2506,6 +2576,21 @@ const LabroomDetail = () => {
                     );
                   })}
                 </div>
+
+                {/* Running total. The percentages are meant to add up to 100, so
+                    showing the sum lets the teacher see when they have not. */}
+                {(() => {
+                  const sum = editSessionalActivities.reduce((acc, a) => acc + (Number(a.allocatedMarks) || 0), 0);
+                  const exact = Math.abs(sum - 100) < 0.01;
+                  return (
+                    <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono">
+                      <span className="text-slate-500">Total allocated</span>
+                      <span className={exact ? 'text-emerald-400' : 'text-amber-400'}>
+                        {sum.toFixed(2)}%{exact ? '' : ' (target 100%)'}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="pt-3 flex flex-col sm:flex-row gap-2 sm:gap-3">

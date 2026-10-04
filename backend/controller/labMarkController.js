@@ -5,7 +5,8 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
-const { computeLabWeightedPercentage } = require('../utils/labWeights');
+const { computeLabWeightedPercentage, resolveCategoryKey } = require('../utils/labWeights');
+const { getGradeAndGpa } = require('../utils/gradeScale');
 
 const VALID_STANDARD_CATEGORIES = [
   'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
@@ -353,13 +354,14 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   }
 
   let sumOverall = 0;
+  let sumGradePoints = 0;
 
   const rankings = validDocs.map(doc => {
     // Weighted overall comes from the shared helper, which is the same code the
     // CSV export uses. Keeping one implementation is what guarantees a student's
     // exported "Overall %" matches their leaderboard percentage.
     const weighted = computeLabWeightedPercentage(labroom, doc);
-    const { percentage, marksObtained, marksPossible, hasWeights, categoryPercentages } = weighted;
+    const { percentage, marksObtained, marksPossible, totalMarks, finalMarks, hasWeights, categoryPercentages } = weighted;
 
     // Flat per-category percentages for the leaderboard filters. Keys stay as
     // `<targetKey>Percentage` because the frontend reads exactly that shape.
@@ -370,11 +372,23 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
 
     sumOverall += percentage;
 
+    // A lab is graded on the same scale as a classroom, so students see the same
+    // letter and grade point they would get in the theory half.
+    const graded = getGradeAndGpa(percentage);
+    sumGradePoints += graded.gradePoint;
+
     return {
       student: doc.student,
       marksDoc: doc,
       percentage,
       overallPercentage: percentage,
+      // Marks out of the room's allocated total, so the UI can show "35.00/50"
+      // as well as the 70% that produced it.
+      finalMarks,
+      totalMarks,
+      letterGrade: graded.grade,
+      gradePoint: graded.gradePoint,
+      isFailing: graded.isFailing,
       isWeighted: hasWeights,
       totalObtained: marksObtained,
       totalPossible: marksPossible,
@@ -384,8 +398,16 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
 
   rankings.sort((a, b) => b.percentage - a.percentage);
 
+  const labTotal = Number(labroom?.totalMarks) > 0 ? Number(labroom.totalMarks) : 100;
   const classAverages = {
-    overallLabPercentage: Number((sumOverall / validDocs.length).toFixed(2))
+    overallLabPercentage: Number((sumOverall / validDocs.length).toFixed(2)),
+    // Marks out of the lab's allocated total, e.g. "36.13/50". This used to repeat
+    // the average percentage unchanged, so a 50-mark lab displayed "72.25/50" - a
+    // score above the maximum. The percentage is now resolved against the total.
+    overallMarks: Number(((sumOverall / validDocs.length) / 100 * labTotal).toFixed(2)),
+    averageGradePoint: validDocs.length > 0 ? Number((sumGradePoints / validDocs.length).toFixed(2)) : 0,
+    gradePointScale: '4.00',
+    totalMarks: labTotal
   };
 
   // Persist the cached overall percentage. LabMark.studentLabPercentage existed
@@ -398,12 +420,25 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
       // and every poll. Writing a row whose value already matches turns a read
       // into N pointless writes, so only genuinely stale caches are refreshed.
       const cached = Number(r.marksDoc.studentLabPercentage);
-      return !Number.isFinite(cached) || cached !== r.percentage;
+      const cachedGp = Number(r.marksDoc.gradePoint);
+      const cachedGrade = String(r.marksDoc.letterGrade || '');
+      return !Number.isFinite(cached) || cached !== r.percentage
+        || !Number.isFinite(cachedGp) || cachedGp !== r.gradePoint
+        || cachedGrade !== r.letterGrade;
     })
     .map((r) => ({
       updateOne: {
         filter: { _id: r.marksDoc._id },
-        update: { $set: { studentLabPercentage: r.percentage } }
+        // Grade and grade point ride along with the percentage so a consumer
+        // reading only the cached fields still sees a consistent record.
+        update: {
+          $set: {
+            studentLabPercentage: r.percentage,
+            letterGrade: r.letterGrade,
+            gradePoint: r.gradePoint,
+            isFailing: r.isFailing
+          }
+        }
       }
     }));
 
@@ -450,25 +485,51 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', '_id rollNo registrationNo name').lean();
   const markDocMap = new Map(markDocs.map(m => [m.student?._id?.toString(), m]));
 
-  let headerActivityCols = [];
-  VALID_STANDARD_CATEGORIES.forEach(targetKey => {
-    const items = labroom[targetKey];
-    if (Array.isArray(items)) {
-      items.forEach(item => {
-        headerActivityCols.push({ targetKey, title: item.title, max: item.totalMarks || 10 });
-      });
-    } else if (items && items.title) {
-      headerActivityCols.push({ targetKey, title: items.title, max: items.totalMarks || 10 });
-    }
-  });
+  const labTotal = Number(labroom.totalMarks) > 0 ? Number(labroom.totalMarks) : 100;
 
-  let csvRows = [];
-  let headerRow = ['Roll / Reg No', 'Student Name'];
-  headerActivityCols.forEach(col => {
-    headerRow.push(`"${col.targetKey}: ${col.title} (${col.max}M)"`);
+  // Only the activities the teacher actually configured get columns. Iterating
+  // VALID_STANDARD_CATEGORIES instead meant every schema slot appeared in the sheet
+  // whether or not the room used it, so a lab with two activities exported fourteen.
+  const configuredActivities = ((labroom.sessionalActivities) || [])
+    .map(act => {
+      const targetKey = resolveCategoryKey(act.category);
+      const weight = Number(act.allocatedMarks || 0);
+      if (!targetKey || weight <= 0) return null;
+      const raw = labroom[targetKey];
+      const items = Array.isArray(raw)
+        ? raw
+        : (raw && raw.title ? [raw] : []);
+      return { category: act.category, targetKey, weight, items };
+    })
+    .filter(Boolean);
+
+  const csvRows = [];
+  const headerRow = ['Roll / Reg No', 'Student Name'];
+
+  // Group 1: the raw marks behind every activity item.
+  configuredActivities.forEach(({ category, items }) => {
+    items.forEach(item => {
+      headerRow.push(`"${category}: ${item.title} (${item.totalMarks || 10})"`);
+    });
   });
-  headerRow.push('"Overall %"', '"Final Grade"');
+  headerRow.push('');
+  // Group 2: each activity resolved against its share of the lab total. A lab
+  // activity's weight is a PERCENTAGE of the total, not marks, so its marks are
+  // pct/100 * weight% * total.
+  configuredActivities.forEach(({ category, weight }) => {
+    headerRow.push(`"${category} %"`, `"${category} Marks (wt ${weight}% of ${labTotal})"`, `"${category} Wt"`);
+  });
+  headerRow.push('');
+  // Group 3: the result.
+  headerRow.push('"Total %"', `"Total Obtained (of ${labTotal})"`, '"Grade"', '"Grade Point"');
   csvRows.push(headerRow.join(','));
+
+  // Resolves a percentage inside a weighted block into the marks it contributes,
+  // mirroring marksFromPct on the classroom export. For a lab the weight is a
+  // percentage of the room's total, so a 60% activity in a 50-mark lab is worth 30
+  // marks and contributes 18 of them at 60%.
+  const marksFromPct = (pct, weightPct) =>
+    Number(((Number(pct || 0) / 100) * ((Number(weightPct) || 0) / 100) * labTotal).toFixed(2));
 
   const sortedStudents = [...(labroom.students || [])].sort((a, b) => {
     const identA = a.rollNo || a.registrationNo || '';
@@ -485,18 +546,27 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       `"${st.name || 'Unknown'}"`
     ];
 
-    headerActivityCols.forEach(col => {
-      let match = null;
-      const scores = doc[col.targetKey];
-      if (Array.isArray(scores)) {
-        match = scores.find(s => s.title?.trim().toLowerCase() === col.title?.trim().toLowerCase());
-      } else if (scores && scores.title?.trim().toLowerCase() === col.title?.trim().toLowerCase()) {
-        match = scores;
-      }
+    configuredActivities.forEach(({ targetKey, items }) => {
+      const scores = doc[targetKey];
+      const entries = Array.isArray(scores)
+        ? scores
+        : (scores && scores.title ? [scores] : []);
 
-      const markVal = (match && !match.isBypassed && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null) ? match.obtainedMarks : 0;
-      rowData.push(markVal);
+      items.forEach(item => {
+        const match = entries.find(
+          s => s?.title?.trim().toLowerCase() === item.title?.trim().toLowerCase()
+        );
+        // Absent, bypassed and not-yet-graded are three different states and used
+        // to all export as 0, so a sheet could not tell a real zero from an activity
+        // that never happened or was never entered.
+        if (!match) { rowData.push(''); return; }
+        if (match.isBypassed) { rowData.push('Bypassed(-)'); return; }
+        if (match.isAbsent) { rowData.push('Absent(0)'); return; }
+        rowData.push(match.obtainedMarks ?? '');
+      });
     });
+
+    rowData.push('');
 
     // The exported "Overall %" must be the SAME weighted percentage the leaderboard
     // shows. This used to pool raw marks across every activity
@@ -504,23 +574,36 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
     // entirely - so the sheet reported something closer to the sessional mark
     // distribution and disagreed with the app's own overall.
     const weighted = computeLabWeightedPercentage(labroom, doc);
-    const overallPct = weighted.percentage.toFixed(2);
-    const pVal = Number(overallPct);
-    let grade = 'F';
-    if (pVal >= 85) grade = 'A+';
-    else if (pVal >= 80) grade = 'A';
-    else if (pVal >= 75) grade = 'B+';
-    else if (pVal >= 70) grade = 'B';
-    else if (pVal >= 65) grade = 'C+';
-    else if (pVal >= 60) grade = 'C';
-    else if (pVal >= 50) grade = 'D';
 
-    rowData.push(`"${overallPct}%"`, `"${grade}"`);
+    // Group 2 values: each configured activity's own percentage and the marks it
+    // contributes. categoryPercentages comes from the same helper that produced the
+    // overall figure, so the columns always reconcile with the total below them.
+    configuredActivities.forEach(({ targetKey, weight }) => {
+      const catPct = Number(weighted.categoryPercentages[targetKey] || 0);
+      rowData.push(
+        `"${catPct.toFixed(2)}%"`,
+        `"${marksFromPct(catPct, weight).toFixed(2)}"`,
+        `"${weight}%"`
+      );
+    });
+
+    rowData.push('');
+
+    // Group 3: the result. Grade and grade point come from the shared scale, so the
+    // sheet matches the app's leaderboard and the stored transcript. The old
+    // hand-written thresholds here used A+/A/B+ and had no grade points.
+    const graded = getGradeAndGpa(weighted.percentage);
+    rowData.push(
+      `"${weighted.percentage.toFixed(2)}%"`,
+      `"${weighted.finalMarks.toFixed(2)}"`,
+      `"${graded.grade}"`,
+      `"${graded.gradePoint.toFixed(2)}"`
+    );
     csvRows.push(rowData.join(','));
   });
 
   const csvString = csvRows.join('\n');
-  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename=${labroom.labName}_Results.csv`);
   return res.status(200).send(csvString);
 });

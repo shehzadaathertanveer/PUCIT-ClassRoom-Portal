@@ -25,6 +25,16 @@ const labRoomSchema = new mongoose.Schema(
     gradingScheme: {
       sessionalWeight: { type: Number, default: 100, min: 0, max: 100 }
     },
+
+    // Total solid marks this lab is worth. The activity percentages configured in
+    // sessionalActivities are percentages OF this total, so it only scales the
+    // marks a student is awarded - the percentage itself is unaffected. Defaults
+    // to 100 but stays editable, because a lab can be worth 100, 50 or 40 marks.
+    totalMarks: {
+      type: Number,
+      default: 100,
+      min: [1, 'Total lab marks must be at least 1']
+    },
     
     // Max bypasses ("B") allowed per student, per category. Same semantics as
     // the classroom field: 0/absent means the category cannot be bypassed.

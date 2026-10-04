@@ -35,6 +35,8 @@ import { uploadToCloudinary } from '../utils/cloudinary';
 import NoticeCard from '../components/NoticeCard';
 import BypassLimitsPanel from '../components/BypassLimitsPanel';
 import RoomColorPicker from '../components/RoomColorPicker';
+import GradeBadge from '../components/GradeBadge';
+import { getGradeAndGpa } from '../utils/gradeScale';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const ClassroomDetail = () => {
@@ -540,16 +542,19 @@ const ClassroomDetail = () => {
     }
   };
 
-  const getPucitGrade = (percentage) => {
-    const p = Number(percentage) || 0;
-    if (p >= 85) return 'A+';
-    if (p >= 80) return 'A';
-    if (p >= 75) return 'B+';
-    if (p >= 70) return 'B';
-    if (p >= 65) return 'C+';
-    if (p >= 60) return 'C';
-    if (p >= 50) return 'D';
-    return 'F';
+  // Grade and grade point for an exported row. The server already computes both
+  // for every ranking row, so that is used verbatim; the local scale is only a
+  // fallback. This used to re-derive the letter from the percentage using its own
+  // A+/A/B+ ladder, which meant a downloaded sheet could show a different grade
+  // than the app and the stored transcript.
+  const gradeForRow = (row, overallPct) => {
+    const serverGrade = row.letterGrade || row.marksDoc?.letterGrade;
+    const serverGp = row.gradePoint ?? row.marksDoc?.gradePoint;
+    if (serverGrade) {
+      return { grade: serverGrade, gradePoint: Number(serverGp) || 0 };
+    }
+    const hasExam = !!(row.marksDoc?.mids?.totalMarks || row.marksDoc?.finals?.totalMarks);
+    return getGradeAndGpa(overallPct, hasExam);
   };
 
   const handleDownloadExcelReport = () => {
@@ -560,13 +565,40 @@ const ClassroomDetail = () => {
         return;
       }
 
-      const quizItems = classroom?.quizzes || [];
-      const assignmentItems = classroom?.assignments || [];
+      // Every configured sessional activity gets columns, not just quizzes and
+      // assignments - a room can configure any set, and the sheet previously
+      // omitted everything else a teacher had added.
+      const activityItems = sessionalActivitiesList.map(act => ({
+        category: act.category,
+        weight: Number(act.allocatedMarks) || 0,
+        items: getItemsForCategory(act.category)
+      }));
 
-      let headers = ['Roll Number', 'Student Name'];
-      quizItems.forEach(q => headers.push(`${q.title} (${q.totalMarks})`));
-      assignmentItems.forEach(a => headers.push(`${a.title} (${a.totalMarks})`));
-      headers.push('Mids', 'Finals', 'Sessional %', 'Overall %', 'Grade');
+      const sWeight = Number(classroom.gradingScheme?.sessionalWeight) || 25;
+      const mWeight = Number(classroom.gradingScheme?.midsWeight) || 35;
+      const fWeight = Number(classroom.gradingScheme?.finalsWeight) || 40;
+
+      const headers = ['Roll Number', 'Student Name'];
+      // Group 1: the raw marks behind every activity item.
+      activityItems.forEach(({ category, items }) => {
+        items.forEach(item => {
+          headers.push(`${category} - ${item.title} (${item.totalMarks})`);
+        });
+      });
+      headers.push('');
+      // Group 2: each activity resolved against its own weightage.
+      activityItems.forEach(({ category, weight }) => {
+        headers.push(`${category} %`, `${category} Marks (wt ${weight} of ${sWeight})`, `${category} Wt`);
+      });
+      headers.push('');
+      // Group 3: the sessional block as a whole.
+      headers.push('Sessional %', `Sessional Marks (of ${sWeight})`);
+      headers.push('');
+      // Group 4: the exams, each a slice of the whole 100-mark course.
+      headers.push('Mids %', `Mids Marks (wt ${mWeight} of 100)`, 'Finals %', `Finals Marks (wt ${fWeight} of 100)`);
+      headers.push('');
+      // Group 5: the result.
+      headers.push('Overall %', 'Total Obtained (of 100)', 'Grade', 'Grade Point');
 
       let csvRows = [headers.join(',')];
 
@@ -584,26 +616,93 @@ const ClassroomDetail = () => {
           `"${student.name || 'Unknown'}"`
         ];
 
-        quizItems.forEach(q => {
-          const match = (marksDoc.quizzes || []).find(item => item.title?.trim().toLowerCase() === q.title?.trim().toLowerCase());
-          row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
+        // One activity's own percentage, used both for its "%" column and to resolve
+        // the marks it contributes. Bypassed entries are dropped from both sides,
+        // absent entries keep their possible marks and score 0, and a configured
+        // activity with nothing entered yet scores 0 - the same rules the
+        // on-screen cards and the stored grade use.
+const pctOf = (entries, items) => {
+          let obtained = 0, possible = 0, seen = false;
+          (entries || []).forEach((e) => {
+            if (!e || e.isBypassed) return;
+            seen = true;
+            if (!e.isAbsent) obtained += Number(e.obtainedMarks) || 0;
+            // Fall back to the activity's declared total when an older record has
+            // none stored on the entry, otherwise the whole activity reads 0%.
+            const declared = items.find(i =>
+              i.title?.trim().toLowerCase() === e.title?.trim().toLowerCase()
+            );
+            possible += Number(e.totalMarks) || Number(declared?.totalMarks) || 0;
+          });
+          return seen && possible > 0 ? (obtained / possible) * 100 : 0;
+        };
+
+        const activityPcts = {};
+        activityItems.forEach(({ category, items }) => {
+          const { key } = resolveMarkCategory(category);
+          const entries = key ? (marksDoc[key] || []) : [];
+          // The category percentage covers every entry in that category, not just
+          // the ones with columns, so it must match what the app reports.
+          activityPcts[category] = pctOf(entries, items);
+
+          items.forEach(item => {
+            const match = entries.find(
+              e => e?.title?.trim().toLowerCase() === item.title?.trim().toLowerCase()
+            );
+            if (!match) { row.push(''); return; }
+            if (match.isBypassed) { row.push('Bypassed(-)'); return; }
+            if (match.isAbsent) { row.push('Absent(0)'); return; }
+            row.push(match.obtainedMarks ?? '');
+          });
         });
 
-        assignmentItems.forEach(a => {
-          const match = (marksDoc.assignments || []).find(item => item.title?.trim().toLowerCase() === a.title?.trim().toLowerCase());
-          row.push(match?.isAbsent ? 'Absent' : (match?.obtainedMarks ?? ''));
+        row.push('');
+
+        activityItems.forEach(({ category, weight }) => {
+          row.push(`${Number(activityPcts[category] || 0).toFixed(2)}%`);
+          row.push(marksFromPct(activityPcts[category], weight).toFixed(2));
+          row.push(weight);
         });
 
+        row.push('');
+
+        const sessPct = Number(r.sessionalPercentage || 0);
+        row.push(`${sessPct.toFixed(2)}%`);
+        row.push(marksFromPct(sessPct, sWeight).toFixed(2));
+
+        row.push('');
+
+        const examCell = (entry) => {
+          if (!entry) return '';
+          if (entry.isBypassed) return 'Bypassed(-)';
+          if (entry.isAbsent) return 'Absent(0)';
+          return entry.obtainedMarks ?? '';
+        };
         const midsMatch = marksDoc.mids || r.mids;
-        row.push(midsMatch?.isAbsent ? 'Absent' : (midsMatch?.obtainedMarks ?? ''));
-
         const finalsMatch = marksDoc.finals || r.finals;
-        row.push(finalsMatch?.isAbsent ? 'Absent' : (finalsMatch?.obtainedMarks ?? ''));
+
+        const midsPct = midsMatch && !midsMatch.isBypassed && Number(midsMatch.totalMarks) > 0
+          ? (midsMatch.isAbsent ? 0 : ((Number(midsMatch.obtainedMarks) || 0) / Number(midsMatch.totalMarks)) * 100)
+          : 0;
+        const finalsPct = finalsMatch && !finalsMatch.isBypassed && Number(finalsMatch.totalMarks) > 0
+          ? (finalsMatch.isAbsent ? 0 : ((Number(finalsMatch.obtainedMarks) || 0) / Number(finalsMatch.totalMarks)) * 100)
+          : 0;
+
+        row.push(`${Number(midsPct).toFixed(2)}%`);
+        row.push(marksFromPct(midsPct, mWeight).toFixed(2));
+        row.push(`${Number(finalsPct).toFixed(2)}%`);
+        row.push(marksFromPct(finalsPct, fWeight).toFixed(2));
+
+        row.push('');
 
         const overallPct = Number(r.overallPercentage || 0);
-        row.push(`${Number(r.sessionalPercentage || 0).toFixed(2)}%`);
+        const { grade, gradePoint } = gradeForRow(r, overallPct);
         row.push(`${overallPct.toFixed(2)}%`);
-        row.push(`"${getPucitGrade(overallPct)}"`);
+        // A course is worth a fixed 100 solid marks, so the total obtained is the
+        // overall percentage resolved against 100.
+        row.push(Number(r.overallMarks ?? overallPct).toFixed(2));
+        row.push(`"${grade}"`);
+        row.push(gradePoint.toFixed(2));
 
         csvRows.push(row.join(','));
       });
@@ -878,6 +977,19 @@ const ClassroomDetail = () => {
     ? classroom.sessionalActivities
     : [{ category: 'Quizzes', allocatedMarks: 10 }, { category: 'Assignments', allocatedMarks: 15 }];
 
+  // Solid marks the sessional block is worth out of the fixed 100-mark course
+  // split. Each activity's allocatedMarks is a slice of THIS number, which is
+  // what lets a "10 mark quiz worth 20 raw marks" be expressed as solid marks.
+  const sessionalWeightTotal = Number(classroom.gradingScheme?.sessionalWeight) || 25;
+
+  // Resolves a percentage inside a weighted block into the solid marks it
+  // contributes. 80% of an activity allocated 10 of 25 sessional marks is 8.
+  const marksFromPct = (pct, allocatedMarks) => {
+    const w = Number(allocatedMarks) || 0;
+    if (w <= 0) return 0;
+    return Number(((Number(pct || 0) / 100) * w).toFixed(2));
+  };
+
   const getItemClassAverage = (targetKey, itemTitle, categoryName) => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return '0.00';
@@ -1037,6 +1149,9 @@ const ClassroomDetail = () => {
     if (rankings.length === 0 || !user?._id) {
       return {
         overall: '0.00',
+        overallMarks: '0.00',
+        letterGrade: '',
+        gradePoint: 0,
         sessional: '0.00',
         quizzes: '0.00',
         assignments: '0.00',
@@ -1053,6 +1168,9 @@ const ClassroomDetail = () => {
     if (!found) {
       return {
         overall: '0.00',
+        overallMarks: '0.00',
+        letterGrade: '',
+        gradePoint: 0,
         sessional: '0.00',
         quizzes: '0.00',
         assignments: '0.00',
@@ -1065,6 +1183,14 @@ const ClassroomDetail = () => {
 
     return {
       overall: Number(found.overallPercentage || 0).toFixed(2),
+      // A course is worth a fixed 100 solid marks, so the final marks achieved is
+      // the overall percentage resolved against 100.
+      overallMarks: Number(found.overallMarks ?? found.overallPercentage ?? 0).toFixed(2),
+      // Grade letter and grade point come from the server so the card matches the
+      // stored transcript. Fall back to the cached doc for older records that were
+      // saved before grade points were stored.
+      letterGrade: found.letterGrade || marksDoc?.letterGrade || '',
+      gradePoint: Number(found.gradePoint ?? marksDoc?.gradePoint ?? 0) || 0,
       sessional: Number(found.sessionalPercentage || 0).toFixed(2),
       quizzes: Number(computeCategoryPercentage(marksDoc, 'quizzes')).toFixed(2),
       assignments: Number(computeCategoryPercentage(marksDoc, 'assignments')).toFixed(2),
@@ -1131,10 +1257,15 @@ const ClassroomDetail = () => {
       return {
         ...r,
         perCategory,
+        // Surfaced in the leaderboard rows so each student's grade point is visible
+        // without opening their profile. Server-authoritative, with the stored doc
+        // as a fallback for records saved before grade points existed.
+        letterGrade: r.letterGrade || marksDoc?.letterGrade || '',
+        gradePoint: Number(r.gradePoint ?? marksDoc?.gradePoint ?? 0) || 0,
         computedQuizPct: perCategory.quizzes ?? 0,
         computedAssignmentPct: perCategory.assignments ?? 0
       };
-    }).sort((a, b) => scoreForFilter(a, leaderboardFilter) - scoreForFilter(b, leaderboardFilter));
+    }).sort((a, b) => scoreForFilter(b, leaderboardFilter) - scoreForFilter(a, leaderboardFilter));
   };
 
   const getTotalPendingGradingCount = () => {
@@ -1157,6 +1288,38 @@ const ClassroomDetail = () => {
 
   const studentRankInfo = getStudentRankInfo();
   const studentAnalyticsData = getStudentAnalyticsData();
+
+  // A student's breakdown needs every grading category, not just the sessional
+  // activities. Mids and Finals are separate categories in the 100-mark split
+  // but were never in sessionalActivitiesList, so the breakdown grid rendered
+  // overall, sessional and the sessional activities while silently dropping the
+  // Mids and Finals the student's grade is partly built from.
+const studentBreakdownItems = [
+    ...sessionalActivitiesList.map(act => ({
+      label: act.category,
+      catName: act.category,
+      // Sessional activities are slices of the sessional block.
+      weight: Number(act.allocatedMarks) || 0,
+      weightOf: sessionalWeightTotal,
+      marksFromPct: true
+    })),
+    ...((classroom.mids?.totalMarks > 0) ? [{
+      label: 'Mids',
+      catName: 'Mids',
+      // Mids and finals are slices of the whole 100-mark course, not of the
+      // sessional block, so they are shown against their own scheme weight.
+      weight: Number(classroom.gradingScheme?.midsWeight) || 35,
+      weightOf: 100,
+      marksFromPct: false
+    }] : []),
+    ...((classroom.finals?.totalMarks > 0) ? [{
+      label: 'Finals',
+      catName: 'Finals',
+      weight: Number(classroom.gradingScheme?.finalsWeight) || 40,
+      weightOf: 100,
+      marksFromPct: false
+    }] : [])
+  ];
   const totalPendingCount = getTotalPendingGradingCount();
 
   // Deep Class Metrics helpers (staff overview: per-category averages + progress)
@@ -1441,6 +1604,10 @@ const ClassroomDetail = () => {
                     <div className="lm-inset p-4 space-y-1 border-orange-400/25 transition-all duration-200 hover:-translate-y-px">
                       <p className="text-[10px] sm:text-xs text-orange-300 uppercase font-bold tracking-wider">Overall Percentage</p>
                       <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-orange-200">{studentAnalyticsData.overall}%</p>
+                      <p className="text-[10px] sm:text-xs text-slate-400 font-mono">Final marks: {studentAnalyticsData.overallMarks}/100</p>
+                      <div className="pt-1.5">
+                        <GradeBadge grade={studentAnalyticsData.letterGrade} gradePoint={studentAnalyticsData.gradePoint} />
+                      </div>
                     </div>
                     <div className="lm-inset p-4 space-y-1 border-rose-400/25 transition-all duration-200 hover:-translate-y-px">
                       <p className="text-[10px] sm:text-xs text-rose-300 uppercase font-bold tracking-wider">Class Standing</p>
@@ -1451,16 +1618,27 @@ const ClassroomDetail = () => {
                   <div className="lm-inset p-4 space-y-3">
                     <p className="lm-eyebrow">Your Breakdown Across All Categories</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
-                      {sessionalActivitiesList.map(act => {
-                        const summary = calculateCategoryMarksSummary(act.category);
+                      {studentBreakdownItems.map(item => {
+                        const summary = calculateCategoryMarksSummary(item.catName);
                         return (
-                          <div key={act.category} className="lm-card-flat p-3 space-y-1 min-w-0">
-                            <span className="text-[10px] sm:text-xs text-slate-400 block uppercase font-bold break-words">{act.category}</span>
+                          <div key={item.label} className="lm-card-flat p-3 space-y-1 min-w-0">
+                            <span className="text-[10px] sm:text-xs text-slate-400 block uppercase font-bold break-words">{item.label}</span>
                             <div className="flex items-baseline justify-between gap-2 flex-wrap">
                               <span className="font-mono font-black text-orange-200 text-sm sm:text-base">
                                 {summary.total > 0 ? ((summary.obtained / summary.total) * 100).toFixed(2) : '0.00'}%
                               </span>
                               <span className="text-[10px] sm:text-xs text-slate-400 font-mono">({summary.obtained}/{summary.total})</span>
+                            </div>
+                            {/* Solid marks this activity contributes to the sessional block. */}
+                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                              <span className="text-[10px] sm:text-xs text-slate-500 font-mono">
+                                weight {item.weight} of {item.weightOf}
+                              </span>
+                              <span className="text-[10px] sm:text-xs text-slate-300 font-mono">
+                                {item.marksFromPct
+                                  ? `${marksFromPct(summary.total > 0 ? (summary.obtained / summary.total) * 100 : 0, item.weight)}/${item.weight} marks`
+                                  : `${marksFromPct(summary.total > 0 ? (summary.obtained / summary.total) * 100 : 0, item.weight)}/${item.weight} of 100 marks`}
+                              </span>
                             </div>
                           </div>
                         );
@@ -1488,6 +1666,20 @@ const ClassroomDetail = () => {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="lm-eyebrow">Deep Class Metrics Overview</p>
                       <span className="font-mono font-black text-amber-200 text-base sm:text-lg">Ø {classAnalytics?.classAverages?.overallPercentage ?? 0}%</span>
+                    </div>
+                    <p className="-mt-3 text-[10px] sm:text-xs text-slate-400 font-mono">
+                      Class average marks: {Number(classAnalytics?.classAverages?.overallMarks ?? 0).toFixed(2)}/100
+                    </p>
+                    {/* Cohort GPA: the mean of each student's grade point, not a
+                        letter derived from the average percentage. Averaging the
+                        percentage instead would misreport the cohort (e.g. a class of
+                        49s and 85s averages 67% -> B, but no student holds a B). */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">Class average GPA</span>
+                      <span className="font-mono font-black text-base sm:text-lg text-slate-100">
+                        {Number(classAnalytics?.classAverages?.averageGradePoint ?? 0).toFixed(2)}
+                        <span className="text-[10px] text-slate-500 font-bold"> / 4.00</span>
+                      </span>
                     </div>
 
                     {/* Per-component class averages */}
@@ -1522,6 +1714,16 @@ const ClassroomDetail = () => {
                               <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono text-slate-500">
                                 <span>{prog.graded}/{prog.total} graded</span>
                                 <span>{prog.pct}% progress</span>
+                              </div>
+                              {/* How this activity's liquid marks convert into the solid
+                                  marks it contributes to the sessional block. */}
+                              <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono">
+                                <span className="text-slate-500">
+                                  weight {Number(act.allocatedMarks) || 0} of {sessionalWeightTotal}
+                                </span>
+                                <span className="text-slate-300">
+                                  {marksFromPct(avg, act.allocatedMarks)}/{Number(act.allocatedMarks) || 0} avg marks
+                                </span>
                               </div>
                               <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                                 <div className="h-full bg-gradient-to-r from-orange-200 to-orange-400 rounded-full transition-all" style={{ width: `${prog.pct}%` }}></div>
@@ -1560,9 +1762,25 @@ const ClassroomDetail = () => {
                           })}
                         </div>
                       </div>
-                    )}
-                  </div>
+)}
                 </div>
+
+                {/* The activity weights are slices of the sessional block, so they
+                    should add up to the sessional mark allocation. */}
+                {(() => {
+                  const sum = editSessionalActivities.reduce((acc, a) => acc + (Number(a.allocatedMarks) || 0), 0);
+                  const target = Number(classroom.gradingScheme?.sessionalWeight) || 25;
+                  const exact = Math.abs(sum - target) < 0.01;
+                  return (
+                    <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono">
+                      <span className="text-slate-500">Total sessional allocated</span>
+                      <span className={exact ? 'text-emerald-400' : 'text-amber-400'}>
+                        {sum.toFixed(2)} of {target}{exact ? '' : ' (target ' + target + ')'}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
               )}
             </div>
 
@@ -1675,13 +1893,14 @@ const ClassroomDetail = () => {
                     <th>Rank</th>
                     <th>Roll Number</th>
                     <th>Student Name</th>
+                    <th>Grade / GPA</th>
                     <th className="text-right">Score Percentage</th>
                   </tr>
                 </thead>
                 <tbody>
                   {getSortedLeaderboard().length === 0 ? (
                     <tr>
-                      <td colSpan="4" className="text-center py-10 px-4 text-slate-500 italic">No evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
+                      <td colSpan="5" className="text-center py-10 px-4 text-slate-500 italic">No evaluation rankings generated yet. Start grading students to populate leaderboard.</td>
                     </tr>
                   ) : (
                     getSortedLeaderboard().map((entry, idx) => {
@@ -1713,6 +1932,9 @@ const ClassroomDetail = () => {
                               )}
                             </div>
                           </td>
+                          <td className="whitespace-nowrap">
+                            <GradeBadge grade={entry.letterGrade} gradePoint={entry.gradePoint} compact />
+                          </td>
                           <td className="font-mono font-extrabold text-emerald-300 text-right">
                             {Number(currentScore || 0).toFixed(2)}%
                           </td>
@@ -1737,7 +1959,7 @@ const ClassroomDetail = () => {
             <div key={cat} className="lm-card p-4 sm:p-6 space-y-4 min-w-0">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
                 <h3 className="text-sm font-extrabold text-slate-100 uppercase tracking-wider break-words min-w-0">{cat} Activity Portal</h3>
-                <span className="text-xs font-mono text-slate-400 shrink-0">Allocated Weight: <strong className="text-orange-200">{act.allocatedMarks} Marks</strong></span>
+                <span className="text-xs font-mono text-slate-400 shrink-0">Allocated Weight: <strong className="text-orange-200">{Number(act.allocatedMarks) || 0}</strong> of {sessionalWeightTotal} sessional marks</span>
               </div>
               {itemsList.length === 0 ? (
                 <div className="lm-inset p-6 text-center">

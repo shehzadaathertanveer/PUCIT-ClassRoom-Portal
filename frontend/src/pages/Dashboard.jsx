@@ -63,6 +63,7 @@ const Dashboard = () => {
     creditHours: 3,
     sectionPrefix: '',
     maxCapacity: 50,
+    totalMarks: 100,
     colorKey: DEFAULT_ROOM_COLOR,
     sessionalWeight: 25,
     midsWeight: 35,
@@ -374,8 +375,13 @@ const Dashboard = () => {
     const payload = {
       className: newClassData.name.trim(),
       creditHours: Number(newClassData.creditHours) || 3,
-      sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
-      maxCapacity: Number(newClassData.maxCapacity) || 50,
+sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
+      maxCapacity: newClassData.maxCapacity,
+      // Total solid marks this lab is worth. The activity percentages below are
+      // percentages OF this number, so a 50-mark lab and a 100-mark lab produce
+      // the same percentages but different marks awarded. Editable later in
+      // Lab Settings.
+      totalMarks: Number(newClassData.totalMarks) || 100,
       colorKey: newClassData.colorKey,
       gradingScheme: {
         sessionalWeight: sWeight,
@@ -429,6 +435,7 @@ const Dashboard = () => {
           creditHours: 3,
           sectionPrefix: '',
           maxCapacity: 50,
+          totalMarks: 100,
           colorKey: DEFAULT_ROOM_COLOR,
           sessionalWeight: 25,
           midsWeight: 35,
@@ -2124,6 +2131,26 @@ const Dashboard = () => {
                   className="lm-field font-mono"
                 />
               </div>
+
+              {newClassData.courseType === 'LAB' && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-orange-300 mb-2">
+                    Total Lab Marks
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={newClassData.totalMarks}
+                    onChange={(e) => setNewClassData({ ...newClassData, totalMarks: e.target.value })}
+                    className="lm-field font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1.5 leading-snug">
+                    Total solid marks this lab is worth. The activity percentages below are percentages of this
+                    number, so a 50-mark lab and a 100-mark lab give the same percentages but different marks awarded.
+                  </p>
+                </div>
+              )}
 
               <div className="pt-3 border-t border-white/10">
                 <RoomColorPicker

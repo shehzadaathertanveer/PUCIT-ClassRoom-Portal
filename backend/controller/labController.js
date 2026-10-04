@@ -5,6 +5,8 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 const { normaliseRoomColor } = require('../utils/roomColors');
+const { recalculateLabGrades, activitiesChanged } = require('../utils/recalculateGrades');
+const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
 
 // Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
@@ -116,11 +118,23 @@ exports.createLabroom = catchAsync(async (req, res, next) => {
     teacherId, 
     placeholderTeacherName, 
     taRollNumbers, 
-    maxCapacity 
+    maxCapacity,
+    totalMarks
   } = req.body;
 
   if (!labName || !sectionPrefix) {
     return next(new AppError('Lab name and Section Prefix (e.g., BITF26A) are required!', 400));
+  }
+
+  // Total solid marks this lab is worth. Activity percentages are percentages OF
+  // this number. Defaults to 100 when not supplied.
+  let labTotalMarks = 100;
+  if (totalMarks !== undefined && totalMarks !== null && totalMarks !== '') {
+    const parsed = Number(totalMarks);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return next(new AppError('Total lab marks must be a number of at least 1!', 400));
+    }
+    labTotalMarks = parsed;
   }
 
   const cleanPrefix = sectionPrefix.trim().toUpperCase();
@@ -177,6 +191,7 @@ exports.createLabroom = catchAsync(async (req, res, next) => {
     taRollNumbers: formattedTaRolls,
     tas: existingTaIds,
     maxCapacity: maxCapacity ? Number(maxCapacity) : 40,
+    totalMarks: labTotalMarks,
     teacher: assignedTeacherId,
     placeholderTeacherName: finalPlaceholder,
     colorKey: normaliseRoomColor(req.body.colorKey),
@@ -1718,9 +1733,13 @@ exports.deleteLabNotice = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const { labName, sectionPrefix, maxCapacity, placeholderTeacherName, sessionalActivities, colorKey } = req.body;
+  const { labName, sectionPrefix, maxCapacity, placeholderTeacherName, sessionalActivities, colorKey, totalMarks } = req.body;
 
-  const currentLabroom = await Labroom.findOne({ _id: labroomId, isActive: true }).select('sessionalActivities').lean();
+  // totalMarks is selected too so changing it can be detected and trigger a refresh
+  // of every cached grade.
+  const currentLabroom = await Labroom.findOne({ _id: labroomId, isActive: true })
+    .select('sessionalActivities totalMarks')
+    .lean();
   if (!currentLabroom) return next(new AppError('Active labroom not found!', 404));
 
   const updateData = {};
@@ -1729,22 +1748,50 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
   if (maxCapacity) updateData.maxCapacity = Number(maxCapacity);
   if (placeholderTeacherName !== undefined) updateData.placeholderTeacherName = placeholderTeacherName.trim();
   if (colorKey !== undefined) updateData.colorKey = normaliseRoomColor(colorKey);
+  // The lab's total solid marks. Activity percentages are percentages OF this
+  // number, so editing it rescales the marks students are awarded without
+  // touching any percentage.
+  if (totalMarks !== undefined && totalMarks !== null && totalMarks !== '') {
+    const parsed = Number(totalMarks);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return next(new AppError('Total lab marks must be a number of at least 1!', 400));
+    }
+    updateData.totalMarks = parsed;
+  }
   if (Array.isArray(sessionalActivities)) {
     updateData.sessionalActivities = sessionalActivities.map(a => ({
       category: a.category.trim(),
       allocatedMarks: Number(a.allocatedMarks) || 0
     }));
 
-    // Migrate existing scores when a lab activity's type changed (edit-in-place).
-    const oldKeys = (currentLabroom.sessionalActivities || []).map(a => getNormalizedLabTargetKey(a.category));
-    const newKeys = updateData.sessionalActivities.map(a => getNormalizedLabTargetKey(a.category));
+    // Carry scores over only for a genuine rename. Pairing by index (the previous
+    // behaviour) moved scores into the wrong activity whenever a row was added,
+    // removed or reordered.
+    const migrations = planActivityMigrations(
+      currentLabroom.sessionalActivities,
+      updateData.sessionalActivities,
+      getNormalizedLabTargetKey
+    );
 
-    await Promise.all(oldKeys.map((oldKey, idx) => {
-      const newKey = newKeys[idx];
-      if (!newKey || newKey === oldKey) return null;
-      return migrateLabActivityMarks(labroomId, oldKey, newKey);
-    }));
+    for (const { fromKey, toKey } of migrations) {
+      await migrateLabActivityMarks(labroomId, fromKey, toKey);
+    }
   }
+
+  // A change to the lab's total marks leaves every percentage untouched (activity
+  // weights are percentages of it, not absolute marks), but it DOES change the
+  // grade-bearing numbers a reader derives, so the cached marks are refreshed too.
+  const totalMarksWasEdited =
+    updateData.totalMarks !== undefined &&
+    Number(updateData.totalMarks) !== Number(currentLabroom.totalMarks);
+
+  // Set when the activities or their percentages actually changed. Recalculation
+  // has to wait until the new weights are persisted, otherwise it re-derives the
+  // results from the old weighting and changes nothing.
+  const activitiesWereEdited =
+    Array.isArray(updateData.sessionalActivities) &&
+    activitiesChanged(currentLabroom.sessionalActivities, updateData.sessionalActivities);
+  const shouldRecalculateGrades = activitiesWereEdited || totalMarksWasEdited;
 
   const labroom = await Labroom.findByIdAndUpdate(
     labroomId,
@@ -1756,6 +1803,17 @@ exports.updateLabroomSettings = catchAsync(async (req, res, next) => {
     .populate('students', 'name rollNo registrationNo email personalNotificationEmail');
 
   if (!labroom) return next(new AppError('Labroom not found!', 404));
+
+  // The new activity percentages are persisted now, so re-derive every stored
+  // student percentage from them.
+  if (shouldRecalculateGrades) {
+    const { updated, failed } = await recalculateLabGrades(labroomId);
+    if (failed > 0) {
+      console.warn(
+        `updateLabroomSettings: ${failed} of ${updated + failed} lab marks could not be recalculated for labroom ${labroomId}`
+      );
+    }
+  }
 
   res.status(200).json({
     status: 'success',

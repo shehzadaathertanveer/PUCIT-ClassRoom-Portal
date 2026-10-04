@@ -57,6 +57,11 @@ const labMarkSchema = new mongoose.Schema(
 
     // Cached performance metrics for rapid analytics
     studentLabPercentage: { type: Number, default: 0 },
+    // Grade letter and grade point on the same 0.00-4.00 scale a classroom uses,
+    // so a CGPA can treat theory and practical the same way.
+    letterGrade: { type: String, default: 'In Progress (Sessional)' },
+    gradePoint: { type: Number, default: 0, min: 0, max: 4 },
+    isFailing: { type: Boolean, default: false },
     lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   },
   { timestamps: true }

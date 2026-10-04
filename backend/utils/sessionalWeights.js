@@ -8,6 +8,10 @@
  *
  *   sessional% = SUM(categoryPct * weight) / SUM(weight)
  *
+ * A CONFIGURED activity (one listed in classroom.sessionalActivities) always
+ * counts in that denominator, scoring 0% until its marks are entered. An
+ * activity the teacher never configured is not counted at all.
+ *
  * The distinction matters. Given quizzes worth 20 raw marks but allocated a
  * weight of 10, and assignments worth 10 raw marks also allocated 10:
  *
@@ -95,13 +99,25 @@ const computeSessionalBreakdown = (markDoc, classroom) => {
 
   const fold = (key, entries, fallbackWeight) => {
     const totals = sumEntries(entries);
-    // A category with no graded entries contributes to neither side. Counting an
-    // untouched category as 0% would add its weight to the denominator and pull
-    // the whole sessional score toward zero.
-    if (totals.count === 0 || totals.total <= 0) return;
-    const categoryPct = pct(totals.obtained, totals.total);
+    const hasEntries = totals.count > 0 && totals.total > 0;
+
+    // The weightage of an activity is fixed when the teacher creates the
+    // classroom, so a CONFIGURED activity joins the blend even with nothing
+    // entered yet - it simply scores 0%. That is deliberate: the sessional
+    // score then only ever climbs as marks are entered, instead of starting
+    // high and dropping the moment the next activity is filled in.
+    //
+    //   quizzes 10 (100%), assignments 15 (not entered) -> 40%, not 100%
+    //   ...assignments later entered at 40%             -> 64%, it went up
+    //
+    // An activity the teacher never configured is left out entirely, so unused
+    // categories are never silently penalised.
+    const isConfigured = weightByKey[key] !== undefined;
+    if (!hasEntries && !isConfigured) return;
+
+    const categoryPct = hasEntries ? pct(totals.obtained, totals.total) : 0;
     categoryPercentages[key] = categoryPct;
-    const weight = weightByKey[key] !== undefined ? weightByKey[key] : fallbackWeight;
+    const weight = isConfigured ? weightByKey[key] : fallbackWeight;
     // A fallback of 0 would drop the category from both sides of the ratio and
     // silently erase it, so treat any non-positive weight as unconfigured.
     const effectiveWeight = weight > 0 ? weight : fallbackWeight;
