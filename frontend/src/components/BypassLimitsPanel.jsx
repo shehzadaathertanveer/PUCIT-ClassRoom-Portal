@@ -148,15 +148,24 @@ export default function BypassLimitsPanel({
     }
   };
 
-  // Show ALL categories in the bypass tab so teachers can set limits for any
-  // activity (even if not yet created/graded) - the user explicitly asked for
-  // "bypass limit input boxes for ALL activities"
+  // Show ONLY the categories this room actually has. Listing every category the
+  // schema supports meant a class with just quizzes/assignments/homework still
+  // displayed inputs for projects, vivas, lab sheets and so on - teachers could
+  // not tell which rows were live and set caps against activities that do not
+  // exist. activityCounts comes from the server and is recomputed on every load,
+  // so the list follows the room's activities as they are added or removed.
   const visibleCategories = useMemo(() => {
-    return categories;
-  }, [categories]);
+    // null means the server did not report counts (older backend). Fall back to
+    // showing everything rather than showing nothing.
+    if (!activityCounts) return categories;
+    return categories.filter((c) => Number(activityCounts[c.key] || 0) > 0);
+  }, [categories, activityCounts]);
 
   const enabledCount = visibleCategories.filter((c) => Number(limits[c.key] || 0) > 0).length;
   const totalCap = visibleCategories.reduce((a, c) => a + (Number(limits[c.key]) || 0), 0);
+  const hiddenLimitCount = categories.filter(
+    (c) => !visibleCategories.includes(c) && Number(limits[c.key] || 0) > 0
+  ).length;
 
   if (loading && !loaded) {
     return <p className="text-xs text-slate-400 py-2">Loading bypass limits…</p>;
@@ -185,7 +194,7 @@ export default function BypassLimitsPanel({
 
       {visibleCategories.length === 0 ? (
         <p className="text-[11px] sm:text-xs text-amber-300/90 leading-relaxed rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-3 py-2.5">
-          No activities configured for this {roomType === 'labroom' ? 'labroom' : 'classroom'}.
+          No activities configured for this {roomType === 'labroom' ? 'labroom' : 'classroom'} yet. Bypass limits appear here once an activity is added.
         </p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -236,6 +245,14 @@ export default function BypassLimitsPanel({
       {!canEdit && (
         <p className="text-[11px] text-amber-300/90">
           Only the course teacher or an admin can change these limits.
+        </p>
+      )}
+
+      {/* Hiding a category must not silently forget its cap, so say so explicitly. */}
+      {hiddenLimitCount > 0 && (
+        <p className="text-[11px] sm:text-xs text-slate-400 leading-relaxed">
+          {hiddenLimitCount} categor{hiddenLimitCount === 1 ? 'y has' : 'ies have'} a limit set but no
+          activities right now. Those caps are kept and come back if the activity is re-added.
         </p>
       )}
 

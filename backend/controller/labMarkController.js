@@ -7,6 +7,7 @@ const sendStyledEmail = require('../utils/emailService');
 const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
 const { computeLabWeightedPercentage, resolveCategoryKey } = require('../utils/labWeights');
 const { getGradeAndGpa } = require('../utils/gradeScale');
+const { partitionRoster, csvCell, csvPad, rosterWidths, blankRow } = require('../utils/exportCsv');
 
 const VALID_STANDARD_CATEGORIES = [
   'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
@@ -487,10 +488,15 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
 
   const labTotal = Number(labroom.totalMarks) > 0 ? Number(labroom.totalMarks) : 100;
 
+  // mode: "roster" = names/roll numbers only, "current" = only activities that
+  // have marks entered, "final" = the full deep breakdown.
+  const mode = String(req.query.mode || 'final').toLowerCase();
+  const safeName = String(labroom.labName || 'Labroom').replace(/[^A-Za-z0-9 _-]/g, '').trim();
+
   // Only the activities the teacher actually configured get columns. Iterating
   // VALID_STANDARD_CATEGORIES instead meant every schema slot appeared in the sheet
   // whether or not the room used it, so a lab with two activities exported fourteen.
-  const configuredActivities = ((labroom.sessionalActivities) || [])
+  const allActivities = ((labroom.sessionalActivities) || [])
     .map(act => {
       const targetKey = resolveCategoryKey(act.category);
       const weight = Number(act.allocatedMarks || 0);
@@ -502,6 +508,44 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       return { category: act.category, targetKey, weight, items };
     })
     .filter(Boolean);
+
+  const students = labroom.students || [];
+  const getStudentId = (s) => s.rollNo || s.registrationNo || '';
+
+  // Roster mode needs nothing but the two identity columns.
+  if (mode === 'roster') {
+    const { regular, addDrop } = partitionRoster(students, labroom.sectionPrefix, getStudentId);
+    const widths = rosterWidths([...regular, ...addDrop], getStudentId);
+    const rows = [
+      `${csvCell('Roll / Reg No')},${csvCell('Student Name')}`
+    ];
+    const emit = (list) => {
+      list.forEach((st) => {
+        rows.push(
+          `${csvPad(st.rollNo || st.registrationNo || 'N/A', widths.roll)},${csvPad(st.name || 'Unknown', widths.name)}`
+        );
+      });
+    };
+    emit(regular);
+    if (addDrop.length > 0) {
+      rows.push('');
+      emit(addDrop);
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=${safeName}_Roster.csv`);
+    return res.status(200).send(rows.join('\n'));
+  }
+
+  // "current" mode keeps only activities with marks actually entered, so a
+  // part-finished term does not export a wall of empty zeros.
+  const entriesFor = (doc, targetKey) => {
+    const scores = doc[targetKey];
+    return Array.isArray(scores) ? scores : (scores && scores.title ? [scores] : []);
+  };
+  const hasEntered = (targetKey) =>
+    students.some((st) => entriesFor(markDocMap.get(st._id.toString()) || {}, targetKey).length > 0);
+  const configuredActivities =
+    mode === 'current' ? allActivities.filter((a) => hasEntered(a.targetKey)) : allActivities;
 
   const csvRows = [];
   const headerRow = ['Roll / Reg No', 'Student Name'];
@@ -531,26 +575,23 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
   const marksFromPct = (pct, weightPct) =>
     Number(((Number(pct || 0) / 100) * ((Number(weightPct) || 0) / 100) * labTotal).toFixed(2));
 
-  const sortedStudents = [...(labroom.students || [])].sort((a, b) => {
-    const identA = a.rollNo || a.registrationNo || '';
-    const identB = b.rollNo || b.registrationNo || '';
-    const comp = identA.localeCompare(identB);
-    return comp !== 0 ? comp : (a.name || '').localeCompare(b.name || '');
-  });
+  // Regular students first in ascending identifier order, add/drop students last
+  // behind a blank separator so the two groups are never read as one roster.
+  const { regular, addDrop } = partitionRoster(students, labroom.sectionPrefix, getStudentId);
+  const widths = rosterWidths([...regular, ...addDrop], getStudentId);
+  const totalColumns = headerRow.length;
 
-  sortedStudents.forEach(st => {
+  const emitRows = (list) => {
+    list.forEach(st => {
     const doc = markDocMap.get(st._id.toString()) || {};
     const identifier = st.rollNo || st.registrationNo || 'N/A';
     let rowData = [
-      `"${identifier}"`,
-      `"${st.name || 'Unknown'}"`
+      csvPad(identifier, widths.roll),
+      csvPad(st.name || 'Unknown', widths.name)
     ];
 
     configuredActivities.forEach(({ targetKey, items }) => {
-      const scores = doc[targetKey];
-      const entries = Array.isArray(scores)
-        ? scores
-        : (scores && scores.title ? [scores] : []);
+      const entries = entriesFor(doc, targetKey);
 
       items.forEach(item => {
         const match = entries.find(
@@ -600,11 +641,19 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       `"${graded.gradePoint.toFixed(2)}"`
     );
     csvRows.push(rowData.join(','));
-  });
+    });
+  };
+
+  emitRows(regular);
+  if (addDrop.length > 0) {
+    csvRows.push(blankRow(totalColumns).join(','));
+    emitRows(addDrop);
+  }
 
   const csvString = csvRows.join('\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename=${labroom.labName}_Results.csv`);
+  const suffix = mode === 'current' ? 'Current_Results' : 'Results';
+  res.setHeader('Content-Disposition', `attachment; filename=${safeName}_${suffix}.csv`);
   return res.status(200).send(csvString);
 });
 

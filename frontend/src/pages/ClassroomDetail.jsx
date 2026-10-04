@@ -11,6 +11,7 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
+  ChevronDownIcon,
   Cog6ToothIcon,
   ShieldCheckIcon,
   ExclamationTriangleIcon,
@@ -37,6 +38,7 @@ import BypassLimitsPanel from '../components/BypassLimitsPanel';
 import RoomColorPicker from '../components/RoomColorPicker';
 import GradeBadge from '../components/GradeBadge';
 import { getGradeAndGpa } from '../utils/gradeScale';
+import { partitionRoster, csvPad, rosterWidths, blankRow } from '../utils/exportCsv';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const ClassroomDetail = () => {
@@ -98,6 +100,7 @@ const ClassroomDetail = () => {
 
   // Excel / CSV Sync states for Staff
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [excelCategory, setExcelCategory] = useState('Quizzes');
   const [excelTitle, setExcelTitle] = useState('');
   const [excelTotalMarks, setExcelTotalMarks] = useState(10);
@@ -557,7 +560,60 @@ const ClassroomDetail = () => {
     return getGradeAndGpa(overallPct, hasExam);
   };
 
-  const handleDownloadExcelReport = () => {
+  /**
+   * Export the roster with names and roll numbers only, no marks at all.
+   * Useful as a blank sheet to fill in by hand or to hand to another teacher.
+   */
+  const handleDownloadBlankRoster = () => {
+    try {
+      const rankings = classAnalytics?.rankings || [];
+      if (rankings.length === 0) {
+        showToast('No students in this classroom to export.', 'error');
+        return;
+      }
+
+      const getId = (s) => s?.rollNo || s?.registrationNo || '';
+      const { regular, addDrop } = partitionRoster(rankings, classroom.sectionPrefix, (r) => getId(r.student));
+      const { roll: rollW, name: nameW } = rosterWidths(
+        [...regular, ...addDrop].map((r) => r.student || {}),
+        getId
+      );
+
+      const rows = [`Roll Number${' '.repeat(Math.max(0, rollW - 11))},Student Name`];
+      const emit = (list) => {
+        list.forEach((r) => {
+          const s = r.student || {};
+          rows.push(`${csvPad(s.rollNo || 'N/A', rollW)},${csvPad(s.name || 'Unknown', nameW)}`);
+        });
+      };
+      emit(regular);
+      // A blank line marks where the add/drop block starts so the two groups are
+      // never read as one continuous, unordered roster.
+      if (addDrop.length > 0) {
+        rows.push('');
+        emit(addDrop);
+      }
+
+      downloadCsv(rows.join('\n'), `${classroom.className}_Roster.csv`);
+      showToast('Blank roster downloaded.');
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to generate blank roster.', 'error');
+    }
+  };
+
+  const downloadCsv = (csvString, filename) => {
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadExcelReport = (mode = 'final') => {
     try {
       const rankings = classAnalytics?.rankings || [];
       if (rankings.length === 0) {
@@ -578,145 +634,166 @@ const ClassroomDetail = () => {
       const mWeight = Number(classroom.gradingScheme?.midsWeight) || 35;
       const fWeight = Number(classroom.gradingScheme?.finalsWeight) || 40;
 
-      const headers = ['Roll Number', 'Student Name'];
-      // Group 1: the raw marks behind every activity item.
-      activityItems.forEach(({ category, items }) => {
-        items.forEach(item => {
-          headers.push(`${category} - ${item.title} (${item.totalMarks})`);
-        });
-      });
-      headers.push('');
-      // Group 2: each activity resolved against its own weightage.
-      activityItems.forEach(({ category, weight }) => {
-        headers.push(`${category} %`, `${category} Marks (wt ${weight} of ${sWeight})`, `${category} Wt`);
-      });
-      headers.push('');
-      // Group 3: the sessional block as a whole.
-      headers.push('Sessional %', `Sessional Marks (of ${sWeight})`);
-      headers.push('');
-      // Group 4: the exams, each a slice of the whole 100-mark course.
-      headers.push('Mids %', `Mids Marks (wt ${mWeight} of 100)`, 'Finals %', `Finals Marks (wt ${fWeight} of 100)`);
-      headers.push('');
-      // Group 5: the result.
-      headers.push('Overall %', 'Total Obtained (of 100)', 'Grade', 'Grade Point');
-
-      let csvRows = [headers.join(',')];
-
-      const sortedRankings = [...rankings].sort((a, b) => {
-        const rollA = (a.student?.rollNo || '').toString().toLowerCase();
-        const rollB = (b.student?.rollNo || '').toString().toLowerCase();
-        return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: 'base' });
-      });
-
-      sortedRankings.forEach((r) => {
-        const student = r.student || {};
-        const marksDoc = r.marksDoc || r;
-        const row = [
-          `"${student.rollNo || 'N/A'}"`,
-          `"${student.name || 'Unknown'}"`
-        ];
-
-        // One activity's own percentage, used both for its "%" column and to resolve
-        // the marks it contributes. Bypassed entries are dropped from both sides,
-        // absent entries keep their possible marks and score 0, and a configured
-        // activity with nothing entered yet scores 0 - the same rules the
-        // on-screen cards and the stored grade use.
-const pctOf = (entries, items) => {
-          let obtained = 0, possible = 0, seen = false;
-          (entries || []).forEach((e) => {
-            if (!e || e.isBypassed) return;
-            seen = true;
-            if (!e.isAbsent) obtained += Number(e.obtainedMarks) || 0;
-            // Fall back to the activity's declared total when an older record has
-            // none stored on the entry, otherwise the whole activity reads 0%.
-            const declared = items.find(i =>
-              i.title?.trim().toLowerCase() === e.title?.trim().toLowerCase()
-            );
-            possible += Number(e.totalMarks) || Number(declared?.totalMarks) || 0;
-          });
-          return seen && possible > 0 ? (obtained / possible) * 100 : 0;
-        };
-
-        const activityPcts = {};
-        activityItems.forEach(({ category, items }) => {
+      // ---- column sets per export mode -----------------------------------
+      // "final" is the deep sheet: every configured activity, item, weighted
+      // column and exam. "current" keeps only the activities that actually have
+      // marks entered, so a half-finished term does not export a wall of empty
+      // zeros. "roster" is handled by handleDownloadBlankRoster above.
+      const enteredCats = new Set();
+      rankings.forEach((r) => {
+        const doc = r.marksDoc || r;
+        activityItems.forEach(({ category }) => {
           const { key } = resolveMarkCategory(category);
-          const entries = key ? (marksDoc[key] || []) : [];
-          // The category percentage covers every entry in that category, not just
-          // the ones with columns, so it must match what the app reports.
-          activityPcts[category] = pctOf(entries, items);
-
-          items.forEach(item => {
-            const match = entries.find(
-              e => e?.title?.trim().toLowerCase() === item.title?.trim().toLowerCase()
-            );
-            if (!match) { row.push(''); return; }
-            if (match.isBypassed) { row.push('Bypassed(-)'); return; }
-            if (match.isAbsent) { row.push('Absent(0)'); return; }
-            row.push(match.obtainedMarks ?? '');
-          });
+          const entries = key ? doc[key] : null;
+          if (Array.isArray(entries) && entries.length > 0) enteredCats.add(category);
         });
-
-        row.push('');
-
-        activityItems.forEach(({ category, weight }) => {
-          row.push(`${Number(activityPcts[category] || 0).toFixed(2)}%`);
-          row.push(marksFromPct(activityPcts[category], weight).toFixed(2));
-          row.push(weight);
-        });
-
-        row.push('');
-
-        const sessPct = Number(r.sessionalPercentage || 0);
-        row.push(`${sessPct.toFixed(2)}%`);
-        row.push(marksFromPct(sessPct, sWeight).toFixed(2));
-
-        row.push('');
-
-        const examCell = (entry) => {
-          if (!entry) return '';
-          if (entry.isBypassed) return 'Bypassed(-)';
-          if (entry.isAbsent) return 'Absent(0)';
-          return entry.obtainedMarks ?? '';
-        };
-        const midsMatch = marksDoc.mids || r.mids;
-        const finalsMatch = marksDoc.finals || r.finals;
-
-        const midsPct = midsMatch && !midsMatch.isBypassed && Number(midsMatch.totalMarks) > 0
-          ? (midsMatch.isAbsent ? 0 : ((Number(midsMatch.obtainedMarks) || 0) / Number(midsMatch.totalMarks)) * 100)
-          : 0;
-        const finalsPct = finalsMatch && !finalsMatch.isBypassed && Number(finalsMatch.totalMarks) > 0
-          ? (finalsMatch.isAbsent ? 0 : ((Number(finalsMatch.obtainedMarks) || 0) / Number(finalsMatch.totalMarks)) * 100)
-          : 0;
-
-        row.push(`${Number(midsPct).toFixed(2)}%`);
-        row.push(marksFromPct(midsPct, mWeight).toFixed(2));
-        row.push(`${Number(finalsPct).toFixed(2)}%`);
-        row.push(marksFromPct(finalsPct, fWeight).toFixed(2));
-
-        row.push('');
-
-        const overallPct = Number(r.overallPercentage || 0);
-        const { grade, gradePoint } = gradeForRow(r, overallPct);
-        row.push(`${overallPct.toFixed(2)}%`);
-        // A course is worth a fixed 100 solid marks, so the total obtained is the
-        // overall percentage resolved against 100.
-        row.push(Number(r.overallMarks ?? overallPct).toFixed(2));
-        row.push(`"${grade}"`);
-        row.push(gradePoint.toFixed(2));
-
-        csvRows.push(row.join(','));
       });
+      const includeActivity = (category) => mode !== 'current' || enteredCats.has(category);
+      const shownActivities = activityItems.filter((a) => includeActivity(a.category));
 
-      const csvString = csvRows.join('\n');
-      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${classroom.className}_Marks_Report.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // In "current" mode drop the whole exam block until an exam has been set,
+      // so the sheet shows the sessional work that actually exists.
+      const anyExamEntered = rankings.some((r) => {
+        const doc = r.marksDoc || r;
+        return !!(doc.mids?.obtainedMarks || doc.finals?.obtainedMarks);
+      });
+      const includeExams = mode !== 'current' || anyExamEntered;
 
+      // Recompute headers and rows against the filtered activity list.
+      const shownHeaders = [];
+      shownHeaders.push('Roll Number', 'Student Name');
+      shownActivities.forEach(({ category, items }) => {
+        items.forEach(item => shownHeaders.push(`${category} - ${item.title} (${item.totalMarks})`));
+      });
+      shownHeaders.push('');
+      shownActivities.forEach(({ category, weight }) => {
+        shownHeaders.push(`${category} %`, `${category} Marks (wt ${weight} of ${sWeight})`, `${category} Wt`);
+      });
+      shownHeaders.push('');
+      shownHeaders.push('Sessional %', `Sessional Marks (of ${sWeight})`);
+      shownHeaders.push('');
+      if (includeExams) {
+        shownHeaders.push('Mids %', `Mids Marks (wt ${mWeight} of 100)`, 'Finals %', `Finals Marks (wt ${fWeight} of 100)`);
+      }
+      shownHeaders.push('');
+      shownHeaders.push('Overall %', 'Total Obtained (of 100)', 'Grade', 'Grade Point');
+
+      let csvRows = [shownHeaders.join(',')];
+
+      // Regular students first in ascending roll order, then add/drop students
+      // behind a blank separator line, so the two groups are never mixed up.
+      const getStudentId = (s) => s?.rollNo || s?.registrationNo || '';
+      const { regular, addDrop } = partitionRoster(rankings, classroom.sectionPrefix, (r) => getStudentId(r.student));
+      const widths = rosterWidths(
+        [...regular, ...addDrop].map((r) => r.student || {}),
+        getStudentId
+      );
+      const totalColumns = shownHeaders.length;
+
+      // One activity's own percentage, used both for its "%" column and to resolve
+      // the marks it contributes. Bypassed entries are dropped from both sides,
+      // absent entries keep their possible marks and score 0, and a configured
+      // activity with nothing entered yet scores 0 - the same rules the
+      // on-screen cards and the stored grade use.
+      const pctOf = (entries, items) => {
+        let obtained = 0, possible = 0, seen = false;
+        (entries || []).forEach((e) => {
+          if (!e || e.isBypassed) return;
+          seen = true;
+          if (!e.isAbsent) obtained += Number(e.obtainedMarks) || 0;
+          // Fall back to the activity's declared total when an older record has
+          // none stored on the entry, otherwise the whole activity reads 0%.
+          const declared = items.find(i =>
+            i.title?.trim().toLowerCase() === e.title?.trim().toLowerCase()
+          );
+          possible += Number(e.totalMarks) || Number(declared?.totalMarks) || 0;
+        });
+        return seen && possible > 0 ? (obtained / possible) * 100 : 0;
+      };
+
+      const emitRows = (list) => {
+        list.forEach((r) => {
+          const student = r.student || {};
+          const marksDoc = r.marksDoc || r;
+          const row = [
+            csvPad(student.rollNo || 'N/A', widths.roll),
+            csvPad(student.name || 'Unknown', widths.name)
+          ];
+
+          const activityPcts = {};
+          shownActivities.forEach(({ category, items }) => {
+            const { key } = resolveMarkCategory(category);
+            const entries = key ? (marksDoc[key] || []) : [];
+            // The category percentage covers every entry in that category, not just
+            // the ones with columns, so it must match what the app reports.
+            activityPcts[category] = pctOf(entries, items);
+
+            items.forEach(item => {
+              const match = entries.find(
+                e => e?.title?.trim().toLowerCase() === item.title?.trim().toLowerCase()
+              );
+              if (!match) { row.push(''); return; }
+              if (match.isBypassed) { row.push('Bypassed(-)'); return; }
+              if (match.isAbsent) { row.push('Absent(0)'); return; }
+              row.push(match.obtainedMarks ?? '');
+            });
+          });
+
+          row.push('');
+
+          shownActivities.forEach(({ category, weight }) => {
+            row.push(`${Number(activityPcts[category] || 0).toFixed(2)}%`);
+            row.push(marksFromPct(activityPcts[category], weight).toFixed(2));
+            row.push(weight);
+          });
+
+          row.push('');
+
+          const sessPct = Number(r.sessionalPercentage || 0);
+          row.push(`${sessPct.toFixed(2)}%`);
+          row.push(marksFromPct(sessPct, sWeight).toFixed(2));
+
+          row.push('');
+
+          if (includeExams) {
+            const midsMatch = marksDoc.mids || r.mids;
+            const finalsMatch = marksDoc.finals || r.finals;
+
+            const midsPct = midsMatch && !midsMatch.isBypassed && Number(midsMatch.totalMarks) > 0
+              ? (midsMatch.isAbsent ? 0 : ((Number(midsMatch.obtainedMarks) || 0) / Number(midsMatch.totalMarks)) * 100)
+              : 0;
+            const finalsPct = finalsMatch && !finalsMatch.isBypassed && Number(finalsMatch.totalMarks) > 0
+              ? (finalsMatch.isAbsent ? 0 : ((Number(finalsMatch.obtainedMarks) || 0) / Number(finalsMatch.totalMarks)) * 100)
+              : 0;
+
+            row.push(`${Number(midsPct).toFixed(2)}%`);
+            row.push(marksFromPct(midsPct, mWeight).toFixed(2));
+            row.push(`${Number(finalsPct).toFixed(2)}%`);
+            row.push(marksFromPct(finalsPct, fWeight).toFixed(2));
+          }
+
+          row.push('');
+
+          const overallPct = Number(r.overallPercentage || 0);
+          const { grade, gradePoint } = gradeForRow(r, overallPct);
+          row.push(`${overallPct.toFixed(2)}%`);
+          // A course is worth a fixed 100 solid marks, so the total obtained is the
+          // overall percentage resolved against 100.
+          row.push(Number(r.overallMarks ?? overallPct).toFixed(2));
+          row.push(`"${grade}"`);
+          row.push(gradePoint.toFixed(2));
+
+          csvRows.push(row.join(','));
+        });
+      };
+
+      emitRows(regular);
+      if (addDrop.length > 0) {
+        csvRows.push(blankRow(totalColumns).join(','));
+        emitRows(addDrop);
+      }
+
+      downloadCsv(csvRows.join('\n'), `${classroom.className}_Marks_Report.csv`);
       showToast('Excel/CSV report downloaded successfully!');
     } catch (err) {
       console.error(err);
@@ -1425,10 +1502,48 @@ const studentBreakdownItems = [
             {isStaffOrAdmin && (
               <>
                 <button type="button" onClick={() => setIsAddStudentModalOpen(true)} className="lm-btn-ghost shrink-0 text-orange-200 hover:text-orange-100"><PlusIcon className="w-4 h-4" />Student</button>
-                <button type="button" onClick={handleDownloadExcelReport} className="lm-btn-ghost shrink-0 border-emerald-500/40 text-emerald-300 hover:text-emerald-200">
-                  <ArrowDownTrayIcon className="w-4 h-4" />
-                  Download Excel
-                </button>
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsExportMenuOpen(v => !v)}
+                    className="lm-btn-ghost border-emerald-500/40 text-emerald-300 hover:text-emerald-200"
+                  >
+                    <ArrowDownTrayIcon className="w-4 h-4" />
+                    Download
+                    <ChevronDownIcon className="w-3.5 h-3.5" />
+                  </button>
+                  {isExportMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsExportMenuOpen(false)} aria-hidden="true" />
+                      <div className="absolute right-0 mt-1 w-64 rounded-xl border border-white/10 bg-[#0b1220] shadow-2xl p-1.5 z-50">
+                        <button
+                          type="button"
+                          onClick={() => { setIsExportMenuOpen(false); handleDownloadBlankRoster(); }}
+                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
+                        >
+                          <span className="font-semibold text-emerald-300">Blank Roster</span>
+                          <span className="block text-[11px] text-slate-400">Names and roll numbers only, no marks</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setIsExportMenuOpen(false); handleDownloadExcelReport('current'); }}
+                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
+                        >
+                          <span className="font-semibold text-emerald-300">Current Result</span>
+                          <span className="block text-[11px] text-slate-400">Only activities that have marks entered</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setIsExportMenuOpen(false); handleDownloadExcelReport('final'); }}
+                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
+                        >
+                          <span className="font-semibold text-emerald-300">Final Result</span>
+                          <span className="block text-[11px] text-slate-400">Every activity and weighted breakdown</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button type="button" onClick={() => setIsExcelModalOpen(true)} className="lm-btn-ghost shrink-0 text-orange-200 hover:text-orange-100">
                   <ChartBarIcon className="w-4 h-4" />
                   Upload Sync
