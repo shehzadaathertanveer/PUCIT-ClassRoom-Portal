@@ -5,6 +5,7 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
+const { computeSessionalBreakdown } = require('../utils/sessionalWeights');
 
 const STANDARD_CATEGORIES = [
   'quizzes', 
@@ -495,40 +496,17 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       finalProject: { totalMarks: 0, obtainedMarks: 0 } 
     };
 
-    let totalObtSessional = 0;
-    let totalTotSessional = 0;
-
-    const evaluationCategories = [
-      'quizzes', 'assignments', 'presentations', 'projects', 
-      'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'
-    ];
-
-    evaluationCategories.forEach(cat => {
-      if (Array.isArray(doc[cat])) {
-        doc[cat].forEach(item => {
-          if (item.isBypassed) return; // excluded from both sides
-          if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
-          totalTotSessional += (Number(item.totalMarks) || 0);
-        });
-      }
-    });
-
-    if (Array.isArray(doc.customActivities)) {
-      doc.customActivities.forEach(customCat => {
-        if (Array.isArray(customCat.items)) {
-          customCat.items.forEach(item => {
-            if (item.isBypassed) return; // excluded from both sides
-            if (!item.isAbsent) totalObtSessional += (Number(item.obtainedMarks) || 0);
-            totalTotSessional += (Number(item.totalMarks) || 0);
-          });
-        }
-      });
-    }
-
-    const sessionalPercentage = totalTotSessional > 0 ? (totalObtSessional / totalTotSessional) * 100 : 0;
-    if (totalTotSessional > 0) { 
-      sumSessional += sessionalPercentage; 
-      sessionalCount++; 
+    // The sessional percentage comes from the SAME helper the pre-save hook uses to
+    // store studentClassPercentage. This endpoint used to compute it as a pooled
+    // ratio (total obtained / total possible across every activity), which is a
+    // different number from the weighted blend the stored grade uses whenever
+    // activity weights are not proportional to raw marks. The result was a
+    // student's leaderboard percentage disagreeing with their own letter grade.
+    const sessionalBreakdown = computeSessionalBreakdown(doc, classroom);
+    const sessionalPercentage = sessionalBreakdown.sessionalPercentage;
+    if (sessionalBreakdown.hasSessionals) {
+      sumSessional += sessionalPercentage;
+      sessionalCount++;
     }
 
     let midsPercentage = 0;
@@ -555,7 +533,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
     // as 100% - the letter grade and the leaderboard position disagreed.
     let weightedSum = 0;
     let activeWeightSum = 0;
-    if (totalTotSessional > 0) { weightedSum += sessionalPercentage * sW; activeWeightSum += sW; }
+    if (sessionalBreakdown.hasSessionals) { weightedSum += sessionalPercentage * sW; activeWeightSum += sW; }
     if (hasMids) { weightedSum += midsPercentage * mW; activeWeightSum += mW; }
     if (hasFinals) { weightedSum += finalsPercentage * fW; activeWeightSum += fW; }
 
@@ -635,7 +613,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
 
       if (isExam) {
         const exam = doc[catKey];
-        if (exam && exam.totalMarks > 0) {
+        if (exam && exam.totalMarks > 0 && !exam.isBypassed) {
           catObtained = exam.isAbsent ? 0 : (Number(exam.obtainedMarks) || 0);
           catTotal = Number(exam.totalMarks) || 0;
           catGraded = true;
@@ -643,6 +621,11 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
       } else if (Array.isArray(doc[catKey])) {
         doc[catKey].forEach(item => {
           if (!item || !item.title) return;
+          // Bypassed entries are excluded from both sides here, matching
+          // getArrayTotals in markSchema. Counting their possible marks without
+          // their earned marks made the class average for a category look lower
+          // the more students a teacher bypassed.
+          if (item.isBypassed) return;
           catTotal += Number(item.totalMarks) || 0;
           if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
             catObtained += Number(item.obtainedMarks) || 0;
@@ -726,6 +709,7 @@ exports.getClassAnalytics = catchAsync(async (req, res, next) => {
         if (!ca || !ca.categoryName || ca.categoryName.trim().toLowerCase() !== key) return;
         (ca.items || []).forEach(item => {
           if (!item || !item.title) return;
+          if (item.isBypassed) return;
           catTotal += Number(item.totalMarks) || 0;
           if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
             catObtained += Number(item.obtainedMarks) || 0;

@@ -148,24 +148,12 @@ export default function BypassLimitsPanel({
     }
   };
 
-  // Only the categories this room actually has. activityCounts === null means an
-  // older backend that cannot report them, so fall back to the full list.
+  // Show ALL categories in the bypass tab so teachers can set limits for any
+  // activity (even if not yet created/graded) - the user explicitly asked for
+  // "bypass limit input boxes for ALL activities"
   const visibleCategories = useMemo(() => {
-    if (!activityCounts) return categories;
-    return categories.filter((cat) => Number(activityCounts[cat.key] || 0) > 0);
-  }, [categories, activityCounts]);
-
-  const visibleKeys = useMemo(
-    () => new Set(visibleCategories.map((c) => c.key)),
-    [visibleCategories]
-  );
-
-  // Caps set on a category that is not currently in the room. These are kept in
-  // the payload but not rendered, so the teacher is not confused by an empty row.
-  const dormantCount = useMemo(
-    () => Object.keys(limits).filter((k) => Number(limits[k]) > 0 && !visibleKeys.has(k)).length,
-    [limits, visibleKeys]
-  );
+    return categories;
+  }, [categories]);
 
   const enabledCount = visibleCategories.filter((c) => Number(limits[c.key] || 0) > 0).length;
   const totalCap = visibleCategories.reduce((a, c) => a + (Number(limits[c.key]) || 0), 0);
@@ -197,9 +185,7 @@ export default function BypassLimitsPanel({
 
       {visibleCategories.length === 0 ? (
         <p className="text-[11px] sm:text-xs text-amber-300/90 leading-relaxed rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-3 py-2.5">
-          This {roomType === 'labroom' ? 'labroom' : 'classroom'} has no activities yet, so there is
-          nothing to cap. Add a quiz, assignment, or other activity and its category will appear
-          here automatically.
+          No activities configured for this {roomType === 'labroom' ? 'labroom' : 'classroom'}.
         </p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -210,7 +196,7 @@ export default function BypassLimitsPanel({
             // The server will not accept a cap equal to the activity count, since
             // that would let a student bypass every one of them. Show the ceiling
             // instead of letting the teacher hit a validation error.
-            const maxAllowed = slots !== null ? Math.max(0, slots - 1) : null;
+            const maxAllowed = slots !== null && slots > 0 ? Math.max(0, slots - 1) : undefined;
             return (
               <div key={cat.key} className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-2.5 py-2">
                 <span className={`text-[11px] sm:text-xs truncate ${cat.isCustom ? 'text-purple-300' : 'text-slate-300'}`} title={cat.label}>
@@ -245,14 +231,6 @@ export default function BypassLimitsPanel({
             );
           })}
         </div>
-      )}
-
-      {dormantCount > 0 && (
-        <p className="text-[11px] text-slate-400">
-          {dormantCount} categor{dormantCount === 1 ? 'y' : 'ies'} with a saved cap{' '}
-          {dormantCount === 1 ? 'is' : 'are'} not used in this room yet. {dormantCount === 1 ? 'It is' : 'They are'} kept and
-          will reappear if the activity comes back.
-        </p>
       )}
 
       {!canEdit && (

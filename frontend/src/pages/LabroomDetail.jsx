@@ -806,38 +806,55 @@ const LabroomDetail = () => {
     ? labroom.sessionalActivities
     : [{ category: 'Lab Tasks', allocatedMarks: 50 }, { category: 'Vivas', allocatedMarks: 30 }, { category: 'Lab Tests', allocatedMarks: 20 }];
 
+  // Mirrors the weighted model in getLabroomAnalytics: each configured activity
+  // contributes its CATEGORY percentage (all that category's marks combined)
+//  weighted by allocatedMarks, normalised by the weights actually in play.
+//
+//  Three things this must get right, because the leaderboard falls back to it
+//  whenever the analytics payload has no value for a category:
+//   1. Bypassed ("B") entries drop out of BOTH sides - keeping their possible
+//      marks would drag the percentage down for a student who was never asked.
+//   2. Absent entries still count toward the possible total. Only skipping the
+//      earned marks is correct; skipping the possible marks as well inflated
+//      everyone else's percentage for that category.
+//   3. A category with no marks for this student contributes nothing to either
+//      side of the ratio. Folding its weight into the denominator while adding a
+//      0% numerator made early-term students look like they had failed.
   const calculateStudentPercentages = (markDoc) => {
     if (!markDoc) return { overall: '0.00', categories: {} };
 
-    let totalAllocatedWeight = 0;
+    let totalActiveWeight = 0;
     let weightedEarnedSum = 0;
-    let catPercentages = {};
+    const catPercentages = {};
 
     sessionalActivitiesList.forEach(act => {
       const targetKey = getCategoryTargetKey(act.category);
-      const itemsList = markDoc[targetKey] || [];
+      const entries = markDoc[targetKey];
       const allocatedWeight = Number(act.allocatedMarks || 0);
-      totalAllocatedWeight += allocatedWeight;
 
-      if (itemsList.length > 0) {
-        let catObtained = 0;
-        let catTotal = 0;
-        itemsList.forEach(item => {
-          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
-            catObtained += Number(item.obtainedMarks || 0);
-            catTotal += Number(item.totalMarks || 10);
-          }
-        });
+      let catObtained = 0;
+      let catTotal = 0;
+      const items = Array.isArray(entries) ? entries : (entries && entries.title ? [entries] : []);
+      items.forEach(item => {
+        if (!item || item.isBypassed) return;
+        if (!item.isAbsent) catObtained += Number(item.obtainedMarks || 0);
+        catTotal += Number(item.totalMarks || 0);
+      });
 
-        const catPct = catTotal > 0 ? (catObtained / catTotal) * 100 : 0;
-        catPercentages[act.category] = catPct.toFixed(2);
-        weightedEarnedSum += (catPct * allocatedWeight);
-      } else {
+      if (catTotal <= 0) {
         catPercentages[act.category] = '0.00';
+        return;
+      }
+
+      const catPct = (catObtained / catTotal) * 100;
+      catPercentages[act.category] = catPct.toFixed(2);
+      if (allocatedWeight > 0) {
+        weightedEarnedSum += catPct * allocatedWeight;
+        totalActiveWeight += allocatedWeight;
       }
     });
 
-    const overallPct = totalAllocatedWeight > 0 ? (weightedEarnedSum / totalAllocatedWeight) : 0;
+    const overallPct = totalActiveWeight > 0 ? (weightedEarnedSum / totalActiveWeight) : 0;
     return {
       overall: overallPct.toFixed(2),
       categories: catPercentages
@@ -868,8 +885,11 @@ const LabroomDetail = () => {
       const scores = doc[targetKey] || r[targetKey] || [];
       const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
-      if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
-        totalObtained += Number(match.obtainedMarks);
+      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
+        // An absent student counts as 0 earned but STILL occupies their share of
+        // the possible total. Skipping them entirely (both sides) let absences
+        // inflate the class average, which is the opposite of absent = 0.
+        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
         totalPossible += Number(match.totalMarks || maxMarks);
         count++;
       }
@@ -897,8 +917,10 @@ const LabroomDetail = () => {
       const scores = doc[targetKey] || r[targetKey] || [];
       const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
-      if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
-        totalObtained += Number(match.obtainedMarks);
+      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
+        // Absent = 0 for the raw mark average too, otherwise the average silently
+        // skips every absent student and reads far higher than the class earned.
+        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
         count++;
       }
     });
@@ -995,7 +1017,7 @@ const LabroomDetail = () => {
 
     sessionalActivitiesList.forEach(act => {
       const targetKey = getCategoryTargetKey(act.category);
-      const val = found[targetKey + 'Percentage'] || found[act.category.toLowerCase() + 'Percentage'] || found[act.category];
+      const val = found[targetKey + 'Percentage'] || found[act.category.toLowerCase() + 'Percentage'] || found[act.category.toLowerCase()] || found[act.category];
       if (val !== undefined && val !== null && !isNaN(val)) {
         catPercentages[act.category] = Number(val).toFixed(2);
       }
@@ -1027,8 +1049,12 @@ const LabroomDetail = () => {
 
       if (leaderboardFilter !== 'overall') {
         const targetKey = getCategoryTargetKey(leaderboardFilter);
-        scoreA = Number(a[targetKey + 'Percentage'] || a[leaderboardFilter + 'Percentage'] || calculateStudentPercentages(docA).categories[leaderboardFilter] || 0);
-        scoreB = Number(b[targetKey + 'Percentage'] || b[leaderboardFilter + 'Percentage'] || calculateStudentPercentages(docB).categories[leaderboardFilter] || 0);
+        const calcA2 = calculateStudentPercentages(docA);
+        const calcB2 = calculateStudentPercentages(docB);
+        const catMatchA = Object.keys(calcA2.categories).find(k => k.toLowerCase() === leaderboardFilter.toLowerCase());
+        const catMatchB = Object.keys(calcB2.categories).find(k => k.toLowerCase() === leaderboardFilter.toLowerCase());
+        scoreA = Number(a[targetKey + 'Percentage'] || a[leaderboardFilter.toLowerCase() + 'Percentage'] || a[leaderboardFilter + 'Percentage'] || calcA2.categories[leaderboardFilter] || (catMatchA ? calcA2.categories[catMatchA] : 0)) || 0;
+        scoreB = Number(b[targetKey + 'Percentage'] || b[leaderboardFilter.toLowerCase() + 'Percentage'] || b[leaderboardFilter + 'Percentage'] || calcB2.categories[leaderboardFilter] || (catMatchB ? calcB2.categories[catMatchB] : 0)) || 0;
       }
 
       return scoreB - scoreA;
@@ -1509,7 +1535,9 @@ const LabroomDetail = () => {
                       let currentScore = entry.overallPercentage || entry.percentage || calculateStudentPercentages(doc).overall;
                       if (leaderboardFilter !== 'overall') {
                         const targetKey = getCategoryTargetKey(leaderboardFilter);
-                        currentScore = entry[targetKey + 'Percentage'] || entry[leaderboardFilter + 'Percentage'] || calculateStudentPercentages(doc).categories[leaderboardFilter] || 0;
+                        const calcEntry = calculateStudentPercentages(doc);
+                        const catMatch = Object.keys(calcEntry.categories).find(k => k.toLowerCase() === leaderboardFilter.toLowerCase());
+                        currentScore = entry[targetKey + 'Percentage'] || entry[leaderboardFilter.toLowerCase() + 'Percentage'] || entry[leaderboardFilter + 'Percentage'] || calcEntry.categories[leaderboardFilter] || (catMatch ? calcEntry.categories[catMatch] : 0) || 0;
                       }
 
                       return (
@@ -1609,7 +1637,12 @@ const LabroomDetail = () => {
                                 <div>
                                   <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Your %</span>
                                   <span className="font-mono text-blue-400 font-black text-sm break-words">
-                                    {studentItemScore && !studentItemScore.isAbsent ? `${studentPercentage}%` : 'N/A'}
+                                    {/* Absent is a real 0%, not missing data - showing "N/A" hid a genuine zero. */}
+                                     {studentItemScore
+                                        ? studentItemScore.isBypassed
+                                          ? 'Bypassed'
+                                          : `${studentPercentage}%`
+                                        : 'Pending'}
                                   </span>
                                 </div>
                                 <div className="pt-1 border-t border-white/5">
@@ -1730,24 +1763,24 @@ const LabroomDetail = () => {
               <div className="space-y-1.5">
                 <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-extrabold tracking-wider">Enrolled Students ({activeStudents.length})</p>
                 {activeStudents.map((st, i) => (
-                  <div key={i} className="lm-card-flat p-3.5 flex items-center justify-between gap-3 text-xs">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-slate-100 font-bold truncate">{st.name}</p>
+                  <div key={i} className="lm-card-flat p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 text-xs">
+                    <div className="min-w-0">
+                      <p className="text-slate-100 font-bold break-words">{st.name}</p>
                       <p className="font-mono text-cyan-400 break-all">{st.rollNo}</p>
                     </div>
-                    <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0">
                       {isStaffOrAdmin && (
                         <>
-                          <button onClick={() => openStudentProfile(st)} title="View Profile" aria-label="View Profile" className="lm-btn-ghost">
+                          <button onClick={() => openStudentProfile(st)} title="View Profile" aria-label="View Profile" className="lm-btn-ghost px-2 py-1.5 text-[10px]">
                             <EyeIcon className="w-3.5 h-3.5" />
                             Profile
                           </button>
-                          <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" aria-label="Reset Password" className="lm-btn-ghost">
+                          <button onClick={() => handleStaffResetStudentPassword(st._id, st.name)} title="Reset Password" aria-label="Reset Password" className="lm-btn-ghost px-2 py-1.5 text-[10px]">
                             <KeyIcon className="w-3.5 h-3.5" />
                             Reset
                           </button>
-                          <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" aria-label="Remove Student" className="lm-btn-ghost !px-2.5 !py-2 text-red-300 border border-red-500/30">
-                            <XMarkIcon className="w-3.5 h-3.5" />
+                          <button onClick={() => handleRemoveStudent(st._id, st.name)} title="Remove Student" aria-label="Remove Student" className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-red-950/70 hover:bg-red-900 text-red-300 border border-red-500/40 transition-all cursor-pointer shrink-0">
+                            <XMarkIcon className="w-4 h-4" />
                           </button>
                         </>
                       )}
@@ -2335,7 +2368,7 @@ const LabroomDetail = () => {
 
       {isSettingsModalOpen && (
         <div className="lm-scrim">
-          <div className="lm-modal max-w-lg p-4 sm:p-6 space-y-5">
+          <div className="lm-modal max-w-2xl p-4 sm:p-6 space-y-5">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-base font-extrabold text-slate-100 uppercase flex items-center gap-2 min-w-0 break-words">
                 <Cog6ToothIcon className="w-4 h-4 shrink-0" />

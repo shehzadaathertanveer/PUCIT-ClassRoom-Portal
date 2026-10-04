@@ -1,24 +1,9 @@
 const mongoose = require("mongoose");
 const Classroom = require("./classRoomSchema");
+const { computeSessionalBreakdown, STANDARD_SESSIONAL_KEYS } = require("../utils/sessionalWeights");
 
 const getPercentage = (obtained = 0, total = 0) => {
   return total > 0 ? Number(((obtained / total) * 100).toFixed(2)) : 0;
-};
-
-const getArrayTotals = (items = []) => {
-  return items.reduce(
-    (acc, curr) => {
-      // A bypassed entry is treated as if it never existed for this student:
-      // it contributes to neither the numerator nor the denominator. Skipping
-      // only the numerator would penalise them; including it in the
-      // denominator would inflate their possible total.
-      if (curr.isBypassed) return acc;
-      acc.obtained += (curr.isAbsent ? 0 : (curr.obtainedMarks || 0));
-      acc.total += curr.totalMarks || 0;
-      return acc;
-    },
-    { obtained: 0, total: 0 }
-  );
 };
 
 // Official PUCIT Grading Letter Threshold Calculator
@@ -125,22 +110,6 @@ const markSchema = new mongoose.Schema(
 
 markSchema.index({ classroom: 1, student: 1 }, { unique: true });
 
-// Map category names to exact schema array keys
-const getCategoryTargetKey = (catName = '') => {
-  const clean = catName.trim().toLowerCase();
-  if (clean.includes('quiz')) return 'quizzes';
-  if (clean.includes('assign')) return 'assignments';
-  if (clean.includes('present')) return 'presentations';
-  if (clean.includes('final project')) return 'finalProject';
-  if (clean.includes('project')) return 'projects';
-  if (clean.includes('homework')) return 'homework';
-  if (clean.includes('class activ')) return 'classActivities';
-  if (clean.includes('particip')) return 'classParticipation';
-  if (clean.includes('viva')) return 'vivas';
-  if (clean.includes('special')) return 'specialMarks';
-  return clean;
-};
-
 markSchema.pre("save", async function () {
   let classroom = null;
   try {
@@ -149,62 +118,38 @@ markSchema.pre("save", async function () {
     console.warn("Could not fetch classroom in markSchema pre-save:", err.message);
   }
 
-  const standardKeys = [
-    'quizzes', 'assignments', 'presentations', 'projects', 
-    'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'
-  ];
-
   let catPercentagesMap = {};
-  let totalSessionalEarnedWeighted = 0;
-  let totalSessionalWeight = 0;
 
-  const sessionalConfig = classroom?.sessionalActivities || [];
-  const weightMap = {};
-  sessionalConfig.forEach(act => {
-    const key = getCategoryTargetKey(act.category);
-    weightMap[key] = Number(act.allocatedMarks || 0);
-  });
-
-  // Process all standard sessional categories present on document
-  standardKeys.forEach((key) => {
-    if (this[key] && Array.isArray(this[key]) && this[key].length > 0) {
+// Per-item percentages are still derived here because they are persisted on the
+  // document, but the CATEGORY and overall sessional maths is delegated to
+  // computeSessionalBreakdown so this hook and getClassAnalytics cannot drift
+  // apart and report two different percentages for the same student.
+  STANDARD_SESSIONAL_KEYS.forEach((key) => {
+    if (Array.isArray(this[key]) && this[key].length > 0) {
       this[key].forEach((item) => {
         if (item.isBypassed) { item.percentage = 0; return; }
         if (item.isAbsent) item.obtainedMarks = 0;
         item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
       });
-
-      const totals = getArrayTotals(this[key]);
-      const catPct = getPercentage(totals.obtained, totals.total);
-      catPercentagesMap[key] = catPct;
-
-      const weight = weightMap[key] !== undefined ? weightMap[key] : (100 / standardKeys.length);
-      totalSessionalEarnedWeighted += (catPct * weight);
-      totalSessionalWeight += weight;
     }
   });
 
-  // Process custom sessional categories
   if (Array.isArray(this.customActivities)) {
     this.customActivities.forEach((customCat) => {
-      const catName = customCat.categoryName || 'custom';
-      const catKey = catName.trim().toLowerCase();
       if (Array.isArray(customCat.items) && customCat.items.length > 0) {
         customCat.items.forEach((item) => {
           if (item.isBypassed) { item.percentage = 0; return; }
           if (item.isAbsent) item.obtainedMarks = 0;
           item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
         });
-        const totals = getArrayTotals(customCat.items);
-        const catPct = getPercentage(totals.obtained, totals.total);
-        catPercentagesMap[catKey] = catPct;
-
-        const weight = weightMap[catKey] !== undefined ? weightMap[catKey] : 10;
-        totalSessionalEarnedWeighted += (catPct * weight);
-        totalSessionalWeight += weight;
       }
     });
   }
+
+  // Items marked absent had their obtainedMarks zeroed above, so the shared
+  // breakdown sees a clean document.
+  const sessionalBreakdown = computeSessionalBreakdown(this, classroom);
+  catPercentagesMap = sessionalBreakdown.categoryPercentages;
 
   // Process Mids
   if (this.mids) {
@@ -240,8 +185,8 @@ markSchema.pre("save", async function () {
   let activeWeightSum = 0;
   let weightedScoreSum = 0;
 
-  const calculatedSessionalPct = totalSessionalWeight > 0 ? (totalSessionalEarnedWeighted / totalSessionalWeight) : 0;
-  if (totalSessionalWeight > 0) {
+  const calculatedSessionalPct = sessionalBreakdown.sessionalPercentage;
+  if (sessionalBreakdown.hasSessionals) {
     weightedScoreSum += calculatedSessionalPct * sessionalWeight;
     activeWeightSum += sessionalWeight;
   }

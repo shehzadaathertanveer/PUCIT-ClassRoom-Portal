@@ -200,6 +200,33 @@ const ClassroomDetail = () => {
     return 'quizzes';
   };
 
+  // The set of category keys that live directly on the marks document. Anything
+  // outside this set is a teacher-defined (custom) activity, which is stored
+  // under customActivities[].items instead.
+  const STANDARD_MARK_KEYS = [
+    'quizzes', 'assignments', 'presentations', 'projects', 'homework',
+    'classActivities', 'classParticipation', 'vivas', 'specialMarks',
+    'mids', 'finals', 'finalProject'
+  ];
+
+  // Resolves a configured activity label to where its marks actually live.
+  //
+  // getCategoryTargetKey cannot be reused here: it ends in `return 'quizzes'`
+  // for anything it does not recognise, which is correct for item CREATION
+  // (an unknown label must land somewhere) but catastrophic for the leaderboard
+  // - a custom "Attendance" activity would resolve to quizzes, overwrite the real
+  // quizzes percentage in the per-category map, and render a second "Quizzes"
+  // chip. Custom categories are keyed by their lowercased name, matching the key
+  // markSchema uses in categoryPercentages.
+  const resolveMarkCategory = (catName = '') => {
+    const clean = catName.trim().toLowerCase();
+    if (!clean) return { key: '', isCustom: false };
+    if (STANDARD_MARK_KEYS.includes(clean)) return { key: clean, isCustom: false };
+    const resolved = getCategoryTargetKey(catName);
+    if (STANDARD_MARK_KEYS.includes(resolved)) return { key: resolved, isCustom: false };
+    return { key: clean, isCustom: true };
+  };
+
   const getItemsForCategory = (catName = '') => {
     if (!classroom) return [];
     const targetKey = getCategoryTargetKey(catName);
@@ -869,8 +896,11 @@ const ClassroomDetail = () => {
       const scores = doc[targetKey] || r[targetKey] || [];
       match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
-      if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
-        totalObtained += Number(match.obtainedMarks);
+      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
+        // An absent student counts as 0 earned but STILL occupies their share of
+        // the possible total. Skipping them entirely (both sides) let absences
+        // inflate the class average, which is the opposite of absent = 0.
+        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
         totalPossible += Number(match.totalMarks || maxMarks);
         count++;
       }
@@ -893,8 +923,10 @@ const ClassroomDetail = () => {
       const scores = doc[targetKey] || r[targetKey] || [];
       match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       
-      if (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)) {
-        totalObtained += Number(match.obtainedMarks);
+      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
+        // Absent = 0 for the raw mark average too, otherwise the average silently
+        // skips every absent student and reads far higher than the class earned.
+        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
         count++;
       }
     });
@@ -943,37 +975,59 @@ const ClassroomDetail = () => {
 
     const targetKey = getCategoryTargetKey(catName);
 
-    if (targetKey === 'mids' || targetKey === 'finals') {
-      const item = studentMark[targetKey];
-      if (item && !item.isAbsent) {
-        obtained += Number(item.obtainedMarks || 0);
-        total += Number(item.totalMarks || 0);
-      }
-    } else if (studentMark[targetKey] && Array.isArray(studentMark[targetKey])) {
-      studentMark[targetKey].forEach(item => {
-        if (!item.isAbsent) {
-          obtained += Number(item.obtainedMarks || 0);
-          total += Number(item.totalMarks || 0);
-        }
-      });
+    // Bypassed entries are excluded from both sides, and an absent entry still
+    // contributes its possible marks - so this summary always agrees with
+    // computeCategoryPercentage and with the backend totals.
+    const collect = (item) => {
+      if (!item || item.isBypassed) return;
+      if (!item.isAbsent) obtained += Number(item.obtainedMarks || 0);
+      total += Number(item.totalMarks || 0);
+    };
+
+    const entries = studentMark[targetKey];
+    if (Array.isArray(entries)) {
+      entries.forEach(collect);
+    } else if (entries && typeof entries === 'object') {
+      collect(entries);
     }
     return { obtained, total };
   };
 
-  // Helper to compute category percentages safely from marksDoc for student/rankings
+  // Percentage for ONE category only, out of 100 - this is what a leaderboard
+  // filtered to that category ranks by, and it must agree with the backend.
+  //
+  //  - Bypassed ("B") entries are excluded from BOTH sides. They count for
+  //    nothing, not as a zero, matching getArrayTotals in markSchema.
+  //  - Absent entries still contribute their possible marks. Dropping the
+  //    possible side too would silently rescale the category for that student.
+  //  - Custom (teacher-defined) activities are not top-level keys on the marks
+  //    document; they live in customActivities[].items under the lowercased
+  //    category name, so they need their own lookup.
   const computeCategoryPercentage = (marksDoc, catKey) => {
     if (!marksDoc) return 0;
     let obt = 0;
     let tot = 0;
-    const items = marksDoc[catKey] || [];
-    if (Array.isArray(items)) {
-      items.forEach(item => {
-        if (!item.isAbsent) obt += Number(item.obtainedMarks || 0);
-        tot += Number(item.totalMarks || 0);
-      });
-    } else if (items && typeof items === 'object' && items.totalMarks > 0) {
-      if (!items.isAbsent) obt += Number(items.obtainedMarks || 0);
-      tot += Number(items.totalMarks || 0);
+    const collect = (item) => {
+      if (!item || item.isBypassed) return;
+      if (!item.isAbsent) obt += Number(item.obtainedMarks || 0);
+      tot += Number(item.totalMarks || 0);
+    };
+
+    if (STANDARD_MARK_KEYS.includes(catKey)) {
+      const items = marksDoc[catKey];
+      if (Array.isArray(items)) {
+        items.forEach(collect);
+      } else if (items && typeof items === 'object' && items.totalMarks > 0) {
+        collect(items);
+      }
+      return tot > 0 ? (obt / tot) * 100 : 0;
+    }
+
+    const customCat = (marksDoc.customActivities || []).find(
+      c => c?.categoryName?.trim().toLowerCase() === catKey
+    );
+    if (customCat && Array.isArray(customCat.items)) {
+      customCat.items.forEach(collect);
     }
     return tot > 0 ? (obt / tot) * 100 : 0;
   };
@@ -1050,43 +1104,37 @@ const ClassroomDetail = () => {
     setIsStudentProfileModalOpen(true);
   };
 
+  // Single source of truth for the leaderboard score, so the table and the sort
+  // can never disagree about which number a filter is ranking by.
+  const scoreForFilter = (entry, filter) => {
+    if (filter === 'overall') return Number(entry.overallPercentage || 0);
+    if (filter === 'sessionals') return Number(entry.sessionalPercentage || 0);
+    if (filter === 'mids') return Number(entry.midsPercentage || 0);
+    if (filter === 'finals') return Number(entry.finalsPercentage || 0);
+    return Number(entry.perCategory?.[filter] ?? 0);
+  };
+
   const getSortedLeaderboard = () => {
     const rankings = classAnalytics?.rankings || [];
     if (rankings.length === 0) return [];
 
     return [...rankings].map(r => {
       const marksDoc = r.marksDoc || r;
+      const perCategory = {};
+      // The leaderboard filter is a category label ("Quizzes") or a custom
+      // activity name, so it must be resolved to where its marks are actually
+      // stored before the lookup.
+      sessionalActivitiesList.forEach(act => {
+        const { key } = resolveMarkCategory(act.category);
+        if (key) perCategory[key] = computeCategoryPercentage(marksDoc, key);
+      });
       return {
         ...r,
-        computedQuizPct: computeCategoryPercentage(marksDoc, 'quizzes'),
-        computedAssignmentPct: computeCategoryPercentage(marksDoc, 'assignments')
+        perCategory,
+        computedQuizPct: perCategory.quizzes ?? 0,
+        computedAssignmentPct: perCategory.assignments ?? 0
       };
-    }).sort((a, b) => {
-      let scoreA = 0;
-      let scoreB = 0;
-
-      if (leaderboardFilter === 'overall') {
-        scoreA = a.overallPercentage || 0;
-        scoreB = b.overallPercentage || 0;
-      } else if (leaderboardFilter === 'sessionals') {
-        scoreA = a.sessionalPercentage || 0;
-        scoreB = b.sessionalPercentage || 0;
-      } else if (leaderboardFilter === 'quizzes') {
-        scoreA = a.computedQuizPct || 0;
-        scoreB = b.computedQuizPct || 0;
-      } else if (leaderboardFilter === 'assignments') {
-        scoreA = a.computedAssignmentPct || 0;
-        scoreB = b.computedAssignmentPct || 0;
-      } else if (leaderboardFilter === 'mids') {
-        scoreA = a.midsPercentage || 0;
-        scoreB = b.midsPercentage || 0;
-      } else if (leaderboardFilter === 'finals') {
-        scoreA = a.finalsPercentage || 0;
-        scoreB = b.finalsPercentage || 0;
-      }
-
-      return scoreB - scoreA;
-    });
+    }).sort((a, b) => scoreForFilter(a, leaderboardFilter) - scoreForFilter(b, leaderboardFilter));
   };
 
   const getTotalPendingGradingCount = () => {
@@ -1591,14 +1639,22 @@ const ClassroomDetail = () => {
 
               <div className="lm-scroll-x -mx-4 sm:mx-0 px-4 sm:px-0 w-full sm:w-auto shrink-0">
                 <div className="flex items-center gap-1.5 min-w-max">
-                  {[
+                  {(() => {
+                  // Two configured activities can normalise to the same storage key
+                  // ("Quizzes" and "Quiz"), which would render duplicate chips that
+                  // rank identically. Keep the first label for each key.
+                  const seen = new Set();
+                  return [
                     { key: 'overall', label: 'Overall' },
                     { key: 'sessionals', label: 'Sessionals' },
-                    { key: 'quizzes', label: 'Quizzes' },
-                    { key: 'assignments', label: 'Assignments' },
-                    { key: 'mids', label: 'Mids' },
-                    { key: 'finals', label: 'Finals' },
-                  ].map((filter) => (
+                    ...sessionalActivitiesList.map(act => ({
+                      key: resolveMarkCategory(act.category).key,
+                      label: act.category
+                    })),
+                    ...((classroom.mids?.totalMarks > 0) ? [{ key: 'mids', label: 'Mids' }] : []),
+                    ...((classroom.finals?.totalMarks > 0) ? [{ key: 'finals', label: 'Finals' }] : []),
+                  ].filter(f => f.key && (f.key === 'overall' || f.key === 'sessionals' || !seen.has(f.key) && seen.add(f.key)));
+                })().map((filter) => (
                     <button
                       type="button"
                       key={filter.key}
@@ -1633,12 +1689,7 @@ const ClassroomDetail = () => {
                       const studentName = studentObj.name || 'Unknown Student';
                       const studentRoll = studentObj.rollNo || 'N/A';
 
-                      let currentScore = entry.overallPercentage || 0;
-                      if (leaderboardFilter === 'sessionals') currentScore = entry.sessionalPercentage || 0;
-                      if (leaderboardFilter === 'quizzes') currentScore = entry.computedQuizPct || 0;
-                      if (leaderboardFilter === 'assignments') currentScore = entry.computedAssignmentPct || 0;
-                      if (leaderboardFilter === 'mids') currentScore = entry.midsPercentage || 0;
-                      if (leaderboardFilter === 'finals') currentScore = entry.finalsPercentage || 0;
+                      const currentScore = scoreForFilter(entry, leaderboardFilter);
 
                       return (
                         <tr key={idx}>
@@ -1749,7 +1800,12 @@ const ClassroomDetail = () => {
                                 <div>
                                   <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-bold tracking-wider">Your %</span>
                                   <span className="font-mono text-orange-200 font-black text-sm sm:text-base break-words">
-                                    {studentItemScore && !studentItemScore.isAbsent ? `${studentPercentage}%` : 'N/A'}
+                                    {/* Absent is a real 0%, not missing data - showing "N/A" hid a genuine zero. */}
+                                    {studentItemScore
+                                       ? studentItemScore.isBypassed
+                                         ? 'Bypassed'
+                                         : `${studentPercentage}%`
+                                       : 'Pending'}
                                   </span>
                                 </div>
                                 <div className="pt-1 border-t border-white/[0.06]">

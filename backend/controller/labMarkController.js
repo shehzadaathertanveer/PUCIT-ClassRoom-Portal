@@ -578,7 +578,7 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
         match = scores;
       }
 
-      const markVal = (match && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null) ? match.obtainedMarks : 0;
+      const markVal = (match && !match.isBypassed && !match.isAbsent && match.obtainedMarks !== undefined && match.obtainedMarks !== null) ? match.obtainedMarks : 0;
       rowData.push(markVal);
     });
 
@@ -586,12 +586,13 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       const scores = doc[targetKey];
       if (Array.isArray(scores)) {
         scores.forEach(s => {
+          if (s.isBypassed) return;
           if (!s.isAbsent && s.obtainedMarks !== undefined && s.obtainedMarks !== null) {
             totalObtAll += Number(s.obtainedMarks) || 0;
           }
           totalPossAll += Number(s.totalMarks) || 0;
         });
-      } else if (scores && scores.title) {
+      } else if (scores && scores.title && !scores.isBypassed) {
         if (!scores.isAbsent && scores.obtainedMarks !== undefined && scores.obtainedMarks !== null) {
           totalObtAll += Number(scores.obtainedMarks) || 0;
         }
@@ -599,6 +600,8 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       }
     });
 
+    // Grade thresholds must match getPucitLetterGrade in markSchema.js, otherwise a
+    // student's letter grade in the app disagrees with the exported result sheet.
     const overallPct = totalPossAll > 0 ? ((totalObtAll / totalPossAll) * 100).toFixed(2) : '0.00';
     const pVal = Number(overallPct);
     let grade = 'F';
