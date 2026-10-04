@@ -10,7 +10,6 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
-  ChevronDownIcon,
   Cog6ToothIcon,
   ShieldCheckIcon,
   DocumentTextIcon,
@@ -38,6 +37,7 @@ import NoticeCard from '../components/NoticeCard';
 import BypassLimitsPanel from '../components/BypassLimitsPanel';
 import GradeBadge from '../components/GradeBadge';
 import RoomColorPicker from '../components/RoomColorPicker';
+import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const LabroomDetail = () => {
@@ -689,7 +689,6 @@ const LabroomDetail = () => {
   };
 
   const [isExportingSheet, setIsExportingSheet] = useState(false);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   // Fetches the result sheet from the server rather than rebuilding it in the
   // browser. The client-side version only emitted the activity columns and the
@@ -1201,48 +1200,16 @@ const LabroomDetail = () => {
                     </span>
                   )}
                 </button>
-                <div className="relative">
-                  <button
-                    onClick={() => setIsExportMenuOpen(v => !v)}
-                    disabled={isExportingSheet}
-                    className="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    <ChartBarIcon className="w-4 h-4" />
-                    {isExportingSheet ? 'Preparing...' : 'Download'}
-                    <ChevronDownIcon className="w-3.5 h-3.5" />
-                  </button>
-                  {isExportMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setIsExportMenuOpen(false)} aria-hidden="true" />
-                      <div className="absolute right-0 mt-1 w-64 rounded-xl border border-white/10 bg-[#0b1220] shadow-2xl p-1.5 z-50">
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleExportExcelSheet('roster'); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Blank Roster</span>
-                          <span className="block text-[11px] text-slate-400">Names and roll numbers only, no marks</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleExportExcelSheet('current'); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Current Result</span>
-                          <span className="block text-[11px] text-slate-400">Only activities that have marks entered</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleExportExcelSheet('final'); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Final Result</span>
-                          <span className="block text-[11px] text-slate-400">Every activity and weighted breakdown</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <ExportMenu
+                  icon={ChartBarIcon}
+                  busy={isExportingSheet}
+                  buttonClassName="lm-btn-ghost uppercase text-emerald-300 border border-emerald-500/30"
+                  items={[
+                    { key: 'roster', label: 'Blank Roster', hint: 'Names and roll numbers only, no marks', onClick: () => handleExportExcelSheet('roster') },
+                    { key: 'current', label: 'Current Result', hint: 'Only activities that have marks entered', onClick: () => handleExportExcelSheet('current') },
+                    { key: 'final', label: 'Final Result', hint: 'Every activity and weighted breakdown', onClick: () => handleExportExcelSheet('final') }
+                  ]}
+                />
               </>
             )}
             <button onClick={() => setIsMembersModalOpen(true)} className="lm-btn-ghost uppercase text-cyan-300 border border-cyan-500/30">

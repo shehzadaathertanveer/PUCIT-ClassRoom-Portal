@@ -11,7 +11,6 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   CheckIcon,
-  ChevronDownIcon,
   Cog6ToothIcon,
   ShieldCheckIcon,
   ExclamationTriangleIcon,
@@ -39,6 +38,7 @@ import RoomColorPicker from '../components/RoomColorPicker';
 import GradeBadge from '../components/GradeBadge';
 import { getGradeAndGpa } from '../utils/gradeScale';
 import { partitionRoster, csvPad, rosterWidths, blankRow } from '../utils/exportCsv';
+import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
 const ClassroomDetail = () => {
@@ -100,7 +100,6 @@ const ClassroomDetail = () => {
 
   // Excel / CSV Sync states for Staff
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [excelCategory, setExcelCategory] = useState('Quizzes');
   const [excelTitle, setExcelTitle] = useState('');
   const [excelTotalMarks, setExcelTotalMarks] = useState(10);
@@ -1502,48 +1501,15 @@ const studentBreakdownItems = [
             {isStaffOrAdmin && (
               <>
                 <button type="button" onClick={() => setIsAddStudentModalOpen(true)} className="lm-btn-ghost shrink-0 text-orange-200 hover:text-orange-100"><PlusIcon className="w-4 h-4" />Student</button>
-                <div className="relative shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setIsExportMenuOpen(v => !v)}
-                    className="lm-btn-ghost border-emerald-500/40 text-emerald-300 hover:text-emerald-200"
-                  >
-                    <ArrowDownTrayIcon className="w-4 h-4" />
-                    Download
-                    <ChevronDownIcon className="w-3.5 h-3.5" />
-                  </button>
-                  {isExportMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setIsExportMenuOpen(false)} aria-hidden="true" />
-                      <div className="absolute right-0 mt-1 w-64 rounded-xl border border-white/10 bg-[#0b1220] shadow-2xl p-1.5 z-50">
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleDownloadBlankRoster(); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Blank Roster</span>
-                          <span className="block text-[11px] text-slate-400">Names and roll numbers only, no marks</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleDownloadExcelReport('current'); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Current Result</span>
-                          <span className="block text-[11px] text-slate-400">Only activities that have marks entered</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setIsExportMenuOpen(false); handleDownloadExcelReport('final'); }}
-                          className="block w-full text-left rounded-lg px-3 py-2 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          <span className="font-semibold text-emerald-300">Final Result</span>
-                          <span className="block text-[11px] text-slate-400">Every activity and weighted breakdown</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <ExportMenu
+                  icon={ArrowDownTrayIcon}
+                  buttonClassName="lm-btn-ghost border-emerald-500/40 text-emerald-300 hover:text-emerald-200"
+                  items={[
+                    { key: 'roster', label: 'Blank Roster', hint: 'Names and roll numbers only, no marks', onClick: handleDownloadBlankRoster },
+                    { key: 'current', label: 'Current Result', hint: 'Only activities that have marks entered', onClick: () => handleDownloadExcelReport('current') },
+                    { key: 'final', label: 'Final Result', hint: 'Every activity and weighted breakdown', onClick: () => handleDownloadExcelReport('final') }
+                  ]}
+                />
                 <button type="button" onClick={() => setIsExcelModalOpen(true)} className="lm-btn-ghost shrink-0 text-orange-200 hover:text-orange-100">
                   <ChartBarIcon className="w-4 h-4" />
                   Upload Sync
