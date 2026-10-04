@@ -37,7 +37,7 @@ const BYPASS_MARK = 'B';
  * would silently fail the student, whereas excluding it only omits a value -
  * so ungraded is the safer default for the ambiguous case.
  */
-export const isRowGraded = (item = {}) => {
+const isRowGraded = (item = {}) => {
   if (item.isGraded === true) return true;
   if (item.isGraded === false) return false;
   if (item.isAbsent === true || item.isBypassed === true) return true;

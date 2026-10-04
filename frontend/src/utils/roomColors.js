@@ -73,7 +73,7 @@ export const getRoomColor = (key) => ROOM_COLORS[key] || ROOM_COLORS[DEFAULT_ROO
  * The tone to paint a small UI chip with. Deep hinge colours carry a separate
  * vivid `swatch`; single-tone colours fall back to their own hex.
  */
-export const pickTone = (c) => c.swatch || c.hex;
+const pickTone = (c) => c.swatch || c.hex;
 
 /**
  * Inline styles for a room card: a tinted body with a coloured hinge down the

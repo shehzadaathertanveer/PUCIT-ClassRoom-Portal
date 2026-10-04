@@ -26,13 +26,13 @@ const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov', 'm4v'];
 const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga'];
 
 /** Extension from the file name, lowercased, without the dot. */
-export const attachmentExtension = (fileName = '') => {
+const attachmentExtension = (fileName = '') => {
   const clean = String(fileName).split('?')[0];
   const parts = clean.split('.');
   return parts.length > 1 ? parts.pop().toLowerCase() : '';
 };
 
-export const formatFileSize = (bytes) => {
+const formatFileSize = (bytes) => {
   const n = Number(bytes);
   if (!Number.isFinite(n) || n <= 0) return '';
   if (n < 1024) return `${n} B`;
@@ -45,7 +45,7 @@ export const formatFileSize = (bytes) => {
  * extension. Declared types win because teachers can rename a file to `.pdf`
  * and Cloudinary still holds a video.
  */
-export const describeAttachment = (attachment = {}) => {
+const describeAttachment = (attachment = {}) => {
   const { fileType = '', fileName = '' } = attachment;
   const ext = attachmentExtension(fileName);
   const declared = String(fileType).toLowerCase();
@@ -71,7 +71,7 @@ export const describeAttachment = (attachment = {}) => {
  * non-Cloudinary value can only be legacy or hand-edited data - rendering it
  * would turn the attachment into a javascript:/data:/plain-http XSS vector.
  */
-export const buildDeliveryUrl = (rawUrl, kind = 'file') => {
+const buildDeliveryUrl = (rawUrl, kind = 'file') => {
   const url = String(rawUrl || '').trim();
   if (!url) return '';
 
