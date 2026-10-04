@@ -5,6 +5,7 @@ const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
 const sendStyledEmail = require('../utils/emailService');
 const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
+const { computeLabWeightedPercentage } = require('../utils/labWeights');
 
 const VALID_STANDARD_CATEGORIES = [
   'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
@@ -353,101 +354,19 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
 
   let sumOverall = 0;
 
-  // ---------------------------------------------------------------------------
-  // Category weighting. This is computed ONCE for the whole room rather than
-  // per student - it was previously rebuilt inside the rankings map, which made
-  // every student's row re-do the same string normalisation and lookups.
-  // ---------------------------------------------------------------------------
-  const normKey = (s) =>
-    String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-      .replace(/ies$/, 'y').replace(/sses$/, 'ss').replace(/([^s])s$/, '$1');
-
-  // Exact match wins. Otherwise accept a substring match only when it is
-  // unambiguous - guessing between "projects" and "finalProject" would
-  // silently apply the wrong weight, which is worse than applying none.
-  const resolveCategoryKey = (category) => {
-    const a = normKey(category);
-    if (!a) return null;
-    const exact = VALID_STANDARD_CATEGORIES.find((k) => normKey(k) === a);
-    if (exact) return exact;
-    const partial = VALID_STANDARD_CATEGORIES.filter((k) => {
-      const b = normKey(k);
-      return b.includes(a) || a.includes(b);
-    });
-    return partial.length === 1 ? partial[0] : null;
-  };
-
-  const weightByKey = {};
-  (labroom?.sessionalActivities || []).forEach(act => {
-    const key = resolveCategoryKey(act.category);
-    if (key) weightByKey[key] = Number(act.allocatedMarks || 0);
-  });
-
-  const configuredWeights = Object.values(weightByKey).filter((w) => w > 0);
-  const hasWeights = configuredWeights.length > 0;
-
-  // Categories the teacher never configured a weight for used to fall back to
-  // weight 0, which silently dropped them from the denominator - a student
-  // graded only in those categories scored 0% and appeared to fail. Give them
-  // the mean configured weight instead so they still count, as the comment
-  // ("contribute equally") always promised.
-  //
-  // Only categories that actually hold graded marks (catPoss > 0) enter the
-  // weighted denominator. Folding in the categories a student was never
-  // assessed on would add their weight to the denominator while contributing a
-  // 0% numerator, dragging the overall score toward zero.
-  const meanConfiguredWeight = hasWeights
-    ? configuredWeights.reduce((a, b) => a + b, 0) / configuredWeights.length
-    : 0;
-
   const rankings = validDocs.map(doc => {
-    // Real marks, in marks - kept separate from the weighted percentage so the
-    // UI never renders "65 * 40 = 2600 / 10" as a mark total.
-    let marksObtained = 0;
-    let marksPossible = 0;
-    let weightedScore = 0;
-    let weightTotal = 0;
-    let catStats = {};
+    // Weighted overall comes from the shared helper, which is the same code the
+    // CSV export uses. Keeping one implementation is what guarantees a student's
+    // exported "Overall %" matches their leaderboard percentage.
+    const weighted = computeLabWeightedPercentage(labroom, doc);
+    const { percentage, marksObtained, marksPossible, hasWeights, categoryPercentages } = weighted;
 
-    VALID_STANDARD_CATEGORIES.forEach(targetKey => {
-      let catObt = 0;
-      let catPoss = 0;
-
-      // Skip bypassed entries on BOTH sides - they do not exist for this student.
-      const items = doc[targetKey];
-      if (Array.isArray(items)) {
-        items.forEach(item => {
-          if (item.isBypassed) return;
-          if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null) {
-            catObt += Number(item.obtainedMarks) || 0;
-          }
-          catPoss += Number(item.totalMarks) || 0;
-        });
-      } else if (items && items.title && !items.isBypassed) {
-        if (!items.isAbsent && items.obtainedMarks !== undefined && items.obtainedMarks !== null) {
-          catObt += Number(items.obtainedMarks) || 0;
-        }
-        catPoss += Number(items.totalMarks) || 0;
-      }
-
-      const catPct = catPoss > 0 ? Number(((catObt / catPoss) * 100).toFixed(2)) : 0;
-      catStats[targetKey + 'Percentage'] = catPct;
-
-      marksObtained += catObt;
-      marksPossible += catPoss;
-
-      if (hasWeights && catPoss > 0) {
-        const w = weightByKey[targetKey] > 0 ? weightByKey[targetKey] : meanConfiguredWeight;
-        weightedScore += catPct * w;
-        weightTotal += w;
-      }
+    // Flat per-category percentages for the leaderboard filters. Keys stay as
+    // `<targetKey>Percentage` because the frontend reads exactly that shape.
+    const catStats = {};
+    VALID_STANDARD_CATEGORIES.forEach(k => {
+      catStats[k + 'Percentage'] = categoryPercentages[k] !== undefined ? categoryPercentages[k] : 0;
     });
-
-    // Weighted overall when weights exist; otherwise a plain mark total, which
-    // preserves the behaviour from before weighting was supported.
-    const percentage = hasWeights
-      ? (weightTotal > 0 ? Number((weightedScore / weightTotal).toFixed(2)) : 0)
-      : (marksPossible > 0 ? Number(((marksObtained / marksPossible) * 100).toFixed(2)) : 0);
 
     sumOverall += percentage;
 
@@ -566,9 +485,6 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       `"${st.name || 'Unknown'}"`
     ];
 
-    let totalObtAll = 0;
-    let totalPossAll = 0;
-
     headerActivityCols.forEach(col => {
       let match = null;
       const scores = doc[col.targetKey];
@@ -582,27 +498,13 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
       rowData.push(markVal);
     });
 
-    VALID_STANDARD_CATEGORIES.forEach(targetKey => {
-      const scores = doc[targetKey];
-      if (Array.isArray(scores)) {
-        scores.forEach(s => {
-          if (s.isBypassed) return;
-          if (!s.isAbsent && s.obtainedMarks !== undefined && s.obtainedMarks !== null) {
-            totalObtAll += Number(s.obtainedMarks) || 0;
-          }
-          totalPossAll += Number(s.totalMarks) || 0;
-        });
-      } else if (scores && scores.title && !scores.isBypassed) {
-        if (!scores.isAbsent && scores.obtainedMarks !== undefined && scores.obtainedMarks !== null) {
-          totalObtAll += Number(scores.obtainedMarks) || 0;
-        }
-        totalPossAll += Number(scores.totalMarks) || 0;
-      }
-    });
-
-    // Grade thresholds must match getPucitLetterGrade in markSchema.js, otherwise a
-    // student's letter grade in the app disagrees with the exported result sheet.
-    const overallPct = totalPossAll > 0 ? ((totalObtAll / totalPossAll) * 100).toFixed(2) : '0.00';
+    // The exported "Overall %" must be the SAME weighted percentage the leaderboard
+    // shows. This used to pool raw marks across every activity
+    // (totalObtAll / totalPossAll), which ignores the teacher's allocated weights
+    // entirely - so the sheet reported something closer to the sessional mark
+    // distribution and disagreed with the app's own overall.
+    const weighted = computeLabWeightedPercentage(labroom, doc);
+    const overallPct = weighted.percentage.toFixed(2);
     const pVal = Number(overallPct);
     let grade = 'F';
     if (pVal >= 85) grade = 'A+';

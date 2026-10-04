@@ -80,7 +80,14 @@ const computeSessionalBreakdown = (markDoc, classroom) => {
 
   const weightByKey = {};
   ((classroom && classroom.sessionalActivities) || []).forEach((act) => {
-    weightByKey[resolveCategoryKey(act.category)] = Number(act.allocatedMarks || 0);
+    const marks = Number(act.allocatedMarks || 0);
+    // A configured weight of 0 is treated as "not configured" rather than as a
+    // real 0. The schema allows min: 0, so a teacher can easily leave an
+    // activity at 0 while setting up the others. Honouring that 0 literally
+    // multiplied the category percentage by 0 AND added 0 to the denominator,
+    // so if every activity sat at 0 the whole sessional score collapsed to 0
+    // and the leaderboard showed 0.00% for every student.
+    if (marks > 0) weightByKey[resolveCategoryKey(act.category)] = marks;
   });
 
   let weightedEarned = 0;
@@ -95,8 +102,11 @@ const computeSessionalBreakdown = (markDoc, classroom) => {
     const categoryPct = pct(totals.obtained, totals.total);
     categoryPercentages[key] = categoryPct;
     const weight = weightByKey[key] !== undefined ? weightByKey[key] : fallbackWeight;
-    weightedEarned += categoryPct * weight;
-    weightTotal += weight;
+    // A fallback of 0 would drop the category from both sides of the ratio and
+    // silently erase it, so treat any non-positive weight as unconfigured.
+    const effectiveWeight = weight > 0 ? weight : fallbackWeight;
+    weightedEarned += categoryPct * effectiveWeight;
+    weightTotal += effectiveWeight;
   };
 
   STANDARD_SESSIONAL_KEYS.forEach((key) => {
