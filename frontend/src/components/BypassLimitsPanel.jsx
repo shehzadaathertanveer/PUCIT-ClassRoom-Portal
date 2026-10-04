@@ -78,6 +78,7 @@ export default function BypassLimitsPanel({
   // Teacher-defined (custom) categories get their own row so they can be capped
   // too. They are keyed the same way the server keys them.
   const categories = useMemo(() => {
+    const seen = new Set(baseCategories.map((c) => c.key));
     const custom = (customCategories || [])
       .map((c) => (typeof c === 'string' ? c : c?.category || c?.categoryName || ''))
       .filter(Boolean)
@@ -103,6 +104,16 @@ export default function BypassLimitsPanel({
           label,
           isCustom: true
         };
+      })
+      // A configured activity name is very often the same as a standard category
+      // ("Lab Tasks", "Quizzes"). Those camelCase to a key the standard list already
+      // contains, and appending them unconditionally rendered the same category
+      // twice - "Lab Tasks" appearing as both the standard row and a "custom" row.
+      // The standard row wins: it carries the live activity count and the same
+      // limit key the server enforces.
+      .filter((c) => {
+        if (!seen.has(c.key)) { seen.add(c.key); return true; }
+        return false;
       });
     return [...baseCategories, ...custom];
   }, [baseCategories, customCategories]);
