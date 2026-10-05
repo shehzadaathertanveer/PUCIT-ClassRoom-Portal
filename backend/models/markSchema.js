@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Classroom = require("./classRoomSchema");
 const { computeSessionalBreakdown, STANDARD_SESSIONAL_KEYS } = require("../utils/sessionalWeights");
 const { getGradeAndGpa } = require("../utils/gradeScale");
+const { applyVivaMultiplier } = require("../utils/viva");
 
 const getPercentage = (obtained = 0, total = 0) => {
   return total > 0 ? Number(((obtained / total) * 100).toFixed(2)) : 0;
@@ -30,6 +31,12 @@ const individualMarkSchema = new mongoose.Schema({
   // earned and possible so it cannot dilute their average or inflate the
   // denominator. Enforced against classroom.bypassLimits at the controller.
   isBypassed: { type: Boolean, default: false },
+  // Viva gate. Off by default so every mark row that existed before this feature
+  // keeps its exact marks. When on, `vivaMarks` (0-10) multiplies `obtainedMarks`
+  // into `vivaAdjustedMarks`, which is what the grade is computed from.
+  hasViva: { type: Boolean, default: false },
+  vivaMarks: { type: Number, min: 0, max: 10, default: null },
+  vivaAdjustedMarks: { type: Number, default: null },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: true });
@@ -40,6 +47,9 @@ const customActivityItemSchema = new mongoose.Schema({
   obtainedMarks: { type: Number, required: true, min: 0, default: 0 },
   isAbsent: { type: Boolean, default: false },
   isBypassed: { type: Boolean, default: false },
+  hasViva: { type: Boolean, default: false },
+  vivaMarks: { type: Number, min: 0, max: 10, default: null },
+  vivaAdjustedMarks: { type: Number, default: null },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: true });
@@ -55,6 +65,9 @@ const singleMarkSchema = new mongoose.Schema({
   obtainedMarks: { type: Number, default: 0, min: 0 },
   isAbsent: { type: Boolean, default: false },
   isBypassed: { type: Boolean, default: false },
+  hasViva: { type: Boolean, default: false },
+  vivaMarks: { type: Number, min: 0, max: 10, default: null },
+  vivaAdjustedMarks: { type: Number, default: null },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
 }, { _id: false });
@@ -120,24 +133,28 @@ markSchema.pre("save", async function () {
   // document, but the CATEGORY and overall sessional maths is delegated to
   // computeSessionalBreakdown so this hook and getClassAnalytics cannot drift
   // apart and report two different percentages for the same student.
+  // Per-item percentage comes from the VIVA-ADJUSTED marks when the activity is
+  // viva gated, and from the raw marks otherwise. The raw score the teacher typed
+  // is preserved in obtainedMarks so the sheet can still show both numbers.
+  const finalizeItem = (item) => {
+    if (item.isBypassed) { item.vivaAdjustedMarks = 0; item.percentage = 0; return; }
+    if (item.isAbsent) item.obtainedMarks = 0;
+    item.vivaAdjustedMarks = item.hasViva
+      ? applyVivaMultiplier(item.obtainedMarks, item.vivaMarks)
+      : (Number(item.obtainedMarks) || 0);
+    item.percentage = getPercentage(item.vivaAdjustedMarks, item.totalMarks);
+  };
+
   STANDARD_SESSIONAL_KEYS.forEach((key) => {
     if (Array.isArray(this[key]) && this[key].length > 0) {
-      this[key].forEach((item) => {
-        if (item.isBypassed) { item.percentage = 0; return; }
-        if (item.isAbsent) item.obtainedMarks = 0;
-        item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
-      });
+      this[key].forEach(finalizeItem);
     }
   });
 
   if (Array.isArray(this.customActivities)) {
     this.customActivities.forEach((customCat) => {
       if (Array.isArray(customCat.items) && customCat.items.length > 0) {
-        customCat.items.forEach((item) => {
-          if (item.isBypassed) { item.percentage = 0; return; }
-          if (item.isAbsent) item.obtainedMarks = 0;
-          item.percentage = getPercentage(item.obtainedMarks, item.totalMarks);
-        });
+        customCat.items.forEach(finalizeItem);
       }
     });
   }
@@ -149,28 +166,37 @@ markSchema.pre("save", async function () {
 
   // Process Mids
   if (this.mids) {
-    if (this.mids.isBypassed) { this.mids.percentage = 0; }
+    if (this.mids.isBypassed) { this.mids.vivaAdjustedMarks = 0; this.mids.percentage = 0; }
     else {
       if (this.mids.isAbsent) this.mids.obtainedMarks = 0;
-      this.mids.percentage = getPercentage(this.mids.obtainedMarks, this.mids.totalMarks);
+      this.mids.vivaAdjustedMarks = this.mids.hasViva
+        ? applyVivaMultiplier(this.mids.obtainedMarks, this.mids.vivaMarks)
+        : (Number(this.mids.obtainedMarks) || 0);
+      this.mids.percentage = getPercentage(this.mids.vivaAdjustedMarks, this.mids.totalMarks);
     }
   }
-  
+
   // Process Finals
   if (this.finals) {
-    if (this.finals.isBypassed) { this.finals.percentage = 0; }
+    if (this.finals.isBypassed) { this.finals.vivaAdjustedMarks = 0; this.finals.percentage = 0; }
     else {
       if (this.finals.isAbsent) this.finals.obtainedMarks = 0;
-      this.finals.percentage = getPercentage(this.finals.obtainedMarks, this.finals.totalMarks);
+      this.finals.vivaAdjustedMarks = this.finals.hasViva
+        ? applyVivaMultiplier(this.finals.obtainedMarks, this.finals.vivaMarks)
+        : (Number(this.finals.obtainedMarks) || 0);
+      this.finals.percentage = getPercentage(this.finals.vivaAdjustedMarks, this.finals.totalMarks);
     }
   }
 
   // Process Final Project
   if (this.finalProject) {
-    if (this.finalProject.isBypassed) { this.finalProject.percentage = 0; }
+    if (this.finalProject.isBypassed) { this.finalProject.vivaAdjustedMarks = 0; this.finalProject.percentage = 0; }
     else {
       if (this.finalProject.isAbsent) this.finalProject.obtainedMarks = 0;
-      this.finalProject.percentage = getPercentage(this.finalProject.obtainedMarks, this.finalProject.totalMarks);
+      this.finalProject.vivaAdjustedMarks = this.finalProject.hasViva
+        ? applyVivaMultiplier(this.finalProject.obtainedMarks, this.finalProject.vivaMarks)
+        : (Number(this.finalProject.obtainedMarks) || 0);
+      this.finalProject.percentage = getPercentage(this.finalProject.vivaAdjustedMarks, this.finalProject.totalMarks);
     }
   }
 

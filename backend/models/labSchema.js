@@ -1,6 +1,18 @@
 const mongoose = require('mongoose');
 const { ROOM_COLOR_KEYS, DEFAULT_ROOM_COLOR } = require('../utils/roomColors');
 
+// Every lab activity definition is the same shape. `hasViva` marks the activity
+// as viva gated: the marksheet then shows a second input per student (the viva,
+// scored out of 10) and the marks that count towards the grade are the activity
+// marks multiplied by that viva. Defaults to false so every activity created
+// before this feature is unaffected.
+const labEvaluationItemSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  totalMarks: { type: Number, required: true, min: 1 },
+  hasViva: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+});
+
 const labRoomSchema = new mongoose.Schema(
   {
     labName: { 
@@ -138,91 +150,23 @@ const labRoomSchema = new mongoose.Schema(
     }],
 
     // 🚀 FULLY EXPANDED LAB EVALUATION STORAGE ARRAYS
-    labTasks: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labTests: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    quizzes: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    assignments: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    presentations: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    vivas: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    projects: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    homework: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    classParticipation: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    specialMarks: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    finalProject: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labMids: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labFinals: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labActivities: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labBehavior: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    labWorksheets: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
-    troubleshooting: [{
-      title: { type: String, required: true, trim: true },
-      totalMarks: { type: Number, required: true, min: 1 },
-      createdAt: { type: Date, default: Date.now }
-    }],
+    labTasks: [labEvaluationItemSchema],
+    labTests: [labEvaluationItemSchema],
+    quizzes: [labEvaluationItemSchema],
+    assignments: [labEvaluationItemSchema],
+    presentations: [labEvaluationItemSchema],
+    vivas: [labEvaluationItemSchema],
+    projects: [labEvaluationItemSchema],
+    homework: [labEvaluationItemSchema],
+    classParticipation: [labEvaluationItemSchema],
+    specialMarks: [labEvaluationItemSchema],
+    finalProject: [labEvaluationItemSchema],
+    labMids: [labEvaluationItemSchema],
+    labFinals: [labEvaluationItemSchema],
+    labActivities: [labEvaluationItemSchema],
+    labBehavior: [labEvaluationItemSchema],
+    labWorksheets: [labEvaluationItemSchema],
+    troubleshooting: [labEvaluationItemSchema],
 
     isActive: { 
       type: Boolean, 

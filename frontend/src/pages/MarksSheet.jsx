@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/outline';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
+import { normalizeVivaScore, VIVA_MAX, rowFinalMarks } from '../utils/viva';
 
 const UNGRADED_MARK = '-99';
 // "B" bypasses this activity: the backend drops it from BOTH the earned and the
@@ -94,6 +95,12 @@ const MarksSheet = () => {
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(initialFilterState);
   const [unassignedStudentIds, setUnassignedStudentIds] = useState(new Set());
 
+  // Viva gate for THIS activity. Seeded from the creation modal's router state so
+  // the column appears on first paint, then reconciled with the stored activity
+  // once the sheet loads - the stored definition is the real source of truth.
+  const [hasViva, setHasViva] = useState(!!location.state?.hasViva);
+  const [vivaInputs, setVivaInputs] = useState({});
+
   // Saving & Deleting states
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -162,6 +169,9 @@ const MarksSheet = () => {
         if (foundActivity?.totalMarks) {
           setTotalMarks(foundActivity.totalMarks);
         }
+        if (foundActivity && foundActivity.hasViva !== undefined) {
+          setHasViva(!!foundActivity.hasViva);
+        }
       }
 
       if (activeTitle && activeTitle !== 'general') {
@@ -179,6 +189,7 @@ const MarksSheet = () => {
 
       // Populate spreadsheet inputs
       const initialMap = {};
+      const vivaMap = {};
       const marksMap = new Map((data.existingMarks || []).map(m => [m.student?.toString() || m.student?._id?.toString(), m]));
 
       (data.students || []).forEach(student => {
@@ -188,6 +199,7 @@ const MarksSheet = () => {
         let obtained = UNGRADED_MARK;
         let isAbsent = false;
         let isBypassed = false;
+        let vivaMarks = '';
         let fileObj = { url: '', public_id: '', fileType: '', fileName: '' };
 
         if (markDoc) {
@@ -211,6 +223,12 @@ const MarksSheet = () => {
             isBypassed = !!item.isBypassed;
             obtained = isBypassed ? BYPASS_MARK : (item.isAbsent ? 'A' : (hasStored ? rawStored : UNGRADED_MARK));
             isAbsent = !!item.isAbsent;
+            // Blank (rather than 0) when null/undefined, so a viva-gated row that
+            // has never been viva-scored is visibly outstanding instead of
+            // looking like the teacher deliberately scored zero.
+            if (item.vivaMarks !== null && item.vivaMarks !== undefined) {
+              vivaMarks = String(item.vivaMarks);
+            }
             if (item.file) fileObj = item.file;
             if (item.title && !itemTitle) setItemTitle(item.title);
             if (item.totalMarks && !passedTotalMarks) setTotalMarks(item.totalMarks);
@@ -223,9 +241,11 @@ const MarksSheet = () => {
           isBypassed,
           file: fileObj
         };
+        vivaMap[studentId] = vivaMarks;
       });
 
       setMarkInputs(initialMap);
+      setVivaInputs(vivaMap);
     } catch (err) {
       console.error('Failed to load marksheet:', err);
       setError(err.response?.data?.message || 'Failed to load grading spreadsheet.');
@@ -293,6 +313,16 @@ const MarksSheet = () => {
     });
   };
 
+  const handleVivaChange = (studentId, value) => {
+    setErrorStudentIds(prev => {
+      if (!prev.size || !prev.has(studentId)) return prev;
+      const next = new Set(prev);
+      next.delete(studentId);
+      return next;
+    });
+    setVivaInputs(prev => ({ ...prev, [studentId]: value }));
+  };
+
   const handleFileUpload = async (studentId, e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -334,6 +364,16 @@ const MarksSheet = () => {
       }
 
       // Per-box validation: highlight any invalid marks before saving so they can be fixed.
+      // A row counts as "graded" when it has a real score and is neither absent nor
+      // bypassed - only those rows need a viva when the activity is viva gated.
+      const isGradedRow = (data) => {
+        const rawVal = String(data.obtainedMarks ?? '').trim();
+        if (rawVal === '' || rawVal === UNGRADED_MARK) return false;
+        if (rawVal.toUpperCase() === 'A') return false;
+        if (rawVal.toUpperCase() === BYPASS_MARK) return false;
+        return true;
+      };
+
       const invalidIds = new Set();
       Object.entries(markInputs).forEach(([studentId, data]) => {
         const rawVal = String(data.obtainedMarks ?? '').trim();
@@ -345,6 +385,18 @@ const MarksSheet = () => {
           invalidIds.add(studentId);
         }
       });
+
+      // A graded row with the viva gate on but no viva entered would silently fall
+      // back to the raw marks server-side, so the teacher would never find out.
+      // Catch it here instead, where it can still be fixed.
+      if (hasViva) {
+        Object.entries(markInputs).forEach(([studentId, data]) => {
+          if (!isGradedRow(data)) return;
+          if (normalizeVivaScore(vivaInputs[studentId]) === null) {
+            invalidIds.add(studentId);
+          }
+        });
+      }
       if (invalidIds.size > 0) {
         setErrorStudentIds(invalidIds);
         showToast(`Invalid marks in ${invalidIds.size} highlighted box(es) — fix them and save again.`);
@@ -364,12 +416,17 @@ const MarksSheet = () => {
           const upper = rawVal.toUpperCase();
           const isAbs = data.isAbsent || upper === 'A';
           const isByp = !isAbs && (data.isBypassed || upper === BYPASS_MARK);
+          const viva = normalizeVivaScore(vivaInputs[studentId]);
           return {
             studentId,
             // 'B' is sent as the literal sentinel - the server decides whether
             // the bypass is allowed and rejects it if the limit is already met.
             obtainedMarks: isAbs ? 0 : (isByp ? BYPASS_MARK : Number(rawVal)),
             isAbsent: isAbs,
+            // Sent per row so the gate can be toggled from the sheet without
+            // recreating the activity. Absent/bypassed rows carry null: their
+            // viva is not consulted.
+            vivaMarks: hasViva ? viva : null,
             file: data.file?.url ? data.file : null
           };
         });
@@ -385,6 +442,7 @@ const MarksSheet = () => {
         category,
         title: resolvedTitle,
         totalMarks: parsedTotalMarks,
+        hasViva,
         marksData
       });
 
@@ -426,6 +484,9 @@ const MarksSheet = () => {
   const handleExportToExcel = () => {
     try {
       let csvContent = "data:text/csv;charset=utf-8,";
+      // The viva and final columns only exist when the gate is on, so a plain
+      // sheet exports exactly what it always did.
+      if (hasViva) csvContent += "Viva (0-10),Final Marks (after viva),";
       csvContent += "Roll Number,Student Name,Marks Obtained,Total Marks,Status\r\n";
 
       students.forEach(student => {
@@ -439,7 +500,22 @@ const MarksSheet = () => {
         const score = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : rawMark));
         const status = inputData.isAbsent ? 'Absent' : (isBypassed ? 'Bypassed' : (isUngraded ? 'Ungraded' : 'Graded'));
 
-        csvContent += `${roll},${name},${score},${totalMarks},${status}\r\n`;
+        // Export the raw marks AND the viva-adjusted figure, so the spreadsheet
+        // explains the grade instead of just restating it.
+        const vivaValue = normalizeVivaScore(vivaInputs[studentId]);
+        const finalValue = rowFinalMarks({
+          obtainedMarks: rawMark,
+          isAbsent: inputData.isAbsent,
+          isBypassed,
+          isUngraded,
+          vivaEnabled: hasViva,
+          vivaMarks: vivaValue
+        });
+        const vivaCols = hasViva
+          ? `${vivaValue === null ? '' : vivaValue},${finalValue === null ? '' : finalValue},`
+          : '';
+
+        csvContent += `${vivaCols}${roll},${name},${score},${totalMarks},${status}\r\n`;
       });
 
       const encodedUri = encodeURI(csvContent);
@@ -581,6 +657,24 @@ const MarksSheet = () => {
                   className="lm-field lm-num w-full min-w-0 text-center text-xs sm:text-sm"
                 />
               </div>
+              {/* Toggle lives on the sheet too, so a teacher can turn the viva on
+                  for an activity created before this feature existed without
+                  having to delete and recreate it. */}
+              <div className="w-full lg:w-1/4 min-w-0">
+                <label className="block lm-eyebrow text-orange-300 mb-1.5">Viva Multiplier</label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hasViva}
+                  onClick={() => setHasViva(!hasViva)}
+                  className={`w-full flex items-center justify-between gap-2 lm-field cursor-pointer ${hasViva ? 'lm-chip-active' : ''}`}
+                >
+                  <span className="text-[10px] sm:text-xs font-bold uppercase">{hasViva ? 'On' : 'Off'}</span>
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">
+                    {hasViva ? '× viva ÷ 10' : 'marks as entered'}
+                  </span>
+                </button>
+              </div>
               <div className="w-full lg:w-auto min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <button
                   type="button"
@@ -611,6 +705,9 @@ const MarksSheet = () => {
       <span className="lm-badge border-red-500/40 text-red-300">A = Absent</span>
       <span className="lm-badge border-stone-500/50 text-stone-300">B = Bypassed (excluded from grade)</span>
               <span className="lm-badge text-slate-500">0 = Scored zero</span>
+              {hasViva && (
+                <span className="lm-badge border-emerald-500/40 text-emerald-300">Final = marks × viva ÷ 10, rounded up</span>
+              )}
               <span className="lm-badge border-red-500/60 text-red-300">Red glow = Fix this box</span>
             </div>
 
@@ -623,13 +720,19 @@ const MarksSheet = () => {
                     <th>Roll Number</th>
                     <th>Student Name</th>
                     <th>Marks (or 'A') / Out of {totalMarks}</th>
+                    {hasViva && (
+                      <>
+                        <th>Viva (0-10)</th>
+                        <th>Final (after viva)</th>
+                      </>
+                    )}
                     <th>Attachment Script</th>
                   </tr>
                 </thead>
                 <tbody>
                   {displayedStudents.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="p-0">
+                      <td colSpan={hasViva ? 7 : 5} className="p-0">
                         <div className="m-2.5 sm:m-3 rounded-2xl border border-dashed border-white/[0.09] bg-slate-950/50 flex flex-col items-center justify-center gap-2.5 px-4 py-12 text-center">
                           <UserGroupIcon className="w-7 h-7 text-slate-500" />
                           <span className="text-slate-500 text-xs sm:text-sm italic">No students found matching filter.</span>
@@ -657,6 +760,21 @@ const MarksSheet = () => {
                               ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse'
                               : 'border-white/10 text-slate-100';
 
+                      // Live preview of what this row will actually be worth, so the
+                      // teacher never has to save first to discover what the viva did.
+                      const vivaValue = normalizeVivaScore(vivaInputs[studentId]);
+                      const rowHasError = errorStudentIds.has(studentId);
+                      const finalValue = rowFinalMarks({
+                        obtainedMarks: rawMarkValue,
+                        isAbsent: inputData.isAbsent,
+                        isBypassed: isBypassDisplay,
+                        isUngraded: isUngradedDisplay,
+                        vivaEnabled: hasViva,
+                        vivaMarks: vivaValue
+                      });
+                      const vivaMissingButRequired =
+                        hasViva && !isBypassDisplay && !inputData.isAbsent && !isUngradedDisplay && vivaValue === null;
+
                       return (
                         <tr key={studentId}>
                           <td className="font-mono text-slate-500">{idx + 1}</td>
@@ -675,6 +793,34 @@ const MarksSheet = () => {
                               className={`lm-field lm-num w-full min-w-[4.5rem] text-center px-2 py-2 text-xs sm:text-sm ${markCellClass}`}
                             />
                           </td>
+                          {hasViva && (
+                            <>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={VIVA_MAX}
+                                  step="1"
+                                  value={vivaInputs[studentId] ?? ''}
+                                  onChange={(e) => handleVivaChange(studentId, e.target.value)}
+                                  placeholder={isBypassDisplay || inputData.isAbsent || isUngradedDisplay ? '—' : `0-${VIVA_MAX}`}
+                                  disabled={isBypassDisplay || inputData.isAbsent || isUngradedDisplay}
+                                  className={`lm-field lm-num w-full min-w-[3.5rem] text-center px-2 py-2 text-xs sm:text-sm ${
+                                    vivaMissingButRequired || (rowHasError && vivaValue === null)
+                                      ? 'border-red-500 text-red-300 bg-red-950/40 ring-2 ring-red-500/50 animate-pulse'
+                                      : 'border-white/10 text-slate-100'
+                                  }`}
+                                />
+                              </td>
+                              <td className="text-center font-mono">
+                                {finalValue === null ? (
+                                  <span className="text-slate-600">—</span>
+                                ) : (
+                                  <span className="text-emerald-300 font-bold whitespace-nowrap">{finalValue}</span>
+                                )}
+                              </td>
+                            </>
+                          )}
                           <td>
                             <div className="flex items-center gap-2">
                               {inputData.file?.url ? (

@@ -7,6 +7,12 @@ const sendStyledEmail = require('../utils/emailService'); // Centralized email u
 const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
 const { computeSessionalBreakdown } = require('../utils/sessionalWeights');
 const { getGradeAndGpa } = require('../utils/gradeScale');
+const {
+  applyVivaMultiplier,
+  effectiveMarks,
+  normalizeVivaScore,
+  VIVA_MAX
+} = require('../utils/viva');
 
 const STANDARD_CATEGORIES = [
   'quizzes', 
@@ -519,7 +525,9 @@ let sumGradePoints = 0, gradePointCount = 0;
     const midsEntered = !!(doc.mids && doc.mids.totalMarks > 0);
     const hasMids = midsEntered && !doc.mids.isBypassed;
     if (hasMids) {
-      midsPercentage = doc.mids.isAbsent ? 0 : ((Number(doc.mids.obtainedMarks) || 0) / doc.mids.totalMarks) * 100;
+      // effectiveMarks, not obtainedMarks: a viva-gated exam contributes the
+      // multiplied score, matching what the pre-save hook stored as the grade.
+      midsPercentage = doc.mids.isAbsent ? 0 : (effectiveMarks(doc.mids) / doc.mids.totalMarks) * 100;
     }
     // Averaged over every non-bypassed student, with an ungraded exam contributing
     // 0 - matching how the overall percentage now treats it. Averaging only the
@@ -531,7 +539,7 @@ let sumGradePoints = 0, gradePointCount = 0;
     const finalsEntered = !!(doc.finals && doc.finals.totalMarks > 0);
     const hasFinals = finalsEntered && !doc.finals.isBypassed;
     if (hasFinals) {
-      finalsPercentage = doc.finals.isAbsent ? 0 : ((Number(doc.finals.obtainedMarks) || 0) / doc.finals.totalMarks) * 100;
+      finalsPercentage = doc.finals.isAbsent ? 0 : (effectiveMarks(doc.finals) / doc.finals.totalMarks) * 100;
     }
     if (!doc.finals?.isBypassed) { sumFinals += finalsPercentage; finalsCount++; }
 
@@ -663,7 +671,7 @@ let sumGradePoints = 0, gradePointCount = 0;
       if (isExam) {
         const exam = doc[catKey];
         if (exam && exam.totalMarks > 0 && !exam.isBypassed) {
-          catObtained = exam.isAbsent ? 0 : (Number(exam.obtainedMarks) || 0);
+          catObtained = exam.isAbsent ? 0 : effectiveMarks(exam);
           catTotal = Number(exam.totalMarks) || 0;
           catGraded = true;
         }
@@ -677,7 +685,9 @@ let sumGradePoints = 0, gradePointCount = 0;
           if (item.isBypassed) return;
           catTotal += Number(item.totalMarks) || 0;
           if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
-            catObtained += Number(item.obtainedMarks) || 0;
+            // effectiveMarks so a viva-gated category's class average reflects
+            // the multiplied scores the grades were actually built from.
+            catObtained += effectiveMarks(item);
             catGraded = true;
           } else if (item.isAbsent) {
             catGraded = true;
@@ -761,7 +771,7 @@ let sumGradePoints = 0, gradePointCount = 0;
           if (item.isBypassed) return;
           catTotal += Number(item.totalMarks) || 0;
           if (!item.isAbsent && item.obtainedMarks !== undefined && item.obtainedMarks !== null && !isNaN(item.obtainedMarks)) {
-            catObtained += Number(item.obtainedMarks) || 0;
+            catObtained += effectiveMarks(item);
             catGraded = true;
           } else if (item.isAbsent) {
             catGraded = true;
@@ -822,29 +832,35 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 
   const decodedTitle = decodeURIComponent(title).trim().toLowerCase();
 
+  // The room-side definition decides whether the viva column applies at all, so
+  // the popup shows it even for students who have no saved row yet.
+  const roomItem = ['mids', 'finals', 'finalProject'].includes(targetCategory)
+    ? classroom[targetCategory]
+    : (isStandard
+        ? (Array.isArray(classroom[targetCategory])
+            ? classroom[targetCategory].find(i => i.title?.toLowerCase() === decodedTitle)
+            : null)
+        : ((classroom.customActivities || [])
+            .find(c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+                       c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase())?.items || [])
+            .find(i => i.title?.toLowerCase() === decodedTitle));
+  const hasViva = Boolean(roomItem && roomItem.hasViva);
+
   const studentSheet = (classroom.students || []).map(st => {
     const studentId = st._id.toString();
     const markDoc = markMap[studentId];
     let obtainedMarks = undefined;
     let isAbsent = false;
     let file = null;
+    let vivaMarks = null;
 
     if (markDoc) {
+      let entry = null;
       if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
-        const examObj = markDoc[targetCategory];
-        if (examObj) {
-          obtainedMarks = examObj.obtainedMarks;
-          isAbsent = Boolean(examObj.isAbsent);
-          file = examObj.file || null;
-        }
+        entry = markDoc[targetCategory];
       } else if (isStandard) {
         if (Array.isArray(markDoc[targetCategory])) {
-          const entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodedTitle);
-          if (entry) {
-            obtainedMarks = entry.obtainedMarks;
-            isAbsent = Boolean(entry.isAbsent);
-            file = entry.file || null;
-          }
+          entry = markDoc[targetCategory].find(e => e.title?.toLowerCase() === decodedTitle);
         }
       } else if (Array.isArray(markDoc.customActivities)) {
         const customCat = markDoc.customActivities.find(
@@ -852,13 +868,14 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
                c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
         );
         if (customCat && Array.isArray(customCat.items)) {
-          const entry = customCat.items.find(e => e.title?.toLowerCase() === decodedTitle);
-          if (entry) {
-            obtainedMarks = entry.obtainedMarks;
-            isAbsent = Boolean(entry.isAbsent);
-            file = entry.file || null;
-          }
+          entry = customCat.items.find(e => e.title?.toLowerCase() === decodedTitle);
         }
+      }
+      if (entry) {
+        obtainedMarks = entry.obtainedMarks;
+        isAbsent = Boolean(entry.isAbsent);
+        file = entry.file || null;
+        vivaMarks = normalizeVivaScore(entry.vivaMarks);
       }
     }
 
@@ -868,6 +885,13 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       rollNo: st.rollNo || '',
       obtainedMarks,
       isAbsent,
+      hasViva,
+      vivaMarks,
+      // Derived server-side so the popup and the stored grade can never show
+      // different totals for the same student.
+      vivaAdjustedMarks: hasViva && obtainedMarks !== undefined
+        ? applyVivaMultiplier(obtainedMarks, vivaMarks)
+        : (Number(obtainedMarks) || 0),
       file
     };
   });
@@ -883,7 +907,7 @@ exports.getSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
-  const { category, title, totalMarks, marks } = req.body; 
+  const { category, title, totalMarks, marks, hasViva } = req.body; 
 
   const classroom = await Classroom.findById(classroomId);
   if (!classroom) {
@@ -897,14 +921,20 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
   const parsedTotal = Number(totalMarks) || 10;
   let cleanTitle = (title || '').trim();
 
+  // An omitted `hasViva` means OFF: the popup always sends the toggle's live
+  // value, so an absent flag is an older client and must not silently switch a
+  // graded evaluation into a viva-gated one.
+  const vivaEnabled = hasViva === true || hasViva === 'true';
+
   if (!['mids', 'finals', 'finalProject'].includes(targetCategory)) {
     if (isStandard) {
       if (!Array.isArray(classroom[targetCategory])) classroom[targetCategory] = [];
       const existingIndex = classroom[targetCategory].findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
       if (existingIndex > -1) {
         classroom[targetCategory][existingIndex].totalMarks = parsedTotal;
+        classroom[targetCategory][existingIndex].hasViva = vivaEnabled;
       } else {
-        classroom[targetCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+        classroom[targetCategory].push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
       }
     } else {
       if (!Array.isArray(classroom.customActivities)) classroom.customActivities = [];
@@ -915,21 +945,22 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       if (!customCat) {
         classroom.customActivities.push({
           categoryName: cleanCategory,
-          items: [{ title: cleanTitle, totalMarks: parsedTotal }]
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled }]
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
         const existingIndex = customCat.items.findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
         if (existingIndex > -1) {
           customCat.items[existingIndex].totalMarks = parsedTotal;
+          customCat.items[existingIndex].hasViva = vivaEnabled;
         } else {
-          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal });
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
         }
       }
     }
     await classroom.save();
   } else {
-    classroom[targetCategory] = { title: cleanTitle || 'Exam', totalMarks: parsedTotal };
+    classroom[targetCategory] = { title: cleanTitle || 'Exam', totalMarks: parsedTotal, hasViva: vivaEnabled };
     await classroom.save();
   }
 
@@ -985,23 +1016,38 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       const obtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
       const fileData = parseCloudinaryFile(m);
 
+      // Absent and bypassed rows carry no viva - there is no score to multiply.
+      const rowViva = vivaEnabled && !isAbsent && !isBypass ? normalizeVivaScore(m.vivaMarks) : null;
+      if (vivaEnabled && !isAbsent && !isBypass && rowViva === null) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Viva is ON for this evaluation, so every graded student needs a viva out of ${VIVA_MAX}.`,
+          data: { studentId }
+        });
+      }
+
       // Only notify students whose grade actually changed (avoids duplicate emails
       // when the same sheet is re-saved or ungraded entries are added).
       let marksChanged = !markDoc;
+      const vivaDiffers = (existing) =>
+        (existing.hasViva === true) !== vivaEnabled ||
+        normalizeVivaScore(existing.vivaMarks) !== rowViva;
       if (markDoc) {
         if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
           const exam = markDoc[targetCategory];
           if (!exam) marksChanged = true;
           else marksChanged = (Number(exam.obtainedMarks) || 0) !== obtained ||
                               (exam.isAbsent === true) !== isAbsent ||
-                              (Number(exam.totalMarks) || 0) !== parsedTotal;
+                              (Number(exam.totalMarks) || 0) !== parsedTotal ||
+                              vivaDiffers(exam);
         } else if (isStandard) {
           const existingItem = (Array.isArray(markDoc[targetCategory]) ? markDoc[targetCategory] : [])
             .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
           if (!existingItem) marksChanged = true;
           else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== obtained ||
                               (existingItem.isAbsent === true) !== isAbsent ||
-                              (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+                              (Number(existingItem.totalMarks) || 0) !== parsedTotal ||
+                              vivaDiffers(existingItem);
         } else {
           const customCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
             .find(c => c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
@@ -1012,7 +1058,8 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           if (!existingItem) marksChanged = true;
           else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== obtained ||
                               (existingItem.isAbsent === true) !== isAbsent ||
-                              (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+                              (Number(existingItem.totalMarks) || 0) !== parsedTotal ||
+                              vivaDiffers(existingItem);
         }
       }
 
@@ -1023,6 +1070,8 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           obtainedMarks: obtained,
           isAbsent,
           isBypassed: isBypass,
+          hasViva: vivaEnabled,
+          vivaMarks: rowViva,
           file: fileData || markDoc[targetCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
         };
       } else if (isStandard) {
@@ -1034,6 +1083,8 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
           obtainedMarks: obtained,
           isAbsent,
           isBypassed: isBypass,
+          hasViva: vivaEnabled,
+          vivaMarks: rowViva,
           file: fileData || (entryIndex > -1 ? markDoc[targetCategory][entryIndex].file : { url: '', public_id: '', fileType: '', fileName: '' })
         };
 
@@ -1051,7 +1102,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
         if (!customCat) {
           markDoc.customActivities.push({
             categoryName: cleanCategory,
-            items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, isBypassed: isBypass, file: fileData || { url: '' } }]
+            items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, isBypassed: isBypass, hasViva: vivaEnabled, vivaMarks: rowViva, file: fileData || { url: '' } }]
           });
         } else {
           if (!Array.isArray(customCat.items)) customCat.items = [];
@@ -1062,6 +1113,8 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
             obtainedMarks: obtained,
             isAbsent,
             isBypassed: isBypass,
+            hasViva: vivaEnabled,
+            vivaMarks: rowViva,
             file: fileData || (entryIndex > -1 ? customCat.items[entryIndex].file : { url: '' })
           };
 
@@ -1115,7 +1168,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
 // BATCH SUBMIT MARKS
 // =============================================================================
 exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
-  const { classroomId, category, title, totalMarks, marksData } = req.body;
+  const { classroomId, category, title, totalMarks, marksData, hasViva } = req.body;
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
@@ -1130,11 +1183,17 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     return next(new AppError('Total marks must be a valid number greater than 0!', 400));
   }
 
+  // An omitted `hasViva` means OFF. The sheet always sends the toggle's live
+  // value, so an absent flag can only be an older client - and the pre-viva
+  // behaviour is exactly what every already-graded activity must keep.
+  const vivaEnabled = hasViva === true || hasViva === 'true';
+
   const validEntries = marksData
     .map(item => ({
       studentId: item.studentId || item.student || item._id,
       obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score),
       isAbsent: Boolean(item.isAbsent),
+      vivaMarks: item.vivaMarks,
       file: parseCloudinaryFile(item)
     }))
     .filter(item => {
@@ -1152,6 +1211,26 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     return next(new AppError('No valid student marks were provided for submission.', 400));
   }
 
+  // A viva-gated activity needs a viva on every graded row. Rejecting the batch
+  // beats defaulting: a missing viva silently treated as 0 would wipe a student's
+  // marks, and silently treated as 10 would hand out marks nobody awarded. The
+  // sheet highlights the offending boxes and the teacher fills them in.
+  // Absent/bypassed rows are exempt - there is nothing to multiply.
+  if (vivaEnabled) {
+    const missingViva = validEntries.filter((e) => {
+      const raw = String(e.obtainedMarks).trim();
+      if (raw.toUpperCase() === 'A' || raw.toUpperCase() === BYPASS_SENTINEL) return false;
+      return normalizeVivaScore(e.vivaMarks) === null;
+    });
+    if (missingViva.length > 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Viva is ON for this evaluation, so every graded student needs a viva out of ${VIVA_MAX}. ${missingViva.length} row(s) are missing one.`,
+        data: { missingCount: missingViva.length, studentIds: missingViva.map((e) => e.studentId) }
+      });
+    }
+  }
+
   let cleanTitle = (title || '').trim();
   const isMongoId = /^[0-9a-fA-F]{24}$/.test(cleanTitle);
   if (!cleanTitle || isMongoId) {
@@ -1161,8 +1240,10 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findById(classroomId);
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
+  // The room-side definition carries hasViva so the marksheet can show the viva
+  // input from the moment the evaluation is opened, before any marks exist.
   if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
-    classroom[resolvedCategory] = { title: cleanTitle, totalMarks: parsedTotal };
+    classroom[resolvedCategory] = { title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled };
     await classroom.save();
   } else {
     if (isStandard) {
@@ -1172,8 +1253,9 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       );
       if (existingClassItem) {
         existingClassItem.totalMarks = parsedTotal;
+        existingClassItem.hasViva = vivaEnabled;
       } else {
-        classroom[resolvedCategory].push({ title: cleanTitle, totalMarks: parsedTotal });
+        classroom[resolvedCategory].push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
       }
     } else {
       if (!Array.isArray(classroom.customActivities)) classroom.customActivities = [];
@@ -1184,15 +1266,16 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       if (!customCat) {
         classroom.customActivities.push({
           categoryName: cleanCategory,
-          items: [{ title: cleanTitle, totalMarks: parsedTotal }]
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled }]
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
         const existingCustomItem = customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
         if (existingCustomItem) {
           existingCustomItem.totalMarks = parsedTotal;
+          existingCustomItem.hasViva = vivaEnabled;
         } else {
-          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal });
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
         }
       }
     }
@@ -1222,6 +1305,12 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       continue;
     }
 
+    // Absent and bypassed rows carry no viva: there is no score to multiply and
+    // no work to defend, so a viva would only add a meaningless number.
+    const parsedViva = vivaEnabled && !absentFlag && !bypassFlag
+      ? normalizeVivaScore(item.vivaMarks)
+      : null;
+
     let markDoc = docMap.get(studentIdStr);
 
     // Cap bypasses per student per category. Checked before any write so a
@@ -1247,20 +1336,29 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     let marksChanged = !markDoc;
     const parsedObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal) || 0);
 
+    // A viva change on its own is a grade change: it can move the student's
+    // marks even when the raw score is untouched, so it must count towards
+    // marksChanged or the student is never notified of the new mark.
+    const vivaDiffers = (existing) =>
+      (existing.hasViva === true) !== vivaEnabled ||
+      normalizeVivaScore(existing.vivaMarks) !== parsedViva;
+
     if (markDoc) {
       if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
         const exam = markDoc[resolvedCategory];
         if (!exam) marksChanged = true;
         else marksChanged = (Number(exam.obtainedMarks) || 0) !== parsedObtained ||
                             (exam.isAbsent === true) !== absentFlag ||
-                            (Number(exam.totalMarks) || 0) !== parsedTotal;
+                            (Number(exam.totalMarks) || 0) !== parsedTotal ||
+                            vivaDiffers(exam);
       } else if (isStandard) {
         const existingItem = (Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [])
           .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
         if (!existingItem) marksChanged = true;
         else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
                             (existingItem.isAbsent === true) !== absentFlag ||
-                            (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+                            (Number(existingItem.totalMarks) || 0) !== parsedTotal ||
+                            vivaDiffers(existingItem);
       } else {
         const customCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
           .find(c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
@@ -1271,7 +1369,8 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         if (!existingItem) marksChanged = true;
         else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
                             (existingItem.isAbsent === true) !== absentFlag ||
-                            (Number(existingItem.totalMarks) || 0) !== parsedTotal;
+                            (Number(existingItem.totalMarks) || 0) !== parsedTotal ||
+                            vivaDiffers(existingItem);
       }
     }
 
@@ -1292,6 +1391,8 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       });
     }
 
+    // `vivaAdjustedMarks` is left to the schema's pre-save hook rather than set
+    // here, so there is exactly one place that turns (score, viva) into marks.
     if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
       markDoc[resolvedCategory] = {
         title: cleanTitle,
@@ -1299,6 +1400,8 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         obtainedMarks: parsedObtained,
         isAbsent: absentFlag,
         isBypassed: bypassFlag,
+        hasViva: vivaEnabled,
+        vivaMarks: parsedViva,
         file: file || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
       };
     } else if (isStandard) {
@@ -1311,9 +1414,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         markDoc[resolvedCategory][existingIdx].obtainedMarks = parsedObtained;
         markDoc[resolvedCategory][existingIdx].isAbsent = absentFlag;
         markDoc[resolvedCategory][existingIdx].isBypassed = bypassFlag;
+        markDoc[resolvedCategory][existingIdx].hasViva = vivaEnabled;
+        markDoc[resolvedCategory][existingIdx].vivaMarks = parsedViva;
         if (file) markDoc[resolvedCategory][existingIdx].file = file;
       } else {
-        const newItem = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag };
+        const newItem = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, hasViva: vivaEnabled, vivaMarks: parsedViva };
         if (file) newItem.file = file;
         markDoc[resolvedCategory].push(newItem);
       }
@@ -1326,7 +1431,7 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       if (!customCat) {
         markDoc.customActivities.push({
           categoryName: cleanCategory,
-          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, file: file || { url: '' } }]
+          items: [{ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, hasViva: vivaEnabled, vivaMarks: parsedViva, file: file || { url: '' } }]
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
@@ -1336,9 +1441,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
           customCat.items[existingItemIdx].obtainedMarks = parsedObtained;
           customCat.items[existingItemIdx].isAbsent = absentFlag;
           customCat.items[existingItemIdx].isBypassed = bypassFlag;
+          customCat.items[existingItemIdx].hasViva = vivaEnabled;
+          customCat.items[existingItemIdx].vivaMarks = parsedViva;
           if (file) customCat.items[existingItemIdx].file = file;
         } else {
-          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, file: file || { url: '' } });
+          customCat.items.push({ title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isAbsent: absentFlag, isBypassed: bypassFlag, hasViva: vivaEnabled, vivaMarks: parsedViva, file: file || { url: '' } });
         }
       }
     }
@@ -1353,7 +1460,13 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     if (studentUser) {
       const targetStudentEmail = studentUser.personalNotificationEmail || studentUser.email;
       if (targetStudentEmail && !targetStudentEmail.includes('@temp.pucit.edu.pk')) {
-        const percentage = parsedTotal > 0 ? ((parsedObtained / parsedTotal) * 100).toFixed(2) : '0.00';
+        // Percentage quoted in the notification is the one the grade is built
+        // from, i.e. after the viva multiplier. Quoting the raw score here would
+        // have the email and the transcript disagreeing about the same mark.
+        const effectiveObtained = vivaEnabled && parsedViva !== null
+          ? applyVivaMultiplier(parsedObtained, parsedViva)
+          : parsedObtained;
+        const percentage = parsedTotal > 0 ? ((effectiveObtained / parsedTotal) * 100).toFixed(2) : '0.00';
         const displayRole = req.user.role === 'STUDENT' ? 'Teaching Assistant' : req.user.role;
         emailDispatchList.push({
           email: targetStudentEmail,
@@ -1370,6 +1483,14 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
                 : bypassFlag
                   ? 'Bypassed (excluded from grade)'
                   : `${parsedObtained} / ${parsedTotal} (${percentage}%)` },
+            // Shown only when a viva actually applied, and always showing BOTH
+            // numbers so the student can see why their mark is what it is.
+            ...(vivaEnabled && parsedViva !== null
+              ? [
+                  { label: 'Viva (out of 10)', value: `${parsedViva}` },
+                  { label: 'Marks after viva', value: `${effectiveObtained} / ${parsedTotal}` }
+                ]
+              : []),
             { label: 'Graded By', value: `${req.user.name} (${displayRole})` }
           ]
         });
@@ -1458,6 +1579,10 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   const incomingObtained = req.body.newObtainedMarks !== undefined ? req.body.newObtainedMarks : (req.body.obtainedMarks !== undefined ? req.body.obtainedMarks : req.body.score);
   const incomingTotal = req.body.newTotalMarks !== undefined ? req.body.newTotalMarks : req.body.totalMarks;
   const isAbsentFlag = Boolean(req.body.isAbsent);
+  // Single-row edits keep whatever viva the row already had unless the caller
+  // sends a new one, so nudging a score does not silently clear a recorded viva.
+  const incomingHasViva = req.body.hasViva;
+  const incomingViva = req.body.vivaMarks;
 
   const cleanCategory = category ? category.trim().toLowerCase() : '';
   const resolvedCategory = CATEGORY_MAP[cleanCategory] || getNormalizedTargetKey(cleanCategory);
@@ -1494,6 +1619,32 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   // Only notify the student when their grade actually changes.
   let marksChanged = true;
 
+  /**
+   * Resolves the viva for one row, given the row as it currently stands.
+   *
+   * Absent and bypassed rows carry no viva - there is no score to multiply.
+   * A viva-gated row must have one, otherwise the write is refused rather than
+   * defaulted: defaulting to 0 silently wipes a student's marks, and defaulting
+   * to 10 hands out marks nobody awarded.
+   */
+  const resolveRowViva = (existing) => {
+    const enabled = incomingHasViva === undefined
+      ? Boolean(existing && existing.hasViva)
+      : (incomingHasViva === true || incomingHasViva === 'true');
+    if (!enabled) return { hasViva: false, vivaMarks: null };
+    const viva = normalizeVivaScore(
+      incomingViva !== undefined ? incomingViva : (existing ? existing.vivaMarks : null)
+    );
+    return { hasViva: true, vivaMarks: viva };
+  };
+
+  const requireVivaFor = (rowViva, absentFlag, bypassFlag) => {
+    if (rowViva.hasViva && !absentFlag && !bypassFlag && rowViva.vivaMarks === null) {
+      return new AppError(`Viva is ON for this evaluation, so a viva out of ${VIVA_MAX} is required.`, 400);
+    }
+    return null;
+  };
+
   if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
@@ -1511,10 +1662,16 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     }
 
     const prevExam = markDoc[resolvedCategory];
+    const examViva = resolveRowViva(prevExam);
+    const vivaErr = requireVivaFor(examViva, absentFlag, bypassFlag);
+    if (vivaErr) return next(vivaErr);
+
     marksChanged = !prevExam ||
       (Number(prevExam.obtainedMarks) || 0) !== currentObtained ||
       (Number(prevExam.totalMarks) || 0) !== currentTotal ||
-      (Boolean(prevExam.isAbsent)) !== absentFlag;
+      (Boolean(prevExam.isAbsent)) !== absentFlag ||
+      (prevExam.hasViva === true) !== examViva.hasViva ||
+      normalizeVivaScore(prevExam.vivaMarks) !== examViva.vivaMarks;
 
     markDoc[resolvedCategory] = {
       title: itemTitle || 'Exam',
@@ -1522,6 +1679,8 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       obtainedMarks: currentObtained,
       isAbsent: absentFlag,
       isBypassed: bypassFlag,
+      hasViva: examViva.hasViva,
+      vivaMarks: examViva.vivaMarks,
       file: fileData || markDoc[resolvedCategory]?.file || { url: '', public_id: '', fileType: '', fileName: '' }
     };
   } else if (isStandard) {
@@ -1548,16 +1707,24 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     }
 
     const prevItem = itemIdx > -1 ? markDoc[resolvedCategory][itemIdx] : null;
+    const itemViva = resolveRowViva(prevItem);
+    const itemVivaErr = requireVivaFor(itemViva, absentFlag, bypassFlag);
+    if (itemVivaErr) return next(itemVivaErr);
+
     marksChanged = !prevItem ||
       (Number(prevItem.obtainedMarks) || 0) !== currentObtained ||
       (Number(prevItem.totalMarks) || 0) !== currentTotal ||
-      (Boolean(prevItem.isAbsent)) !== absentFlag;
+      (Boolean(prevItem.isAbsent)) !== absentFlag ||
+      (prevItem.hasViva === true) !== itemViva.hasViva ||
+      normalizeVivaScore(prevItem.vivaMarks) !== itemViva.vivaMarks;
 
     if (itemIdx > -1) {
       markDoc[resolvedCategory][itemIdx].totalMarks = currentTotal;
       markDoc[resolvedCategory][itemIdx].obtainedMarks = currentObtained;
       markDoc[resolvedCategory][itemIdx].isAbsent = absentFlag;
       markDoc[resolvedCategory][itemIdx].isBypassed = bypassFlag;
+      markDoc[resolvedCategory][itemIdx].hasViva = itemViva.hasViva;
+      markDoc[resolvedCategory][itemIdx].vivaMarks = itemViva.vivaMarks;
       if (fileData) markDoc[resolvedCategory][itemIdx].file = fileData;
     } else {
       markDoc[resolvedCategory].push({
@@ -1566,6 +1733,8 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
         obtainedMarks: currentObtained,
         isAbsent: absentFlag,
         isBypassed: bypassFlag,
+        hasViva: itemViva.hasViva,
+        vivaMarks: itemViva.vivaMarks,
         file: fileData || { url: '', public_id: '', fileType: '', fileName: '' }
       });
     }
@@ -1589,6 +1758,10 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
         const verdict = canBypass(classroom, markDoc, resolvedCategory, cleanTitle);
         if (!verdict.allowed) return next(new AppError(verdict.message, 400));
       }
+      const newCustomViva = resolveRowViva(null);
+      const newCustomVivaErr = requireVivaFor(newCustomViva, absentNew, bypassNew);
+      if (newCustomVivaErr) return next(newCustomVivaErr);
+
       markDoc.customActivities.push({
         categoryName: cleanCategory,
         items: [{
@@ -1597,6 +1770,8 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
           obtainedMarks: (absentNew || bypassNew) ? 0 : (Number(rawNew) || 0),
           isAbsent: absentNew,
           isBypassed: bypassNew,
+          hasViva: newCustomViva.hasViva,
+          vivaMarks: newCustomViva.vivaMarks,
           file: fileData || { url: '' }
         }]
       });
@@ -1614,16 +1789,24 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       const currentObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal));
 
       const prevItem = itemIdx > -1 ? customCat.items[itemIdx] : null;
+      const customViva = resolveRowViva(prevItem);
+      const customVivaErr = requireVivaFor(customViva, absentFlag, bypassFlag);
+      if (customVivaErr) return next(customVivaErr);
+
       marksChanged = !prevItem ||
         (Number(prevItem.obtainedMarks) || 0) !== currentObtained ||
         (Number(prevItem.totalMarks) || 0) !== currentTotal ||
-        (Boolean(prevItem.isAbsent)) !== absentFlag;
+        (Boolean(prevItem.isAbsent)) !== absentFlag ||
+        (prevItem.hasViva === true) !== customViva.hasViva ||
+        normalizeVivaScore(prevItem.vivaMarks) !== customViva.vivaMarks;
 
       if (itemIdx > -1) {
         customCat.items[itemIdx].totalMarks = currentTotal;
         customCat.items[itemIdx].obtainedMarks = currentObtained;
         customCat.items[itemIdx].isAbsent = absentFlag;
         customCat.items[itemIdx].isBypassed = bypassFlag;
+        customCat.items[itemIdx].hasViva = customViva.hasViva;
+        customCat.items[itemIdx].vivaMarks = customViva.vivaMarks;
         if (fileData) customCat.items[itemIdx].file = fileData;
       } else {
         customCat.items.push({
@@ -1632,6 +1815,8 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
           obtainedMarks: currentObtained,
           isAbsent: absentFlag,
           isBypassed: bypassFlag,
+          hasViva: customViva.hasViva,
+          vivaMarks: customViva.vivaMarks,
           file: fileData || { url: '' }
         });
       }

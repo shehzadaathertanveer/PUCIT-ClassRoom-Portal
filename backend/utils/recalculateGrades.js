@@ -17,8 +17,9 @@ const Classroom = require('../models/classRoomSchema');
 const Labroom = require('../models/labSchema');
 const Mark = require('../models/markSchema');
 const LabMark = require('../models/labMarkSchema');
-const { computeLabWeightedPercentage } = require('./labWeights');
+const { computeLabWeightedPercentage, VALID_STANDARD_CATEGORIES } = require('./labWeights');
 const { getGradeAndGpa } = require('./gradeScale');
+const { applyVivaToDoc } = require('./viva');
 
 /**
  * Re-saves every Mark in the classroom so the schema's pre-save hook re-runs the
@@ -69,6 +70,10 @@ const recalculateLabGrades = async (labroomId) => {
 
   for (const doc of docs) {
     try {
+      // Refresh vivaAdjustedMarks from the stored score + viva before weighing.
+      // labWeights reads that derived field, so skipping this would let a stale
+      // adjusted value survive a re-save and disagree with its own inputs.
+      applyVivaToDoc(doc, VALID_STANDARD_CATEGORIES);
       const { percentage } = computeLabWeightedPercentage(labroom, doc);
       // A lab is graded on the same scale as a classroom, so grade and grade
       // point are stored too rather than recomputed by every consumer.

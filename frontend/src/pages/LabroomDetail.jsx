@@ -39,6 +39,7 @@ import GradeBadge from '../components/GradeBadge';
 import RoomColorPicker from '../components/RoomColorPicker';
 import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
+import { effectiveMarks } from '../utils/viva';
 
 const LabroomDetail = () => {
   const { labroomId } = useParams();
@@ -93,6 +94,9 @@ const LabroomDetail = () => {
   const [itemCategory, setItemCategory] = useState('Lab Tasks');
   const [itemTitle, setItemTitle] = useState('');
   const [itemTotalMarks, setItemTotalMarks] = useState(10);
+  // Off by default, matching the classroom: a new lab evaluation grades at face
+  // value unless the teacher explicitly turns the viva on.
+  const [itemHasViva, setItemHasViva] = useState(false);
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
   const [creatingItem, setCreatingItem] = useState(false);
@@ -428,18 +432,22 @@ const LabroomDetail = () => {
       await API.post(`/labrooms/${labroomId}/items`, {
         category: catKey,
         title: trimmedTitle,
-        totalMarks: tMarks
+        totalMarks: tMarks,
+        hasViva: itemHasViva
       });
 
       setIsItemModalOpen(false);
       setEvaluationMode(null);
       setItemTitle('');
       setItemTotalMarks(10);
+      setItemHasViva(false);
       setRangeStart('');
       setRangeEnd('');
       showToast('Opening lab result sheet...');
 
-      const sheetState = { totalMarks: tMarks };
+      // hasViva rides along so the sheet shows the viva column immediately
+      // instead of flashing the old layout until a refetch lands.
+      const sheetState = { totalMarks: tMarks, hasViva: itemHasViva };
       if (evaluationMode === 'range') {
         sheetState.filterRange = { start: Number(rangeStart), end: Number(rangeEnd) };
       }
@@ -814,7 +822,10 @@ const LabroomDetail = () => {
       const items = Array.isArray(entries) ? entries : (entries && entries.title ? [entries] : []);
       items.forEach(item => {
         if (!item || item.isBypassed) return;
-        if (!item.isAbsent) catObtained += Number(item.obtainedMarks || 0);
+        // VIVA-ADJUSTED, mirroring labWeights.sumCategory on the server. Summing raw
+        // marks here would make this local percentage disagree with the stored
+        // lab grade for the same student.
+        if (!item.isAbsent) catObtained += effectiveMarks(item);
         catTotal += Number(item.totalMarks || 0);
       });
 
@@ -849,7 +860,9 @@ const LabroomDetail = () => {
       const sScore = (studentMark?.[targetKey] || []).find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       if (sScore && sScore.obtainedMarks !== undefined && sScore.obtainedMarks !== null) {
         const total = Number(sScore.totalMarks || 10);
-        return ((Number(sScore.obtainedMarks) / total) * 100).toFixed(2);
+        // VIVA-ADJUSTED, so this fallback agrees with the analytics row it stands
+        // in for rather than reporting a different average for the same activity.
+        return ((effectiveMarks(sScore) / total) * 100).toFixed(2);
       }
       return '0.00';
     }
@@ -871,7 +884,9 @@ const LabroomDetail = () => {
         // An absent student counts as 0 earned but STILL occupies their share of
         // the possible total. Skipping them entirely (both sides) let absences
         // inflate the class average, which is the opposite of absent = 0.
-        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
+        // effectiveMarks, not raw obtainedMarks: on a viva-gated activity the
+        // class average must reflect the marks students actually earned.
+        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
         totalPossible += Number(match.totalMarks || maxMarks);
         count++;
       }
@@ -886,7 +901,10 @@ const LabroomDetail = () => {
     if (rankings.length === 0) {
       const sScore = (studentMark?.[targetKey] || []).find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
       if (sScore && sScore.obtainedMarks !== undefined && sScore.obtainedMarks !== null) {
-        return Number(sScore.obtainedMarks).toFixed(2);
+        // Adjusted here too, because this figure is displayed as "x / total" right
+        // beside the percentage. Using raw marks on a viva-gated activity would
+        // print two different answers for the same cohort.
+        return effectiveMarks(sScore).toFixed(2);
       }
       return '0.00';
     }
@@ -902,7 +920,7 @@ const LabroomDetail = () => {
       if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
         // Absent = 0 for the raw mark average too, otherwise the average silently
         // skips every absent student and reads far higher than the class earned.
-        totalObtained += match.isAbsent ? 0 : Number(match.obtainedMarks);
+        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
         count++;
       }
     });
@@ -1665,10 +1683,17 @@ const LabroomDetail = () => {
                     const gradedCount = getItemGradedCount(targetKey, item.title);
                     const ungradedCount = Math.max(0, totalStudentsCount - gradedCount);
 
-                    const obtained = studentItemScore?.obtainedMarks ?? 0;
+                    const rawObtained = studentItemScore?.obtainedMarks ?? 0;
                     const total = Number(item.totalMarks || 10);
-                    const studentPercentage = total > 0 ? ((obtained / total) * 100).toFixed(2) : '0.00';
                     const hasFile = studentItemScore?.file && studentItemScore.file.url;
+
+                    // On a viva-gated activity the number that counts is the adjusted
+                    // one, so that is what every readout below shows. The raw score is
+                    // still labelled separately so a student can see both.
+                    const obtained = effectiveMarks(studentItemScore);
+                    const isVivaGated = !!studentItemScore?.hasViva;
+                    const vivaScore = studentItemScore?.vivaMarks;
+                    const studentPercentage = total > 0 ? ((obtained / total) * 100).toFixed(2) : '0.00';
 
                     return (
                       <div
@@ -1694,6 +1719,14 @@ const LabroomDetail = () => {
                                   <span className="font-mono text-emerald-400 font-black text-sm break-words">
                                     {studentItemScore ? (studentItemScore.isAbsent ? 'Marked Absent' : `${obtained} / ${total}`) : 'Pending'}
                                   </span>
+                                  {/* Spelled out rather than just showing a smaller number:
+                                      a viva-gated score that drops is otherwise invisible
+                                      and looks like a marking error. */}
+                                  {isVivaGated && !studentItemScore.isAbsent && (
+                                    <span className="block text-[9px] sm:text-[10px] text-slate-400 font-normal leading-snug">
+                                      {rawObtained} raw × viva {vivaScore}/10
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="pt-1 border-t border-white/5">
                                   <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg Score</span>
@@ -1923,13 +1956,17 @@ const LabroomDetail = () => {
                       </div>
                       {itemsList.map((item, idx) => {
                         const score = (Array.isArray(catScores) ? catScores : []).find(s => s.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
-                        const obtained = score && !score.isAbsent ? score.obtainedMarks : null;
+                        const obtained = score && !score.isAbsent ? effectiveMarks(score) : null;
                         const total = Number(item.totalMarks || 0);
+                        const vivaNote = score?.hasViva && !score.isAbsent
+                          ? ` (${score.obtainedMarks} raw × viva ${score.vivaMarks}/10)`
+                          : '';
                         return (
                           <div key={idx} className="flex items-center justify-between gap-2 text-xs">
                             <span className="text-slate-300 truncate min-w-0">{item.title}</span>
                             <span className={`font-mono font-bold shrink-0 ml-2 ${obtained === null ? 'text-slate-600' : score.isAbsent ? 'text-amber-400' : 'text-emerald-400'}`}>
                               {score && score.isAbsent ? 'ABSENT' : obtained === null ? 'Ungraded' : `${obtained} / ${total}`}
+                              {vivaNote && <span className="block text-[9px] text-slate-400 font-normal leading-snug">{vivaNote.trim()}</span>}
                             </span>
                           </div>
                         );
@@ -1989,6 +2026,24 @@ const LabroomDetail = () => {
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">Total Marks</label>
                   <input type="number" required min="1" value={itemTotalMarks} onChange={(e) => setItemTotalMarks(e.target.value)} className="lm-field font-mono" />
+                </div>
+
+                <div className="lm-inset p-3 space-y-2.5">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={itemHasViva}
+                    onClick={() => setItemHasViva(!itemHasViva)}
+                    className="w-full flex items-center justify-between gap-3 text-left cursor-pointer"
+                  >
+                    <span className="text-[10px] sm:text-xs font-bold uppercase text-slate-300">Viva Multiplier</span>
+                    <span className={`lm-chip shrink-0 ${itemHasViva ? 'lm-chip-active' : ''}`}>{itemHasViva ? 'On' : 'Off'}</span>
+                  </button>
+                  <p className="text-[10px] sm:text-xs text-slate-400 leading-relaxed">
+                    {itemHasViva
+                      ? 'Each student also gets a viva out of 10. Final marks are the evaluation marks multiplied by that viva, rounded up, and the lab total scales from those adjusted marks.'
+                      : 'Off by default. Marks count at face value with no viva multiplier.'}
+                  </p>
                 </div>
 
                 {evaluationMode === 'range' && (
@@ -2749,8 +2804,15 @@ const LabroomDetail = () => {
                 <div className="lm-inset p-6 space-y-1.5">
                   <p className="text-[10px] sm:text-xs text-slate-400 uppercase">Your Obtained Score</p>
                   <p className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 break-words">
-                    {sScore ? (sScore.isAbsent ? 'Marked Absent' : `${sScore.obtainedMarks} / ${selectedActivityItem.item.totalMarks}`) : 'Pending Evaluation'}
+                    {sScore ? (sScore.isAbsent ? 'Marked Absent' : `${effectiveMarks(sScore)} / ${selectedActivityItem.item.totalMarks}`) : 'Pending Evaluation'}
                   </p>
+                  {/* The breakdown matters here: this is the headline number a
+                      student sees, so a viva-reduced mark needs its cause shown. */}
+                  {sScore?.hasViva && !sScore.isAbsent && (
+                    <p className="text-[10px] sm:text-xs font-mono text-slate-400">
+                      {sScore.obtainedMarks} raw × viva {sScore.vivaMarks}/10
+                    </p>
+                  )}
                 </div>
               );
             })()}

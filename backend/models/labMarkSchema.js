@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
 
+const { applyVivaToDoc } = require('../utils/viva');
+const { VALID_STANDARD_CATEGORIES } = require('../utils/labWeights');
+
 const cloudinaryFileSchema = new mongoose.Schema(
   {
     url: { type: String, default: "" },
@@ -21,6 +24,13 @@ const LabItemScoreSchema = new mongoose.Schema({
   // Bypass: this evaluation does not exist for this student. Excluded from
   // BOTH earned and possible. Enforced against labroom.bypassLimits.
   isBypassed: { type: Boolean, default: false },
+  // Viva gate. Off by default so every pre-existing row keeps its exact marks.
+  // When on, `vivaMarks` (0-10) multiplies `obtainedMarks` into
+  // `vivaAdjustedMarks`, and it is the adjusted figure that feeds labWeights and
+  // therefore the percentage, the scaled final marks and the letter grade.
+  hasViva: { type: Boolean, default: false },
+  vivaMarks: { type: Number, min: 0, max: 10, default: null },
+  vivaAdjustedMarks: { type: Number, default: null },
   remarks: { type: String, trim: true, default: '' },
   file: { type: cloudinaryFileSchema, default: () => ({}) } // 👈 Persists file attachments in lab grading sheets
 }, { _id: false });
@@ -66,6 +76,20 @@ const labMarkSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+/**
+ * Refreshes every row's cached `vivaAdjustedMarks` on save.
+ *
+ * LabMark has no grade hook (the weighted percentage is derived on read by
+ * labWeights, not cached by a hook), so without this the cached adjusted value
+ * could go stale: a row written by an older client, or one whose viva was edited
+ * through a path that forgot to recompute, would keep advertising a figure that
+ * disagrees with its own score and viva. Refreshing here means no write path can
+ * skip it. Cheap - it touches no database, just re-derives numbers in memory.
+ */
+labMarkSchema.pre('save', function () {
+  applyVivaToDoc(this, VALID_STANDARD_CATEGORIES);
+});
 
 // Compound unique index to ensure one mark sheet per student per labroom
 labMarkSchema.index({ labroom: 1, student: 1 }, { unique: true });

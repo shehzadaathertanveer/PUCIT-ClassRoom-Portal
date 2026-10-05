@@ -24,6 +24,8 @@
  * student. markSchema and markController now both call computeSessionalBreakdown.
  */
 
+const { effectiveMarks } = require('./viva');
+
 // The sessional category keys that live directly on the marks document.
 const STANDARD_SESSIONAL_KEYS = [
   'quizzes', 'assignments', 'presentations', 'projects',
@@ -62,12 +64,17 @@ const pct = (obtained = 0, total = 0) => (total > 0 ? Number(((obtained / total)
  * Sums a category's entries. A bypassed ("B") entry is dropped from BOTH sides:
  * it counts for nothing rather than counting as a zero. An absent entry still
  * contributes its possible marks, since the activity was still worth marks.
+ *
+ * Earned marks are the VIVA-ADJUSTED ones (see utils/viva). Reading
+ * `obtainedMarks` here instead would make a student's grade in this breakdown
+ * disagree with the letter grade the pre-save hook stored, which is exactly the
+ * class of bug this module exists to prevent.
  */
 const sumEntries = (entries) => {
   const acc = { obtained: 0, total: 0, count: 0 };
   (Array.isArray(entries) ? entries : []).forEach((item) => {
     if (!item || item.isBypassed) return;
-    if (!item.isAbsent) acc.obtained += Number(item.obtainedMarks) || 0;
+    if (!item.isAbsent) acc.obtained += effectiveMarks(item);
     acc.total += Number(item.totalMarks) || 0;
     acc.count += 1;
   });

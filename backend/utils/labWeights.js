@@ -37,6 +37,8 @@ const VALID_STANDARD_CATEGORIES = [
   'labActivities', 'labBehavior', 'labWorksheets', 'troubleshooting'
 ];
 
+const { effectiveMarks } = require('./viva');
+
 const normKey = (s) =>
   String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     .replace(/ies$/, 'y').replace(/sses$/, 'ss').replace(/([^s])s$/, '$1');
@@ -64,6 +66,9 @@ const resolveCategoryKey = (category) => {
  *    exist for this student, so it must neither help nor hurt them.
  *  - Absent entries contribute 0 earned but KEEP their possible marks, because
  *    absent is a real zero rather than a missing grade.
+ *
+ * Earned marks are the VIVA-ADJUSTED ones (see utils/viva), so the marks scaled
+ * out of labroom.totalMarks reflect the viva gate rather than the raw score.
  */
 const sumCategory = (entries) => {
   const acc = { obtained: 0, possible: 0 };
@@ -73,7 +78,7 @@ const sumCategory = (entries) => {
 
   items.forEach((item) => {
     if (!item || item.isBypassed) return;
-    if (!item.isAbsent) acc.obtained += Number(item.obtainedMarks) || 0;
+    if (!item.isAbsent) acc.obtained += effectiveMarks(item);
     acc.possible += Number(item.totalMarks) || 0;
   });
   return acc;

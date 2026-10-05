@@ -1,15 +1,25 @@
 const mongoose = require('mongoose');
 const { ROOM_COLOR_KEYS, DEFAULT_ROOM_COLOR } = require('../utils/roomColors');
 
+// Whether this activity is viva gated. Stored on the ROOM side as well as on each
+// student's mark row so the marksheet knows to show the second viva input before
+// any marks have been entered. Defaults to false, which is why every activity
+// that predates the viva feature keeps behaving exactly as before.
+const vivaGateFields = {
+  hasViva: { type: Boolean, default: false }
+};
+
 const evaluationItemSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   totalMarks: { type: Number, required: true, min: 1 },
+  ...vivaGateFields,
   createdAt: { type: Date, default: Date.now }
 }, { _id: true });
 
 const singleEvaluationSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true, default: 'Exam' },
   totalMarks: { type: Number, required: true, min: 1, default: 30 },
+  ...vivaGateFields,
   createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 

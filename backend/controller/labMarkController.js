@@ -8,6 +8,7 @@ const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
 const { computeLabWeightedPercentage, resolveCategoryKey } = require('../utils/labWeights');
 const { getGradeAndGpa } = require('../utils/gradeScale');
 const { partitionRoster, csvCell, csvPad, rosterWidths, blankRow } = require('../utils/exportCsv');
+const { applyVivaMultiplier, normalizeVivaScore, withVivaAdjusted, effectiveMarks, VIVA_MAX } = require('../utils/viva');
 
 const VALID_STANDARD_CATEGORIES = [
   'labTasks', 'vivas', 'labTests', 'projects', 'quizzes', 'assignments',
@@ -603,7 +604,10 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
         if (!match) { rowData.push(''); return; }
         if (match.isBypassed) { rowData.push('Bypassed(-)'); return; }
         if (match.isAbsent) { rowData.push('Absent(0)'); return; }
-        rowData.push(match.obtainedMarks ?? '');
+        // VIVA-ADJUSTED, not the raw score. The overall % further down these rows is
+        // computed from the adjusted marks, so exporting raw marks here would print
+        // components that do not add up to the total beside them.
+        rowData.push(match.hasViva ? effectiveMarks(match) : (match.obtainedMarks ?? ''));
       });
     });
 
@@ -661,7 +665,7 @@ exports.downloadLabExcelExport = catchAsync(async (req, res, next) => {
 // 2. BATCH SUBMIT LAB MARKS (Targeted Notifications & File Attachments)
 // =============================================================================
 exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
-  const { labroomId, category, title, totalMarks, marksData } = req.body;
+  const { labroomId, category, title, totalMarks, marksData, hasViva } = req.body;
 
   if (!labroomId || totalMarks === undefined || !Array.isArray(marksData) || marksData.length === 0) {
     return next(new AppError('Labroom ID, Total Marks (>0), and Marks Data array are required!', 400));
@@ -671,6 +675,12 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   if (isNaN(parsedTotal) || parsedTotal <= 0) {
     return next(new AppError('Total marks must be valid and greater than 0!', 400));
   }
+
+  // Omitted `hasViva` means OFF, not "keep whatever was there". The sheet always
+  // sends the toggle's current value, so an absent flag can only be an older
+  // client - and the safe reading for those is the pre-viva behaviour, which is
+  // also what every already-graded lab activity keeps.
+  const vivaEnabled = hasViva === true || hasViva === 'true';
 
   const standardKey = RESOLVE_LAB_CATEGORY(category || '');
   let cleanTitle = (title || '').trim();
@@ -682,15 +692,18 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
+  // The room-side definition carries hasViva so the marksheet can render the
+  // viva column from the moment the activity is opened, before any marks exist.
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
-    labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal }];
+    labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled }];
   } else {
     if (!Array.isArray(labroom[standardKey])) labroom[standardKey] = [];
     const exists = labroom[standardKey].find(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
     if (exists) {
       exists.totalMarks = parsedTotal;
+      exists.hasViva = vivaEnabled;
     } else {
-      labroom[standardKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+      labroom[standardKey].push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
     }
   }
   await labroom.save();
@@ -698,6 +711,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   const validEntries = marksData.map(item => ({
     studentId: item.studentId || item.student || item._id,
     obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score),
+    vivaMarks: item.vivaMarks,
     file: item.file || {}
   })).filter(item => {
     if (!item.studentId) return false;
@@ -713,6 +727,26 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   if (validEntries.length === 0) {
     return next(new AppError('No valid student marks were provided for submission.', 400));
+  }
+
+  // A viva-gated activity needs a viva score on every graded row. Rejecting the
+  // whole batch is deliberate: silently defaulting a missing viva would either
+  // silently zero a student or silently grant full marks, and both are worse than
+  // asking the teacher to fill in the highlighted boxes. Absent and bypassed rows
+  // are exempt - there is nothing to multiply.
+  if (vivaEnabled) {
+    const missingViva = validEntries.filter((e) => {
+      const raw = String(e.obtainedMarks).trim();
+      if (raw.toUpperCase() === 'A' || raw.toUpperCase() === BYPASS_SENTINEL) return false;
+      return normalizeVivaScore(e.vivaMarks) === null;
+    });
+    if (missingViva.length > 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Viva is ON for this activity, so every graded student needs a viva score out of ${VIVA_MAX}. ${missingViva.length} row(s) are missing one.`,
+        data: { missingCount: missingViva.length, studentIds: missingViva.map(e => e.studentId) }
+      });
+    }
   }
 
   const studentIds = validEntries.map(e => e.studentId);
@@ -734,6 +768,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       continue;
     }
     const parsedObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
+    const parsedViva = vivaEnabled && !isAbsent && !isBypass ? normalizeVivaScore(entry.vivaMarks) : null;
     const fileData = entry.file || {};
 
     let markDoc = docMap.get(studentIdStr);
@@ -771,8 +806,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
         const oldAbsent = existingItem.isAbsent === true;
         const oldBypassed = existingItem.isBypassed === true;
         const oldTotal = Number(existingItem.totalMarks) || 0;
+        const oldVivaEnabled = existingItem.hasViva === true;
+        const oldViva = normalizeVivaScore(existingItem.vivaMarks);
         marksChanged = oldObtained !== parsedObtained || oldAbsent !== isAbsent ||
-                       oldBypassed !== isBypass || oldTotal !== parsedTotal;
+                       oldBypassed !== isBypass || oldTotal !== parsedTotal ||
+                       oldVivaEnabled !== vivaEnabled || oldViva !== parsedViva;
       }
     }
 
@@ -790,7 +828,20 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     // or "B". The -99/empty ungraded sentinel was already filtered out above, so
     // mark the row graded - this is what keeps a legitimate 0 score from being
     // re-read as "ungraded" later.
-    const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: parsedObtained, isGraded: true, isAbsent, isBypassed: isBypass, file: fileData };
+    // vivaAdjustedMarks is computed HERE rather than trusted from the client, and
+    // it is stored alongside the raw score so the sheet can show both "scored 80"
+    // and "viva 0 means that counts as 0".
+    const itemPayload = withVivaAdjusted({
+      title: cleanTitle,
+      totalMarks: parsedTotal,
+      obtainedMarks: parsedObtained,
+      hasViva: vivaEnabled,
+      vivaMarks: parsedViva,
+      isGraded: true,
+      isAbsent,
+      isBypassed: isBypass,
+      file: fileData
+    });
 
     if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
       markDoc[standardKey] = [itemPayload];
@@ -831,6 +882,14 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
                 : isBypass
                   ? 'Bypassed (excluded from grade)'
                   : `${parsedObtained} / ${parsedTotal}` },
+            // The viva and its effect are both surfaced so a student can see WHY
+            // their marks changed rather than finding a lower number with no reason.
+            ...(vivaEnabled && parsedViva !== null
+              ? [
+                  { label: 'Viva (out of 10)', value: `${parsedViva}` },
+                  { label: 'Marks after viva', value: `${applyVivaMultiplier(parsedObtained, parsedViva)} / ${parsedTotal}` }
+                ]
+              : []),
             { label: 'Graded By', value: req.user.name }
           ]
         });
@@ -877,7 +936,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 // 3. UPDATE SINGLE STUDENT ITEM MARK (With File Attachment Support)
 // =============================================================================
 exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
-  const { labroomId, studentId, category, itemTitle, obtainedMarks, totalMarks, file } = req.body;
+  const { labroomId, studentId, category, itemTitle, obtainedMarks, totalMarks, file, vivaMarks, hasViva } = req.body;
 
   if (!labroomId || !studentId || !category || !itemTitle) {
     return next(new AppError('Labroom ID, Student ID, category, and item title are required!', 400));
@@ -918,6 +977,18 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     ? existingItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
     : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
 
+  // Single-row edit falls back to whatever the row already had, so nudging one
+  // student's viva without touching their score does not blank the other field.
+  const singleVivaEnabled = hasViva === undefined
+    ? Boolean(existingItem && existingItem.hasViva)
+    : (hasViva === true || hasViva === 'true');
+  const singleViva = singleVivaEnabled
+    ? normalizeVivaScore(vivaMarks !== undefined ? vivaMarks : (existingItem ? existingItem.vivaMarks : null))
+    : null;
+  if (singleVivaEnabled && !isAbsent && !isBypass && singleViva === null) {
+    return next(new AppError(`Viva is ON for this activity, so a viva score out of ${VIVA_MAX} is required.`, 400));
+  }
+
   if (isBypass) {
     const verdict = canBypass(labroom, markDoc, standardKey, cleanTitle);
     if (!verdict.allowed) return next(new AppError(verdict.message, 400));
@@ -929,13 +1000,26 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     const oldAbsent = existingItem.isAbsent === true;
     const oldBypassed = existingItem.isBypassed === true;
     const oldTotal = Number(existingItem.totalMarks) || 0;
+    const oldVivaEnabled = existingItem.hasViva === true;
+    const oldViva = normalizeVivaScore(existingItem.vivaMarks);
     marksChanged = oldObtained !== currentObtained || oldAbsent !== isAbsent ||
-                   oldBypassed !== isBypass || oldTotal !== currentTotal;
+                   oldBypassed !== isBypass || oldTotal !== currentTotal ||
+                   oldVivaEnabled !== singleVivaEnabled || oldViva !== singleViva;
   }
 
   // Same reasoning as the bulk path: a submitted value means graded, so a real 0
   // is preserved as a 0 on reload instead of being normalised to ungraded.
-  const itemPayload = { title: cleanTitle, totalMarks: currentTotal, obtainedMarks: currentObtained, isGraded: true, isAbsent, isBypassed: isBypass, file: fileData };
+  const itemPayload = withVivaAdjusted({
+    title: cleanTitle,
+    totalMarks: currentTotal,
+    obtainedMarks: currentObtained,
+    hasViva: singleVivaEnabled,
+    vivaMarks: singleViva,
+    isGraded: true,
+    isAbsent,
+    isBypassed: isBypass,
+    file: fileData
+  });
 
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
     markDoc[standardKey] = [itemPayload];
@@ -970,6 +1054,12 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
               : isBypass
                 ? 'Bypassed (excluded from grade)'
                 : `${currentObtained} / ${currentTotal}` },
+          ...(singleVivaEnabled && singleViva !== null
+            ? [
+                { label: 'Viva (out of 10)', value: `${singleViva}` },
+                { label: 'Marks after viva', value: `${applyVivaMultiplier(currentObtained, singleViva)} / ${currentTotal}` }
+              ]
+            : []),
           { label: 'Updated By', value: req.user.name }
         ]
       });

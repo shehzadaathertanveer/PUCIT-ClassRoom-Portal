@@ -8,6 +8,7 @@ const { normaliseRoomColor } = require('../utils/roomColors');
 const { recalculateClassroomGrades, activitiesChanged } = require('../utils/recalculateGrades');
 const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
+const { normalizeVivaScore, withVivaAdjusted, VIVA_MAX } = require('../utils/viva');
 
 // Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
 const STANDARD_CATEGORY_KEYS = ['quizzes','assignments','presentations','projects','homework','classActivities','classParticipation','vivas','specialMarks','mids','finals','finalProject'];
@@ -885,7 +886,7 @@ exports.deleteComplaint = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.createGradedItem = catchAsync(async (req, res, next) => {
   const { classroomId } = req.params;
-  const { category, type, title, totalMarks, rangeStart, rangeEnd } = req.body;
+  const { category, type, title, totalMarks, rangeStart, rangeEnd, hasViva } = req.body;
 
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to create grading items in this classroom.', 403));
@@ -903,8 +904,13 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
     return next(new AppError('A valid item title is required.', 400));
   }
 
+  // Omitted hasViva means OFF. The creation dialog always sends the toggle's
+  // live value, so an absent flag is an older client and must not silently turn a
+  // viva-gated activity into a plain one (or the reverse) when re-saving.
+  const vivaEnabled = hasViva === true || hasViva === 'true';
+
   if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-    classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal };
+    classroom[targetKey] = { title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled };
   } else {
     if (!Array.isArray(classroom[targetKey])) classroom[targetKey] = [];
     const existsIndex = classroom[targetKey].findIndex(
@@ -912,8 +918,9 @@ exports.createGradedItem = catchAsync(async (req, res, next) => {
     );
     if (existsIndex > -1) {
       classroom[targetKey][existsIndex].totalMarks = parsedTotal;
+      classroom[targetKey][existsIndex].hasViva = vivaEnabled;
     } else {
-      classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal });
+      classroom[targetKey].push({ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled });
     }
   }
   await classroom.save();
@@ -1463,7 +1470,7 @@ exports.getClassroomMarks = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.updateStudentMarks = catchAsync(async (req, res, next) => {
   const { classroomId, studentId } = req.params;
-  const { category, type, title, obtainedMarks, totalMarks, isAbsent } = req.body;
+  const { category, type, title, obtainedMarks, totalMarks, isAbsent, vivaMarks: incomingViva, hasViva } = req.body;
 
   const isStaff = await verifyClassroomStaff(req.user._id, req.user.role, classroomId);
   if (!isStaff) return next(new AppError('Unauthorized to update student marks.', 403));
@@ -1481,31 +1488,55 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
     markRecord = await Mark.create({ classroom: classroomId, student: studentId });
   }
 
+  // VIVA: this endpoint historically rebuilt the whole subdocument, which silently
+  // dropped hasViva/vivaMarks on every call. Resolve the gate against the incoming
+  // value, falling back to whatever is already stored so an old client that omits
+  // hasViva does not switch a viva-gated activity off.
+  const previousEntry = ['mids', 'finals', 'finalProject'].includes(targetKey)
+    ? markRecord[targetKey]
+    : (markRecord[targetKey] || []).find(
+      (item) => item.title.trim().toLowerCase() === (title || '').trim().toLowerCase()
+    );
+  const vivaEnabled = hasViva !== undefined ? Boolean(hasViva) : Boolean(previousEntry?.hasViva);
+  const vivaMarks = vivaEnabled && !isAbsent
+    ? normalizeVivaScore(incomingViva !== undefined ? incomingViva : previousEntry?.vivaMarks)
+    : null;
+
+  if (vivaEnabled && !isAbsent && vivaMarks === null) {
+    return next(new AppError(`Viva is ON for this evaluation, so a viva out of ${VIVA_MAX} is required.`, 400));
+  }
+
   if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
-    markRecord[targetKey] = {
+    markRecord[targetKey] = withVivaAdjusted({
+      ...(previousEntry || {}),
       title: title || 'Exam',
       totalMarks: Number(totalMarks) || markRecord[targetKey]?.totalMarks || 0,
       obtainedMarks: isAbsent ? 0 : Number(obtainedMarks) || 0,
       isAbsent: Boolean(isAbsent),
-    };
+      hasViva: vivaEnabled,
+      vivaMarks,
+    });
   } else {
     if (!title) return next(new AppError('Item title is required for evaluations.', 400));
-    
+
     const cleanTitle = title.trim();
     if (!markRecord[targetKey]) markRecord[targetKey] = [];
     const itemIndex = markRecord[targetKey].findIndex(
       (item) => item.title.trim().toLowerCase() === cleanTitle.toLowerCase()
     );
 
-    const itemData = {
+    const itemData = withVivaAdjusted({
+      ...(previousEntry || {}),
       title: cleanTitle,
       totalMarks: Number(totalMarks),
       obtainedMarks: isAbsent ? 0 : Number(obtainedMarks),
       isAbsent: Boolean(isAbsent),
-    };
+      hasViva: vivaEnabled,
+      vivaMarks,
+    });
 
     if (itemIndex > -1) {
-      markRecord[targetKey][itemIndex] = { ...markRecord[targetKey][itemIndex], ...itemData };
+      markRecord[targetKey][itemIndex] = itemData;
     } else {
       markRecord[targetKey].push(itemData);
     }
@@ -2021,17 +2052,32 @@ exports.syncExcelClassroomMarks = catchAsync(async (req, res, next) => {
       });
     }
 
+    // The spreadsheet carries marks only. Any viva already recorded on the row
+    // is PRESERVED rather than dropped - a spreadsheet re-upload must not quietly
+    // wipe the viva multipliers a teacher keyed in by hand, which would change
+    // every viva-gated student's grade.
     if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+      const prevExam = markDoc[targetKey];
       markDoc[targetKey] = {
         title: cleanTitle,
         totalMarks: parsedTotal,
         obtainedMarks: obtained,
-        isAbsent
+        isAbsent,
+        hasViva: Boolean(prevExam && prevExam.hasViva),
+        vivaMarks: prevExam ? normalizeVivaScore(prevExam.vivaMarks) : null
       };
     } else {
       if (!Array.isArray(markDoc[targetKey])) markDoc[targetKey] = [];
       const itemIdx = markDoc[targetKey].findIndex(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
-      const payload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent };
+      const prevItem = itemIdx > -1 ? markDoc[targetKey][itemIdx] : null;
+      const payload = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent,
+        hasViva: Boolean(prevItem && prevItem.hasViva),
+        vivaMarks: prevItem ? normalizeVivaScore(prevItem.vivaMarks) : null
+      };
       if (itemIdx > -1) {
         markDoc[targetKey][itemIdx] = { ...markDoc[targetKey][itemIdx], ...payload };
       } else {

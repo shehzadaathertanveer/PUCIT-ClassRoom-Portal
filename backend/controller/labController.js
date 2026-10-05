@@ -8,6 +8,7 @@ const { normaliseRoomColor } = require('../utils/roomColors');
 const { recalculateLabGrades, activitiesChanged } = require('../utils/recalculateGrades');
 const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
+const { normalizeVivaScore } = require('../utils/viva');
 
 // Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
 const getRollDigits = (rollNo = '') => {
@@ -1452,7 +1453,7 @@ exports.deleteLabComplaint = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const { category, title, totalMarks, rangeStart, rangeEnd } = req.body;
+  const { category, title, totalMarks, rangeStart, rangeEnd, hasViva } = req.body;
 
   const isStaff = await verifyLabStaff(req.user._id, req.user.role, labroomId);
   if (!isStaff) return next(new AppError('Unauthorized to create lab items.', 403));
@@ -1496,18 +1497,25 @@ exports.createLabGradedItem = catchAsync(async (req, res, next) => {
   }
 
   if (!labroom[targetKey]) labroom[targetKey] = [];
-  
+
+  // Omitted hasViva means OFF, matching every other viva write path. The creation
+  // dialog always sends the toggle's live value, so an absent flag is an older
+  // client and must not flip an existing activity's viva gate.
+  const vivaEnabled = hasViva === true || hasViva === 'true';
+
   if (['labMids', 'labFinals', 'finalProject'].includes(targetKey)) {
-    labroom[targetKey] = [{ title: trimmedTitle, totalMarks: tMarks }];
+    labroom[targetKey] = [{ title: trimmedTitle, totalMarks: tMarks, hasViva: vivaEnabled }];
   } else {
     const exists = labroom[targetKey].some(i => i.title.toLowerCase() === trimmedTitle.toLowerCase());
     if (!exists) {
-      labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks });
+      labroom[targetKey].push({ title: trimmedTitle, totalMarks: tMarks, hasViva: vivaEnabled });
     }
   }
   await labroom.save();
 
-  const itemPayload = { title: trimmedTitle, totalMarks: tMarks, obtainedMarks: 0, isAbsent: false };
+  // Seeded rows start ungraded. hasViva is carried onto them so the sheet shows
+  // the viva column, but vivaMarks stays null until a viva is actually recorded.
+  const itemPayload = { title: trimmedTitle, totalMarks: tMarks, obtainedMarks: 0, isAbsent: false, hasViva: vivaEnabled, vivaMarks: null };
   const studentIdsToInit = targetStudents.map(st => st._id);
 
   for (const studId of studentIdsToInit) {
@@ -1977,7 +1985,10 @@ exports.syncExcelLabMarks = catchAsync(async (req, res, next) => {
   const parsedTotal = Number(totalMarks) || 10;
 
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
-    labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal }];
+    // Re-uploading a sheet must not silently switch off a viva the teacher
+    // already turned on for this single-entry exam, so the existing gate is kept.
+    const prevItem = Array.isArray(labroom[standardKey]) ? labroom[standardKey][0] : null;
+    labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal, hasViva: Boolean(prevItem && prevItem.hasViva) }];
   } else {
     if (!Array.isArray(labroom[standardKey])) labroom[standardKey] = [];
     const exists = labroom[standardKey].find(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
@@ -2056,13 +2067,33 @@ exports.syncExcelLabMarks = catchAsync(async (req, res, next) => {
       });
     }
 
-    const itemPayload = { title: cleanTitle, totalMarks: parsedTotal, obtainedMarks: obtained, isAbsent, file: {} };
-
+    // The spreadsheet carries marks only, so an already-recorded viva on the
+    // row is PRESERVED. Wiping it here would silently change every
+    // viva-gated student's grade the next time a sheet is re-uploaded.
     if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
-      markDoc[standardKey] = [itemPayload];
+      const prevExam = Array.isArray(markDoc[standardKey]) ? markDoc[standardKey][0] : null;
+      markDoc[standardKey] = [{
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent,
+        file: {},
+        hasViva: Boolean(prevExam && prevExam.hasViva),
+        vivaMarks: prevExam ? normalizeVivaScore(prevExam.vivaMarks) : null
+      }];
     } else {
       if (!Array.isArray(markDoc[standardKey])) markDoc[standardKey] = [];
       const idx = markDoc[standardKey].findIndex(e => e.title.toLowerCase() === cleanTitle.toLowerCase());
+      const prevItem = idx > -1 ? markDoc[standardKey][idx] : null;
+      const itemPayload = {
+        title: cleanTitle,
+        totalMarks: parsedTotal,
+        obtainedMarks: obtained,
+        isAbsent,
+        file: {},
+        hasViva: Boolean(prevItem && prevItem.hasViva),
+        vivaMarks: prevItem ? normalizeVivaScore(prevItem.vivaMarks) : null
+      };
       if (idx > -1) {
         markDoc[standardKey][idx] = { ...markDoc[standardKey][idx], ...itemPayload };
       } else {
