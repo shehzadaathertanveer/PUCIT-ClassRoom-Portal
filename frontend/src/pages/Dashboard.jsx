@@ -109,6 +109,14 @@ const Dashboard = () => {
   const [repairingStudents, setRepairingStudents] = useState(false);
   const [repairMessage, setRepairMessage] = useState('');
 
+  // Registration / OTP delivery lookup (Admin only): "student never received
+  // their code" support tool.
+  const [isOtpLookupOpen, setIsOtpLookupOpen] = useState(false);
+  const [otpLookupQuery, setOtpLookupQuery] = useState('');
+  const [otpLookupResult, setOtpLookupResult] = useState(null);
+  const [otpLookupError, setOtpLookupError] = useState('');
+  const [otpLookupLoading, setOtpLookupLoading] = useState(false);
+
   // Edit Profile / Password & Email Verification modal state
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -255,6 +263,24 @@ const Dashboard = () => {
       console.warn('Failed to toggle fresher registration mode:', err?.response?.data?.message || err.message);
     } finally {
       setTogglingFresherMode(false);
+    }
+  };
+
+  // Admin: trace where a registration OTP was actually delivered
+  const handleOtpLookup = async (e) => {
+    if (e) e.preventDefault();
+    const value = otpLookupQuery.trim();
+    if (!value || otpLookupLoading) return;
+    setOtpLookupLoading(true);
+    setOtpLookupError('');
+    setOtpLookupResult(null);
+    try {
+      const res = await API.get('/auth/admin/registration-lookup', { params: { value } });
+      setOtpLookupResult(res.data?.data || null);
+    } catch (err) {
+      setOtpLookupError(err.response?.data?.message || 'Lookup failed. Try again.');
+    } finally {
+      setOtpLookupLoading(false);
     }
   };
 
@@ -869,6 +895,14 @@ sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
                 }`}
               >
                 Fresher Reg: {fresherMode === null ? '…' : fresherMode ? 'ON' : 'OFF'}
+              </button>
+              <button
+                onClick={() => { setIsOtpLookupOpen(true); setOtpLookupResult(null); setOtpLookupError(''); setOtpLookupQuery(''); }}
+                title="Trace where a registration OTP was delivered"
+                className="lm-btn-ghost flex-grow sm:flex-grow-0 text-teal-200 hover:text-teal-100"
+              >
+                <MagnifyingGlassIcon className="w-4 h-4" />
+                OTP Lookup
               </button>
               <button
                 onClick={handleRepairStudents}
@@ -2018,6 +2052,115 @@ sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
               </button>
             </div>
           </div>
+          </div>
+        </div>
+      )}
+
+      {/* REGISTRATION / OTP DELIVERY LOOKUP (Admin) */}
+      {isOtpLookupOpen && (
+        <div className="lm-scrim">
+          <div className="w-full max-w-lg flex justify-center">
+            <div className="lm-modal p-4 sm:p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-white/10">
+                <h3 className="text-base font-extrabold text-teal-300 uppercase tracking-wide flex items-center gap-2 min-w-0">
+                  <MagnifyingGlassIcon className="w-5 h-5 shrink-0" />
+                  Registration / OTP Lookup
+                </h3>
+                <button onClick={() => setIsOtpLookupOpen(false)} className="inline-flex items-center justify-center w-10 h-10 shrink-0 -mr-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-white/[0.07] transition-colors cursor-pointer" aria-label="Close" title="Close"><XMarkIcon className="w-5 h-5" /></button>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                A student says the code never arrived. Search by roll number, registration number or email to see whether an account or an OTP attempt exists and exactly which inbox the code was handed to.
+              </p>
+
+              <form onSubmit={handleOtpLookup} className="flex gap-2">
+                <input
+                  type="text"
+                  value={otpLookupQuery}
+                  onChange={(e) => setOtpLookupQuery(e.target.value)}
+                  placeholder="BITF26A060 or 2026-NTS-001"
+                  autoCapitalize="characters"
+                  className="lm-field flex-1 min-w-0 uppercase font-mono"
+                />
+                <button type="submit" disabled={otpLookupLoading || !otpLookupQuery.trim()} className="lm-btn px-4 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {otpLookupLoading ? '…' : 'Look up'}
+                </button>
+              </form>
+
+              {otpLookupError && (
+                <div role="alert" className="bg-red-950/60 border border-red-500/40 text-red-200 p-3 rounded-xl text-xs font-medium flex items-start gap-2">
+                  <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-0.5" />
+                  {otpLookupError}
+                </div>
+              )}
+
+              {otpLookupResult && (
+                <div className="space-y-3">
+                  <div className="lm-inset p-3 text-xs text-slate-300 leading-relaxed">
+                    Fresher registration is{' '}
+                    <span className={otpLookupResult.fresherRegistrationEnabled ? 'font-bold text-sky-300' : 'font-bold text-slate-400'}>
+                      {otpLookupResult.fresherRegistrationEnabled ? 'ON' : 'OFF'}
+                    </span>
+                    {' — '}
+                    {otpLookupResult.fresherRegistrationEnabled
+                      ? 'freshers may verify through their personal inbox; seniors still use @pucit.edu.pk.'
+                      : 'every student must verify through their official @pucit.edu.pk inbox, no exceptions.'}
+                  </div>
+
+                  <div className="lm-inset p-3 space-y-1.5">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Account</p>
+                    {otpLookupResult.user ? (
+                      <>
+                        <p className="text-xs text-slate-200">
+                          <span className="font-bold">{otpLookupResult.user.name}</span>
+                          <span className="ml-2 font-mono text-slate-400">{otpLookupResult.user.rollNo || otpLookupResult.user.email}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Role <span className="font-mono text-slate-300">{otpLookupResult.user.role}</span>
+                          {' · '}Email {otpLookupResult.user.isEmailVerified ? 'verified' : 'NOT verified'}
+                          {' · '}joined {new Date(otpLookupResult.user.createdAt).toLocaleDateString()}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-400">No account exists yet for this roll number / email.</p>
+                    )}
+                  </div>
+
+                  <div className="lm-inset p-3 space-y-1.5">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Last OTP attempt</p>
+                    {otpLookupResult.pending ? (
+                      <>
+                        <p className="text-xs text-slate-200 break-all">
+                          Code delivered to <span className="font-mono text-teal-200">{otpLookupResult.pending.otpDeliveredTo}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400 break-all">
+                          Started {new Date(otpLookupResult.pending.startedAt).toLocaleString()}
+                          {otpLookupResult.pending.otpExpiresAt && (
+                            <>
+                              {' · '}expires {new Date(otpLookupResult.pending.otpExpiresAt).toLocaleString()}
+                            </>
+                          )}
+                        </p>
+                        {otpLookupResult.pending.otpExpired && (
+                          <p className="text-[11px] font-bold text-amber-300">
+                            This code has EXPIRED — the student must request a new one.
+                          </p>
+                        )}
+                        {otpLookupResult.pending.personalNotificationEmail && (
+                          <p className="text-[11px] text-slate-400 break-all">
+                            Personal inbox on file: <span className="font-mono">{otpLookupResult.pending.personalNotificationEmail}</span>
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-400">
+                        No attempt on file. Either the student never submitted the registration form, or the record has already expired — attempts are purged 24 hours after they are created.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

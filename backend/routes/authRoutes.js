@@ -46,6 +46,10 @@ router.delete('/admin/users/:userId', restrictTo('ADMIN'), authController.adminD
 // Admin: remove stale unverified registration attempts so stuck freshers can re-register
 router.post('/admin/cleanup-registrations', restrictTo('ADMIN'), authController.cleanupUnverifiedRegistrations);
 
+// Admin: trace a student's OTP delivery - shows whether an account or a pending
+// attempt exists and which inbox the last verification code was sent to.
+router.get('/admin/registration-lookup', restrictTo('ADMIN'), authController.adminRegistrationLookup);
+
 // Admin: repair student email/roll integrity (promote official email used as
 // personal, delete flaw-group students, dedupe roll numbers). dryRun preview supported.
 router.post('/admin/fix-student-email-integrity', restrictTo('ADMIN'), authController.runStudentEmailIntegrityFix);

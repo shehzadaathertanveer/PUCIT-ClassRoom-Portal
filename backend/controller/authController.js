@@ -179,6 +179,73 @@ exports.getRegistrationMode = catchAsync(async (req, res, next) => {
   });
 });
 
+// =============================================================================
+// ADMIN: REGISTRATION / OTP LOOKUP
+// Students report "the site said the code was sent but nothing arrived". This
+// answers, from a single roll number / registration number / email, whether an
+// account exists, whether an OTP attempt is on file and exactly which inbox it
+// was handed to - so support can diagnose it without grepping server logs.
+// PendingRegistration documents self-expire after 24h, so "no record" means no
+// attempt was made in the last day.
+// =============================================================================
+exports.adminRegistrationLookup = catchAsync(async (req, res, next) => {
+  const raw = String(req.query.value ?? req.query.q ?? "").trim();
+  if (!raw) {
+    return next(new AppError("Provide a roll number, registration number or email to look up.", 400));
+  }
+
+  const escaped = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const exactRegex = new RegExp(`^${escaped}$`, "i");
+  const lower = raw.toLowerCase();
+
+  const [user, pending, fresherRegistrationEnabled] = await Promise.all([
+    User.findOne({
+      $or: [{ rollNo: exactRegex }, { email: lower }, { registrationNo: exactRegex }]
+    })
+      .select("name email rollNo registrationNo role isEmailVerified createdAt")
+      .lean(),
+    PendingRegistration.findOne({
+      $or: [
+        { rollNo: exactRegex },
+        { email: lower },
+        { registrationNo: exactRegex },
+        { destinationEmail: lower },
+        { personalNotificationEmail: lower }
+      ]
+    })
+      .select("name email rollNo registrationNo role personalNotificationEmail destinationEmail otpExpiresAt createdAt")
+      .lean(),
+    getFresherRegistrationMode()
+  ]);
+
+  console.log(`[adminRegistrationLookup] value="${raw}" user=${user?._id || "none"} pending=${pending?._id || "none"}`);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      query: raw,
+      fresherRegistrationEnabled,
+      user,
+      pending: pending
+        ? {
+            name: pending.name,
+            email: pending.email,
+            rollNo: pending.rollNo,
+            registrationNo: pending.registrationNo,
+            role: pending.role,
+            personalNotificationEmail: pending.personalNotificationEmail,
+            destinationEmail: pending.destinationEmail,
+            otpDeliveredTo: pending.destinationEmail,
+            otpExpiresAt: pending.otpExpiresAt,
+            // Stale / expired attempts are the most common support case.
+            otpExpired: Boolean(pending.otpExpiresAt && pending.otpExpiresAt.getTime() < Date.now()),
+            startedAt: pending.createdAt
+          }
+        : null
+    }
+  });
+});
+
 exports.toggleRegistrationMode = catchAsync(async (req, res, next) => {
   const { fresherRegistrationEnabled } = req.body;
 
@@ -526,10 +593,17 @@ exports.initiateRegistration = catchAsync(async (req, res, next) => {
   const isOfficialPucitInbox = /@pucit\.edu\.pk$/i.test(destinationEmail);
   console.log(`[initiateRegistration] ${name} (${assignedRole}) roll="${formattedRollNo}" fresherRoll=${isFresherRoll} fresherMode=${fresherRegistrationEnabled} -> OTP target="${destinationEmail}" officialPucitInbox=${isOfficialPucitInbox}`);
 
+  // The official-inbox note must reflect the live admin toggle: telling a
+  // student to "re-register with a personal email" is a dead end while
+  // fresher mode is OFF, because the server rejects that route.
+  const officialInboxNote = fresherRegistrationEnabled
+    ? "Codes are only ever delivered to that address. If you cannot open it, re-register and use your personal notification email instead."
+    : `Codes are only ever delivered to that address, so open it and check Spam/Junk. Personal-email registration is currently disabled by the administrator, so no other inbox can be used.`;
+
   res.status(200).json({
     status: "success",
     message: isOfficialPucitInbox
-      ? `Verification code sent to your OFFICIAL PUCIT inbox (${destinationEmail}). Note: if you cannot access that inbox, re-register with a personal email instead.`
+      ? `Verification code sent to your official PUCIT inbox (${destinationEmail}). ${officialInboxNote}`
       : `Verification code sent to ${destinationEmail}. Please verify OTP to complete registration.`,
     email: officialEmail,
     verificationEmail: destinationEmail,

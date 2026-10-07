@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   AcademicCapIcon,
@@ -61,13 +61,18 @@ const LabroomDetail = () => {
   // Sleek Auto-closing Notification Toast State
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('success');
+  const toastTimerRef = useRef(null);
 
   const showToast = (msg, type = 'success') => {
     setToastMessage(msg);
     setToastType(type);
-    setTimeout(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    // Errors linger far longer: for a blocked save they are the only feedback
+    // the user gets, and they can appear while a modal is still open.
+    toastTimerRef.current = setTimeout(() => {
       setToastMessage('');
-    }, 2000); 
+      toastTimerRef.current = null;
+    }, type === 'error' ? 8000 : 2500);
   };
 
   // Notice board state with optional attachment support
@@ -155,6 +160,10 @@ const LabroomDetail = () => {
   // Settings tab: 'general' (details, colour, weights, danger zone) or
   // 'bypass' (per-category bypass caps).
   const [settingsTab, setSettingsTab] = useState('general');
+  // Persisted inline error for the settings form. The toast auto-hides and can
+  // render behind the modal scrim, so a failed save must also be reported
+  // inside the dialog itself.
+  const [settingsError, setSettingsError] = useState('');
   // TAs cannot open Labroom Settings, but still need to see the bypass caps.
   const [isBypassModalOpen, setIsBypassModalOpen] = useState(false);
   const [editLabName, setEditLabName] = useState('');
@@ -501,6 +510,7 @@ const LabroomDetail = () => {
   const handleUpdateLabSettings = async (e) => {
     e.preventDefault();
     setUpdatingSettings(true);
+    setSettingsError('');
     try {
       await API.patch(`/labrooms/${labroomId}/settings`, {
         labName: editLabName.trim(),
@@ -515,10 +525,13 @@ const LabroomDetail = () => {
         }))
       });
       showToast('Labroom settings & activities updated successfully!');
+      setSettingsError('');
       setIsSettingsModalOpen(false);
       fetchLabroomData();
     } catch (err) {
-      showToast(err.response?.data?.message || err.message || 'Failed to update lab settings.', 'error');
+      const message = err.response?.data?.message || err.message || 'Failed to update lab settings.';
+      setSettingsError(message);
+      showToast(message, 'error');
     } finally {
       setUpdatingSettings(false);
     }
@@ -1162,7 +1175,7 @@ const LabroomDetail = () => {
       <div className="lm-ambient" />
 
       {toastMessage && (
-        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm">
+        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-[100] px-4 w-full max-w-sm pointer-events-none">
           <div className={`lm-toast flex items-center gap-3 px-4 py-3 ${
             toastType === 'success' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'
           }`}>
@@ -1243,7 +1256,7 @@ const LabroomDetail = () => {
                 <button onClick={() => setIsItemModalOpen(true)} className="lm-btn uppercase"><PlusIcon className="w-4 h-4" />Evaluation</button>
               </>
             )}
-            {isTeacherOrAdmin && <button onClick={() => { setSettingsTab('general'); setIsSettingsModalOpen(true); }} className="lm-btn-ghost uppercase text-slate-200"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+            {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setSettingsError(''); setIsSettingsModalOpen(true); }} className="lm-btn-ghost uppercase text-slate-200"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
           {isAssignedTa && !isTeacherOrAdmin && <button type="button" onClick={() => setIsBypassModalOpen(true)} className="lm-btn-ghost uppercase text-slate-200"><ShieldCheckIcon className="w-4 h-4" />Bypass Limits</button>}
           </div>
         </div>
@@ -2537,6 +2550,12 @@ const LabroomDetail = () => {
             {settingsTab === 'general' && (
             <>
             <form onSubmit={handleUpdateLabSettings} className="space-y-4">
+              {settingsError && (
+                <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-500/40 bg-red-950/60 px-3 py-2.5">
+                  <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-0.5 text-red-300" />
+                  <p className="text-xs font-semibold text-red-200 min-w-0 break-words">{settingsError}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Lab Name</label>
                 <input type="text" required value={editLabName} onChange={(e) => setEditLabName(e.target.value)} className="lm-field" />

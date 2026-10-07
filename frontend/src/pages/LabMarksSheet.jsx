@@ -553,7 +553,7 @@ const LabMarksSheet = () => {
       <div className="lm-ambient" />
 
       {toastMessage && (
-        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm" aria-live="polite" role="status">
+        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-[100] px-4 w-full max-w-sm" aria-live="polite" role="status">
           <div className="lm-toast flex items-center gap-3 px-4 py-3 border-white/10">
             <CheckIcon className="w-5 h-5 shrink-0 text-orange-300" />
             <span className="text-xs font-extrabold uppercase tracking-wide text-slate-100 break-words min-w-0">{toastMessage}</span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowDownTrayIcon,
@@ -62,13 +62,18 @@ const ClassroomDetail = () => {
   // Sleek Auto-closing Notification Toast State
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('success');
+  const toastTimerRef = useRef(null);
 
   const showToast = (msg, type = 'success') => {
     setToastMessage(msg);
     setToastType(type);
-    setTimeout(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    // Errors linger far longer: for a blocked save they are the only feedback
+    // the user gets, and they can appear while a modal is still open.
+    toastTimerRef.current = setTimeout(() => {
       setToastMessage('');
-    }, 2000); 
+      toastTimerRef.current = null;
+    }, type === 'error' ? 8000 : 2500);
   };
 
   // Notice board state with optional attachment support
@@ -161,6 +166,10 @@ const ClassroomDetail = () => {
   // Which settings tab is showing: 'general' (details, colour, weights, danger
   // zone) or 'bypass' (per-category bypass caps).
   const [settingsTab, setSettingsTab] = useState('general');
+  // Persisted inline error for the settings form. The toast auto-hides and can
+  // render behind the modal scrim, so a failed save must also be reported
+  // inside the dialog itself.
+  const [settingsError, setSettingsError] = useState('');
   // TAs cannot open Classroom Settings, but they still need to see the bypass
   // caps that constrain what they can mark. Read-only, teacher/admin only to edit.
   const [isBypassModalOpen, setIsBypassModalOpen] = useState(false);
@@ -819,6 +828,7 @@ const ClassroomDetail = () => {
   const handleUpdateClassSettings = async (e) => {
     e.preventDefault();
     setUpdatingSettings(true);
+    setSettingsError('');
     try {
       const sW = Number(editSessionalWeight) || 0;
       const mW = Number(editMidsWeight) || 0;
@@ -850,10 +860,13 @@ const ClassroomDetail = () => {
         }))
       });
       showToast('Classroom settings & weights updated successfully!');
+      setSettingsError('');
       setIsSettingsModalOpen(false);
       fetchClassroomData();
     } catch (err) {
-      showToast(err.response?.data?.message || err.message || 'Failed to update classroom settings.', 'error');
+      const message = err.response?.data?.message || err.message || 'Failed to update classroom settings.';
+      setSettingsError(message);
+      showToast(message, 'error');
     } finally {
       setUpdatingSettings(false);
     }
@@ -1458,7 +1471,7 @@ const studentBreakdownItems = [
       <div className="lm-ambient" />
 
       {toastMessage && (
-        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
+        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4 pointer-events-none">
           <div className={`lm-toast flex items-center gap-3 px-4 py-3 rounded-2xl border ${
             toastType === 'success' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'
           }`}>
@@ -1541,7 +1554,7 @@ const studentBreakdownItems = [
                 <button type="button" onClick={() => setIsItemModalOpen(true)} className="lm-btn shrink-0"><PlusIcon className="w-4 h-4" />Result</button>
               </>
             )}
-            {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setIsSettingsModalOpen(true); }} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
+            {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setSettingsError(''); setIsSettingsModalOpen(true); }} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
             {isAssignedTa && !isTeacherOrAdmin && <button type="button" onClick={() => setIsBypassModalOpen(true)} className="lm-btn-ghost shrink-0"><ShieldCheckIcon className="w-4 h-4" />Bypass Limits</button>}
           </div>
         </div>
@@ -2894,6 +2907,12 @@ const studentBreakdownItems = [
             {settingsTab === 'general' && (
             <>
             <form onSubmit={handleUpdateClassSettings} className="space-y-4">
+              {settingsError && (
+                <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-500/40 bg-red-950/60 px-3 py-2.5">
+                  <ExclamationTriangleIcon className="w-4 h-4 shrink-0 mt-0.5 text-red-300" />
+                  <p className="text-xs font-semibold text-red-200 min-w-0 break-words">{settingsError}</p>
+                </div>
+              )}
               <div>
                 <label className="block lm-eyebrow mb-1">Class Name</label>
                 <input type="text" required value={editClassName} onChange={(e) => setEditClassName(e.target.value)} className="lm-field" />
@@ -2929,6 +2948,15 @@ const studentBreakdownItems = [
                     <input type="number" value={editFinalsWeight} onChange={(e) => setEditFinalsWeight(e.target.value)} className="lm-field px-2 py-1.5 rounded-lg text-xs font-mono" />
                   </div>
                 </div>
+                {(() => {
+                  const total = (Number(editSessionalWeight) || 0) + (Number(editMidsWeight) || 0) + (Number(editFinalsWeight) || 0);
+                  const ok = total === 100;
+                  return (
+                    <p className={`text-[11px] font-mono font-bold ${ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {ok ? 'Total: 100% (valid)' : `Total: ${total}% - weights must equal 100% before saving`}
+                    </p>
+                  );
+                })()}
               </div>
 
               <div className="pt-3 border-t border-white/[0.06]">
@@ -3006,6 +3034,18 @@ const studentBreakdownItems = [
                     );
                   })}
                 </div>
+                {(() => {
+                  const allocated = editSessionalActivities.reduce((acc, act) => acc + (Number(act.allocatedMarks) || 0), 0);
+                  const cap = Number(editSessionalWeight) || 0;
+                  const ok = allocated <= cap;
+                  return (
+                    <p className={`text-[11px] font-mono font-bold ${ok ? 'text-slate-400' : 'text-red-300'}`}>
+                      {ok
+                        ? `Allocated: ${allocated} of ${cap} sessional marks`
+                        : `Allocated: ${allocated} exceeds the ${cap}% sessional weight - lower a value before saving`}
+                    </p>
+                  );
+                })()}
               </div>
 
               <div className="pt-3 flex flex-col sm:flex-row gap-3">

@@ -149,6 +149,19 @@ const Register = () => {
   const isFormValid = hasIdentifier && !fresherBlocked && !personalEmailIsPucit
     && fresherCheck && name.trim().length > 0 && password.length >= 6 && passwordsMatch;
 
+  // Mirrors the server's delivery rule (authController.initiateRegistration)
+  // so the student sees the exact inbox the code will land in BEFORE they
+  // submit, instead of discovering a dead address after the fact.
+  const otpDestination = (() => {
+    if (isRollNoDisabled && !isEmailDisabled && email.trim()) return email.trim().toLowerCase();
+    const personal = personalNotificationEmail.trim().toLowerCase();
+    if (personal && (isFresherWithRoll || isFresherPrefixOnly)) return personal;
+    const roll = rollNo.trim().toLowerCase();
+    if (roll && !isFresherPrefixOnly && !fresherBlocked) return `${roll}@pucit.edu.pk`;
+    return '';
+  })();
+  const otpDestinationIsOfficial = /@pucit\.edu\.pk$/i.test(otpDestination);
+
   const handleRegister = async (e) => {
     if (e) {
       e.preventDefault();
@@ -438,6 +451,25 @@ const Register = () => {
                   </p>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Exact OTP destination for fresher routes (senior students already
+              get the auto-configured official inbox box above). */}
+          {otpDestination && !isSenior && !isRollNoDisabled && (
+            <div className="lm-inset p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <EnvelopeIcon className="w-4 h-4 flex-none text-orange-300" />
+                <p className="min-w-0 text-[11px] font-bold uppercase tracking-[0.12em] text-orange-200">
+                  Verification code will be sent to
+                </p>
+              </div>
+              <p className="lm-num break-all text-xs text-orange-100 sm:text-sm">{otpDestination}</p>
+              <p className="mt-2 text-[11px] leading-snug text-slate-400">
+                {otpDestinationIsOfficial
+                  ? 'Only this official university inbox receives the code - open it, including Spam/Junk, within 10 minutes.'
+                  : 'Open this inbox to read the 6-digit code. The code expires 10 minutes after it is sent.'}
+              </p>
             </div>
           )}
 
