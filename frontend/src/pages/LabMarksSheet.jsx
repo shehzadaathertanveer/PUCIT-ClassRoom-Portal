@@ -777,7 +777,7 @@ const LabMarksSheet = () => {
                                   type="number"
                                   min="0"
                                   max={VIVA_MAX}
-                                  step="1"
+                                  step="0.1"
                                   value={vivaInputs[studentId] ?? ''}
                                   onChange={(e) => handleVivaChange(studentId, e.target.value)}
                                   placeholder={isBypassDisplay || inputData.isAbsent || isUngradedDisplay ? '—' : `0-${VIVA_MAX}`}

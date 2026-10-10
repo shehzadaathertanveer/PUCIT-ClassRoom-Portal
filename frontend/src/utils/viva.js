@@ -11,7 +11,14 @@
 
 export const VIVA_MAX = 10;
 
-/** Clamps to a whole 0-10 score; returns null for blank/unusable input. */
+// Trims binary float noise (9.1 * 100 = 910.0000000000001) so an exact score
+// never gets bumped by a rounding artefact.
+const roundTo = (value, places) => {
+  const factor = 10 ** places;
+  return Math.round(value * factor) / factor;
+};
+
+/** Clamps to a 0-10 score; returns null for blank/unusable input. */
 export const normalizeVivaScore = (value) => {
   if (value === null || value === undefined) return null;
   const str = String(value).trim();
@@ -20,7 +27,8 @@ export const normalizeVivaScore = (value) => {
   if (!Number.isFinite(num)) return null;
   if (num < 0) return 0;
   if (num > VIVA_MAX) return VIVA_MAX;
-  return Math.floor(num);
+  // Vivas can carry decimals: a 9.1 viva is a 91% multiplier, not a 90% one.
+  return roundTo(num, 2);
 };
 
 /** ceil(marks * viva / 10) - matches the server exactly. */
@@ -28,7 +36,7 @@ export const applyVivaMultiplier = (obtainedMarks, vivaMarks) => {
   const obtained = Number(obtainedMarks) || 0;
   const viva = normalizeVivaScore(vivaMarks);
   if (viva === null) return obtained;
-  return Math.ceil((obtained * viva) / VIVA_MAX);
+  return Math.ceil(roundTo((obtained * viva) / VIVA_MAX, 6));
 };
 
 /**

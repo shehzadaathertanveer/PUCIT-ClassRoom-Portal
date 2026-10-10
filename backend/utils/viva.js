@@ -34,6 +34,13 @@ const VIVA_MAX = 10;
 // Marks a teacher can score before a viva of 10/10 still returns them nothing.
 const ceilTo = (value) => Math.ceil(value);
 
+// Trims binary float noise (9.1 * 100 = 910.0000000000001) so an exact score
+// never gets bumped by a rounding artefact.
+const roundTo = (value, places) => {
+  const factor = 10 ** places;
+  return Math.round(value * factor) / factor;
+};
+
 /**
  * Clamps and validates a viva score. Accepts the strings the UI can produce
  * ('', '-', decimals) and returns null when there is nothing usable, so callers
@@ -47,9 +54,10 @@ const normalizeVivaScore = (value) => {
   if (!Number.isFinite(num)) return null;
   if (num < 0) return 0;
   if (num > VIVA_MAX) return VIVA_MAX;
-  // Vivas are scored in whole points out of 10; a stray 7.5 becomes 7 rather
-  // than silently allowing a fractional multiplier nobody asked for.
-  return Math.floor(num);
+  // Vivas can carry decimals: a 9.1 viva is a 91% multiplier, not a 90% one.
+  // Rounding to two places keeps a clean stored value while still honouring the
+  // fraction the teacher typed.
+  return roundTo(num, 2);
 };
 
 /**
@@ -62,7 +70,9 @@ const applyVivaMultiplier = (obtainedMarks, vivaMarks) => {
   // No viva recorded means the activity stands on its own - this is the path
   // every legacy mark row takes.
   if (viva === null) return obtained;
-  return ceilTo((obtained * viva) / VIVA_MAX);
+  // Round away float noise before ceil, otherwise an exact 91 could land at
+  // 91.00000000000001 and round up to 92.
+  return ceilTo(roundTo((obtained * viva) / VIVA_MAX, 6));
 };
 
 /**
