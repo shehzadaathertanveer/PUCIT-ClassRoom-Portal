@@ -457,7 +457,7 @@ const LabMarksSheet = () => {
       let csvContent = "data:text/csv;charset=utf-8,";
       // Viva columns only exist when the gate is on, so a plain sheet exports
       // exactly the same columns it always has.
-      if (hasViva) csvContent += "Viva (0-10),Final Marks (after viva),";
+      if (hasViva) csvContent += "Viva (0-10 / A),Final Marks (after viva),";
       csvContent += "Roll Number,Student Name,Marks Obtained,Total Marks,Status\r\n";
 
       students.forEach(student => {
@@ -695,7 +695,7 @@ const LabMarksSheet = () => {
                     <th>Marks (or 'A') / Out of {totalMarks}</th>
                     {hasViva && (
                       <>
-                        <th>Viva (0-10)</th>
+                        <th>Viva (0-10 / A)</th>
                         <th>Final (after viva)</th>
                       </>
                     )}
@@ -774,13 +774,11 @@ const LabMarksSheet = () => {
                             <>
                               <td>
                                 <input
-                                  type="number"
-                                  min="0"
-                                  max={VIVA_MAX}
-                                  step="0.1"
-                                  value={vivaInputs[studentId] ?? ''}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={inputData.isAbsent ? '0' : (vivaInputs[studentId] ?? '')}
                                   onChange={(e) => handleVivaChange(studentId, e.target.value)}
-                                  placeholder={isBypassDisplay || inputData.isAbsent || isUngradedDisplay ? '—' : `0-${VIVA_MAX}`}
+                                  placeholder={isBypassDisplay || inputData.isAbsent || isUngradedDisplay ? '—' : `0-${VIVA_MAX} or A`}
                                   disabled={isBypassDisplay || inputData.isAbsent || isUngradedDisplay}
                                   className={`lm-field lm-num w-full min-w-[3.5rem] text-center px-2 py-2 text-xs sm:text-sm ${
                                     vivaMissingButRequired || (rowHasError && vivaValue === null)

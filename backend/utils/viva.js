@@ -43,13 +43,16 @@ const roundTo = (value, places) => {
 
 /**
  * Clamps and validates a viva score. Accepts the strings the UI can produce
- * ('', '-', decimals) and returns null when there is nothing usable, so callers
- * can distinguish "teacher left it blank" from "teacher scored 0".
+ * ('', '-', decimals, 'A') and returns null when there is nothing usable, so
+ * callers can distinguish "teacher left it blank" from "teacher scored 0".
  */
 const normalizeVivaScore = (value) => {
   if (value === null || value === undefined) return null;
   const str = String(value).trim();
   if (str === '') return null;
+  // 'A' means the student was absent for the viva: no multiplier, so the
+  // activity marks are zeroed exactly as a viva of 0 would do (marks x 0 = 0).
+  if (str.toUpperCase() === 'A') return 0;
   const num = Number(str);
   if (!Number.isFinite(num)) return null;
   if (num < 0) return 0;

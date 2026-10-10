@@ -80,14 +80,15 @@ router.delete('/:classroomId/students/:studentId', restrictToClassStaff, classro
 router.post('/:classroomId/notices', restrictToClassStaff, classroomController.postNotice);
 
 // Editing/removing an existing announcement is narrower than posting one, so the
-// role gate is looser here and the controller enforces author/teacher/admin.
-// TA is allowed at the route layer because a TA may be the notice author.
-// updateNotice/deleteNotice still enforce the real rule (author, assigned
-// teacher, or admin) via canManageNotice, so this does not widen access.
+// room-membership gate (not a global role gate) is used here and the controller
+// enforces author/teacher/admin. Important: TAs in this app are Students
+// assigned to `classroom.tas`, so a global restrictTo('TA') would never match and
+// the authoring TA would be rejected with 403 before reaching the controller.
+// restrictToClassStaff recognises assigned TAs regardless of their user role.
 router
   .route('/:classroomId/notices/:noticeId')
-  .patch(restrictTo('TEACHER', 'TA', 'ADMIN'), classroomController.updateNotice)
-  .delete(restrictTo('TEACHER', 'TA', 'ADMIN'), classroomController.deleteNotice);
+  .patch(restrictToClassStaff, classroomController.updateNotice)
+  .delete(restrictToClassStaff, classroomController.deleteNotice);
 
 // =============================================================================
 // 3. SINGLE CLASSROOM DETAILS & DELETION ROUTES

@@ -157,13 +157,15 @@ router
   .post(restrictToLabStaff, labController.postLabNotice);
 
 // Editing/removing an existing announcement is narrower than posting one, so the
-// role gate is looser here and the controller enforces author/teacher/admin.
-// TA is allowed here so a TA who authored a notice can still manage it;
-// canManageNotice enforces author / assigned teacher / admin.
+// room-membership gate (not a global role gate) is used here and the controller
+// enforces author/teacher/admin. Important: TAs in this app are Students
+// assigned to `labroom.tas`, so a global restrictTo('TA') would never match and
+// the authoring TA would be rejected with 403 before reaching the controller.
+// restrictToLabStaff recognises assigned TAs regardless of their user role.
 router
   .route("/:labroomId/notices/:noticeId")
-  .patch(restrictTo("TEACHER", "TA", "ADMIN"), labController.updateLabNotice)
-  .delete(restrictTo("TEACHER", "TA", "ADMIN"), labController.deleteLabNotice);
+  .patch(restrictToLabStaff, labController.updateLabNotice)
+  .delete(restrictToLabStaff, labController.deleteLabNotice);
 
 router
   .route("/:labroomId/complaints")

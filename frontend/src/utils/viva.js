@@ -23,6 +23,9 @@ export const normalizeVivaScore = (value) => {
   if (value === null || value === undefined) return null;
   const str = String(value).trim();
   if (str === '') return null;
+  // 'A' means the student was absent for the viva: no multiplier, so the
+  // activity marks are zeroed exactly as a viva of 0 would do (marks x 0 = 0).
+  if (str.toUpperCase() === 'A') return 0;
   const num = Number(str);
   if (!Number.isFinite(num)) return null;
   if (num < 0) return 0;

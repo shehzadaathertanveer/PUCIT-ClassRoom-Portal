@@ -1218,6 +1218,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   // Absent/bypassed rows are exempt - there is nothing to multiply.
   if (vivaEnabled) {
     const missingViva = validEntries.filter((e) => {
+      // Absent students have nothing to defend, so they are exempt. The sheet
+      // sends absent rows as obtainedMarks 0 + isAbsent true, so the flag is
+      // authoritative here - checking the raw value alone would wrongly demand
+      // a viva from every absent student.
+      if (e.isAbsent) return false;
       const raw = String(e.obtainedMarks).trim();
       if (raw.toUpperCase() === 'A' || raw.toUpperCase() === BYPASS_SENTINEL) return false;
       return normalizeVivaScore(e.vivaMarks) === null;
