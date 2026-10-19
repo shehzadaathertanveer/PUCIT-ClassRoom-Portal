@@ -89,6 +89,16 @@ const MarksSheet = () => {
   // Cleanly decode the item title from URL parameters
   const initialDecodedTitle = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
   const [itemTitle, setItemTitle] = useState(initialDecodedTitle);
+  // The title used to look up stored rows/definitions is read from a ref rather
+  // than the itemTitle state, so typing in the title box can no longer retrigger
+  // a load (which used to blank the form mid-edit on every keystroke).
+  const activeTitleRef = useRef(initialDecodedTitle);
+  // True once the teacher edits the title, so a background reload never clobbers
+  // what they are typing with the stored title.
+  const titleEditedRef = useRef(false);
+  // Students who had a stored row when the sheet loaded. Only these may be
+  // "cleared" on save - a row is never deleted just because it failed to hydrate.
+  const hydratedRowIdsRef = useRef(new Set());
   
   // Unassigned filter toggle initialized directly from router state flag
   const initialFilterState = location.state?.filterUngraded || location.state?.filterUnassigned || false;
@@ -146,7 +156,7 @@ const MarksSheet = () => {
       setStudents(data.students || []);
       setExistingMarks(data.existingMarks || []);
 
-      const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
+      const activeTitle = (activeTitleRef.current || '').trim();
       
       // Look up evaluation totalMarks if it already exists in classroom definition schemas
       if (currentClass) {
@@ -191,6 +201,7 @@ const MarksSheet = () => {
       const initialMap = {};
       const vivaMap = {};
       const marksMap = new Map((data.existingMarks || []).map(m => [m.student?.toString() || m.student?._id?.toString(), m]));
+      hydratedRowIdsRef.current = new Set();
 
       (data.students || []).forEach(student => {
         const studentId = student._id.toString();
@@ -218,6 +229,7 @@ const MarksSheet = () => {
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
           );
           if (item) {
+            hydratedRowIdsRef.current.add(studentId);
             const rawStored = item.obtainedMarks;
             const hasStored = rawStored !== undefined && rawStored !== null && String(rawStored).trim() !== '';
             isBypassed = !!item.isBypassed;
@@ -230,7 +242,7 @@ const MarksSheet = () => {
               vivaMarks = String(item.vivaMarks);
             }
             if (item.file) fileObj = item.file;
-            if (item.title && !itemTitle) setItemTitle(item.title);
+            if (item.title && !titleEditedRef.current) setItemTitle(item.title);
             if (item.totalMarks && !passedTotalMarks) setTotalMarks(item.totalMarks);
           }
         }
@@ -252,10 +264,12 @@ const MarksSheet = () => {
     } finally {
       setLoading(false);
     }
-  }, [classroomId, category, itemId, itemTitle, passedTotalMarks, computeUnassignedLocally]);
+  }, [classroomId, category, itemId, passedTotalMarks, computeUnassignedLocally]);
 
   useEffect(() => {
     if (classroomId && category) {
+      activeTitleRef.current = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
+      titleEditedRef.current = false;
       fetchSheetData();
     }
   }, [classroomId, category, itemId, fetchSheetData]);
@@ -457,17 +471,36 @@ const MarksSheet = () => {
         return;
       }
 
+      const originalTitle = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
+      const submittedIds = new Set(marksData.map(m => m.studentId));
+      // Only rows that actually existed at load can be cleared - a row is never
+      // deleted merely because it failed to hydrate into the form.
+      const clearedStudentIds = [...hydratedRowIdsRef.current].filter(id => !submittedIds.has(id));
+
       await API.post('/classroommarks/batch-submit', {
         classroomId,
         category,
         title: resolvedTitle,
+        originalTitle,
         totalMarks: parsedTotalMarks,
         hasViva,
-        marksData
+        marksData,
+        clearedStudentIds
       });
 
+      activeTitleRef.current = resolvedTitle;
       showToast('Marks submitted successfully!');
-      fetchSheetData();
+      if (resolvedTitle && resolvedTitle !== originalTitle) {
+        // Renaming edits the URL too, otherwise a reload would look for the old
+        // title and show every row as ungraded.
+        const basePath = location.pathname.substring(0, location.pathname.lastIndexOf('/'));
+        navigate(`${basePath}/${encodeURIComponent(resolvedTitle)}`, {
+          replace: true,
+          state: { totalMarks: parsedTotalMarks, category, hasViva }
+        });
+      } else {
+        fetchSheetData();
+      }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to submit marks.');
     } finally {
@@ -661,7 +694,7 @@ const MarksSheet = () => {
                 <input
                   type="text"
                   value={itemTitle}
-                  onChange={(e) => setItemTitle(e.target.value)}
+                  onChange={(e) => { titleEditedRef.current = true; setItemTitle(e.target.value); }}
                   placeholder="e.g. Quiz 1"
                   className="lm-field w-full min-w-0 text-xs sm:text-sm"
                 />

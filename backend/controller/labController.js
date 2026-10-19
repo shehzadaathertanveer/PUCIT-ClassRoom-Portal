@@ -7,7 +7,7 @@ const sendStyledEmail = require('../utils/emailService');
 const { normaliseRoomColor } = require('../utils/roomColors');
 const { recalculateLabGrades, activitiesChanged } = require('../utils/recalculateGrades');
 const { planActivityMigrations } = require('../utils/activityRemap');
-const { normaliseNoticeAttachment } = require('../utils/noticeAttachment');
+const { normaliseNoticeAttachment, normaliseNoticeAttachments } = require('../utils/noticeAttachment');
 const { normalizeVivaScore } = require('../utils/viva');
 
 // Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
@@ -1600,7 +1600,7 @@ exports.deleteLabGradedItem = catchAsync(async (req, res, next) => {
 // =============================================================================
 exports.postLabNotice = catchAsync(async (req, res, next) => {
   const { labroomId } = req.params;
-  const { title, content, attachment } = req.body;
+  const { title, content, attachment, attachments } = req.body;
 
   if (!title || !content) {
     return next(new AppError('Notice title and content are required!', 400));
@@ -1612,11 +1612,17 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId).populate('students', 'email personalNotificationEmail');
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
-  // The browser uploads attachments directly to Cloudinary, so the URL arrives
-  // client-controlled. Validate it here rather than trusting it.
-  const attachmentCheck = normaliseNoticeAttachment(attachment);
-  if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
-  const normalisedAttachment = attachmentCheck.attachment;
+  // The browser uploads attachments directly to Cloudinary, so the URLs arrive
+  // client-controlled. Validate each one here rather than trusting them. Newer
+  // clients send an `attachments` array; older ones still send a single
+  // `attachment`, which is folded into the same list for one code path.
+  const incomingAttachments = Array.isArray(attachments) && attachments.length > 0
+    ? attachments
+    : (attachment ? [attachment] : []);
+  const attachmentsCheck = normaliseNoticeAttachments(incomingAttachments);
+  if (!attachmentsCheck.ok) return next(new AppError(attachmentsCheck.message, 400));
+  const normalisedAttachments = attachmentsCheck.attachments;
+  const normalisedAttachment = normalisedAttachments[0] || normaliseNoticeAttachment(null).attachment;
 
   const newNotice = {
     title: title.trim(),
@@ -1624,6 +1630,7 @@ exports.postLabNotice = catchAsync(async (req, res, next) => {
     author: req.user._id,
     authorName: req.user.name,
     attachment: normalisedAttachment,
+    attachments: normalisedAttachments,
     createdAt: new Date(),
   };
 
@@ -1674,7 +1681,7 @@ const canManageLabNotice = (labroom, user) => {
 // PATCH /labrooms/:labroomId/notices/:noticeId
 exports.updateLabNotice = catchAsync(async (req, res, next) => {
   const { labroomId, noticeId } = req.params;
-  const { title, content, attachment } = req.body;
+  const { title, content, attachment, attachments } = req.body;
 
   if (!title || !content) {
     return next(new AppError('Notice title and content are required!', 400));
@@ -1694,9 +1701,16 @@ exports.updateLabNotice = catchAsync(async (req, res, next) => {
   notice.title = title.trim();
   notice.content = content.trim();
 
-  // Only re-validate the attachment when one was actually supplied, so editing
-  // just the text does not require re-uploading the file.
-  if (attachment && typeof attachment === 'object' && attachment.url) {
+  // Attachments are only touched when the client actually supplies them, so
+  // editing just the text keeps every existing file. A full array replaces the
+  // set and refreshes the legacy single field; a lone legacy attachment keeps
+  // its original single-file behaviour without wiping any stored array.
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    const attachmentsCheck = normaliseNoticeAttachments(attachments);
+    if (!attachmentsCheck.ok) return next(new AppError(attachmentsCheck.message, 400));
+    notice.attachments = attachmentsCheck.attachments;
+    notice.attachment = attachmentsCheck.attachments[0] || normaliseNoticeAttachment(null).attachment;
+  } else if (attachment && typeof attachment === 'object' && attachment.url) {
     const attachmentCheck = normaliseNoticeAttachment(attachment);
     if (!attachmentCheck.ok) return next(new AppError(attachmentCheck.message, 400));
     notice.attachment = attachmentCheck.attachment;

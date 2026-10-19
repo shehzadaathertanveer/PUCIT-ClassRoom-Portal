@@ -22,6 +22,10 @@ const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga'];
 const MAX_URL_LENGTH = 2048;
 const MAX_FILE_NAME_LENGTH = 180;
 
+// A notice may carry several files now. The cap is enforced here so a tampered
+// request cannot store an unbounded array; extras are dropped, not rejected.
+const MAX_NOTICE_ATTACHMENTS = 10;
+
 // Decoded once so percent-encoded traversal (%2e%2e%2f) is caught too, but a
 // plain "a..b" segment is not mistaken for an attack.
 const hasTraversal = (value) => {
@@ -99,4 +103,26 @@ const normaliseNoticeAttachment = (raw) => {
   };
 };
 
-module.exports = { normaliseNoticeAttachment };
+/**
+ * Normalise every attachment on an incoming notice. Entries without a URL are
+ * skipped (the legacy single-attachment callers may always send one, even when
+ * empty), invalid entries reject the whole request like before, and anything
+ * past the cap is trimmed rather than causing an error.
+ *
+ * @returns {{ ok: true, attachments: object[] } | { ok: false, message: string }}
+ */
+const normaliseNoticeAttachments = (rawList) => {
+  const list = Array.isArray(rawList) ? rawList : [];
+  const attachments = [];
+
+  for (const raw of list.slice(0, MAX_NOTICE_ATTACHMENTS)) {
+    if (!raw || typeof raw !== 'object' || !raw.url) continue;
+    const check = normaliseNoticeAttachment(raw);
+    if (!check.ok) return check;
+    attachments.push(check.attachment);
+  }
+
+  return { ok: true, attachments };
+};
+
+module.exports = { normaliseNoticeAttachment, normaliseNoticeAttachments, MAX_NOTICE_ATTACHMENTS };

@@ -1242,6 +1242,12 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     cleanTitle = `${resolvedCategory.slice(0, -1).toUpperCase()} Entry`;
   }
 
+  // The title the client loaded the sheet under. When the teacher renames an
+  // activity this lets us move the existing definition and rows to the new title
+  // instead of leaving them behind as orphans that look like ungraded students.
+  const rawOriginalTitle = typeof req.body.originalTitle === 'string' ? req.body.originalTitle.trim() : '';
+  const originalTitle = rawOriginalTitle && !/^[0-9a-fA-F]{24}$/.test(rawOriginalTitle) ? rawOriginalTitle : '';
+
   const classroom = await Classroom.findById(classroomId);
   if (!classroom) return next(new AppError('Classroom not found!', 404));
 
@@ -1253,9 +1259,17 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
   } else {
     if (isStandard) {
       if (!Array.isArray(classroom[resolvedCategory])) classroom[resolvedCategory] = [];
-      const existingClassItem = classroom[resolvedCategory].find(
+      let existingClassItem = classroom[resolvedCategory].find(
         (item) => item.title && item.title.toLowerCase() === cleanTitle.toLowerCase()
       );
+      // Rename support: if the definition is still under its old title, adopt it
+      // and rename it in place rather than appending a duplicate.
+      if (!existingClassItem && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+        existingClassItem = classroom[resolvedCategory].find(
+          (item) => item.title && item.title.toLowerCase() === originalTitle.toLowerCase()
+        );
+        if (existingClassItem) existingClassItem.title = cleanTitle;
+      }
       if (existingClassItem) {
         existingClassItem.totalMarks = parsedTotal;
         existingClassItem.hasViva = vivaEnabled;
@@ -1275,7 +1289,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
-        const existingCustomItem = customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        let existingCustomItem = customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (!existingCustomItem && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+          existingCustomItem = customCat.items.find(i => i.title?.toLowerCase() === originalTitle.toLowerCase());
+          if (existingCustomItem) existingCustomItem.title = cleanTitle;
+        }
         if (existingCustomItem) {
           existingCustomItem.totalMarks = parsedTotal;
           existingCustomItem.hasViva = vivaEnabled;
@@ -1323,15 +1341,20 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
         storedItem = markDoc[resolvedCategory];
       } else if (isStandard) {
-        storedItem = (Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [])
-          .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+        const storedList = Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [];
+        storedItem = storedList.find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase()) ||
+          (originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()
+            ? storedList.find(e => e.title && e.title.toLowerCase() === originalTitle.toLowerCase())
+            : null);
       } else {
         const storedCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
           .find(c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
                      c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase());
-        storedItem = storedCat && Array.isArray(storedCat.items)
-          ? storedCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase())
-          : null;
+        const storedItems = storedCat && Array.isArray(storedCat.items) ? storedCat.items : [];
+        storedItem = storedItems.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase()) ||
+          (originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()
+            ? storedItems.find(i => i.title?.toLowerCase() === originalTitle.toLowerCase())
+            : null);
       }
       if (storedItem) storedViva = normalizeVivaScore(storedItem.vivaMarks);
     }
@@ -1377,8 +1400,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
                             (Number(exam.totalMarks) || 0) !== parsedTotal ||
                             vivaDiffers(exam);
       } else if (isStandard) {
-        const existingItem = (Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [])
-          .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+        const mcList = Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [];
+        let existingItem = mcList.find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+        if (!existingItem && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+          existingItem = mcList.find(e => e.title && e.title.toLowerCase() === originalTitle.toLowerCase()) || null;
+        }
         if (!existingItem) marksChanged = true;
         else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
                             (existingItem.isAbsent === true) !== absentFlag ||
@@ -1388,9 +1414,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         const customCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
           .find(c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
                      c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase());
-        const existingItem = customCat && Array.isArray(customCat.items)
-          ? customCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase())
-          : null;
+        const mcItems = customCat && Array.isArray(customCat.items) ? customCat.items : [];
+        let existingItem = mcItems.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (!existingItem && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+          existingItem = mcItems.find(i => i.title?.toLowerCase() === originalTitle.toLowerCase()) || null;
+        }
         if (!existingItem) marksChanged = true;
         else marksChanged = (Number(existingItem.obtainedMarks) || 0) !== parsedObtained ||
                             (existingItem.isAbsent === true) !== absentFlag ||
@@ -1431,9 +1459,15 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       };
     } else if (isStandard) {
       if (!Array.isArray(markDoc[resolvedCategory])) markDoc[resolvedCategory] = [];
-      const existingIdx = markDoc[resolvedCategory].findIndex(
+      let existingIdx = markDoc[resolvedCategory].findIndex(
         (e) => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase()
       );
+      if (existingIdx === -1 && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+        existingIdx = markDoc[resolvedCategory].findIndex(
+          (e) => e.title && e.title.toLowerCase() === originalTitle.toLowerCase()
+        );
+        if (existingIdx > -1) markDoc[resolvedCategory][existingIdx].title = cleanTitle;
+      }
       if (existingIdx > -1) {
         markDoc[resolvedCategory][existingIdx].totalMarks = parsedTotal;
         markDoc[resolvedCategory][existingIdx].obtainedMarks = parsedObtained;
@@ -1460,7 +1494,11 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         });
       } else {
         if (!Array.isArray(customCat.items)) customCat.items = [];
-        const existingItemIdx = customCat.items.findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        let existingItemIdx = customCat.items.findIndex(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+        if (existingItemIdx === -1 && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+          existingItemIdx = customCat.items.findIndex(i => i.title?.toLowerCase() === originalTitle.toLowerCase());
+          if (existingItemIdx > -1) customCat.items[existingItemIdx].title = cleanTitle;
+        }
         if (existingItemIdx > -1) {
           customCat.items[existingItemIdx].totalMarks = parsedTotal;
           customCat.items[existingItemIdx].obtainedMarks = parsedObtained;
@@ -1526,10 +1564,15 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
 
   await Promise.all(docsToSave.map((doc) => doc.save()));
 
-  // Neutralize students left at -99 (ungraded) for this evaluation so cleared boxes truly unmark them.
+  // Neutralize ONLY the rows the teacher deliberately cleared. The client reports
+  // which students had a stored row at load and are now blank; the old behaviour
+  // deleted every enrolled student missing from the batch, so a row that failed
+  // to hydrate was silently wiped on the next save.
   const submittedIds = new Set(validEntries.map(e => e.studentId.toString()));
-  const enrolledIds = (classroom.students || []).map(s => (s && s._id ? s._id : s).toString());
-  const excludedIds = enrolledIds.filter(id => !submittedIds.has(id));
+  const requestedCleared = Array.isArray(req.body.clearedStudentIds) ? req.body.clearedStudentIds : [];
+  const excludedIds = requestedCleared
+    .map(id => String(id))
+    .filter(id => id && !submittedIds.has(id));
   if (excludedIds.length > 0) {
     if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
       await Mark.updateMany(

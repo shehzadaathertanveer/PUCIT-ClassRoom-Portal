@@ -23,6 +23,15 @@ const singleEvaluationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }, { _id: false });
 
+// Shared shape for a notice file. Kept as a sub-schema so the single legacy
+// `attachment` and the new `attachments` array cannot drift apart.
+const noticeAttachmentSchema = new mongoose.Schema({
+  url: { type: String, default: '' },
+  public_id: { type: String, default: '' },
+  fileType: { type: String, default: '' },
+  fileName: { type: String, default: '' }
+}, { _id: false });
+
 const classroomSchema = new mongoose.Schema(
   {
     className: { 
@@ -124,12 +133,8 @@ const classroomSchema = new mongoose.Schema(
       authorName: { type: String, trim: true },
       authorRole: { type: String, trim: true },
       updatedAt: { type: Date },
-      attachment: {
-        url: { type: String, default: '' },
-        public_id: { type: String, default: '' },
-        fileType: { type: String, default: '' },
-        fileName: { type: String, default: '' }
-      },
+      attachment: { type: noticeAttachmentSchema, default: () => ({}) },
+      attachments: { type: [noticeAttachmentSchema], default: [] },
       createdAt: { type: Date, default: Date.now }
     }],
 

@@ -689,6 +689,12 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     cleanTitle = `Lab Item Entry`;
   }
 
+  // The title the client loaded the sheet under. When the teacher renames an
+  // activity this lets us move the existing definition and rows to the new title
+  // instead of leaving them behind as orphans that look like ungraded students.
+  const rawOriginalTitle = typeof req.body.originalTitle === 'string' ? req.body.originalTitle.trim() : '';
+  const originalTitle = rawOriginalTitle && !/^[0-9a-fA-F]{24}$/.test(rawOriginalTitle) ? rawOriginalTitle : '';
+
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
@@ -698,7 +704,13 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     labroom[standardKey] = [{ title: cleanTitle, totalMarks: parsedTotal, hasViva: vivaEnabled }];
   } else {
     if (!Array.isArray(labroom[standardKey])) labroom[standardKey] = [];
-    const exists = labroom[standardKey].find(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
+    let exists = labroom[standardKey].find(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
+    // Rename support: adopt and rename the definition still under its old title
+    // instead of appending a duplicate.
+    if (!exists && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+      exists = labroom[standardKey].find(i => i.title.toLowerCase() === originalTitle.toLowerCase());
+      if (exists) exists.title = cleanTitle;
+    }
     if (exists) {
       exists.totalMarks = parsedTotal;
       exists.hasViva = vivaEnabled;
@@ -781,9 +793,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     let storedViva = null;
     if (markDoc) {
       const storedItems = markDoc[standardKey];
-      const storedItem = Array.isArray(storedItems)
-        ? storedItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
-        : (storedItems && storedItems.title && storedItems.title.toLowerCase() === cleanTitle.toLowerCase() ? storedItems : null);
+      const storedList = Array.isArray(storedItems) ? storedItems : (storedItems ? [storedItems] : []);
+      const storedItem = storedList.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase()) ||
+        (originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()
+          ? storedList.find(i => i.title && i.title.toLowerCase() === originalTitle.toLowerCase())
+          : null);
       if (storedItem) storedViva = normalizeVivaScore(storedItem.vivaMarks);
     }
     const incomingViva = normalizeVivaScore(entry.vivaMarks);
@@ -810,9 +824,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
     if (markDoc) {
       const existingItems = markDoc[standardKey];
-      const existingItem = Array.isArray(existingItems)
-        ? existingItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
-        : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
+      const mcList = Array.isArray(existingItems) ? existingItems : (existingItems ? [existingItems] : []);
+      let existingItem = mcList.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase());
+      if (!existingItem && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+        existingItem = mcList.find(i => i.title && i.title.toLowerCase() === originalTitle.toLowerCase()) || null;
+      }
 
       if (!existingItem) {
         marksChanged = true;
@@ -862,7 +878,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       markDoc[standardKey] = [itemPayload];
     } else {
       if (!Array.isArray(markDoc[standardKey])) markDoc[standardKey] = [];
-      const idx = markDoc[standardKey].findIndex(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
+      let idx = markDoc[standardKey].findIndex(i => i.title.toLowerCase() === cleanTitle.toLowerCase());
+      if (idx === -1 && originalTitle && originalTitle.toLowerCase() !== cleanTitle.toLowerCase()) {
+        idx = markDoc[standardKey].findIndex(i => i.title.toLowerCase() === originalTitle.toLowerCase());
+        if (idx > -1) markDoc[standardKey][idx].title = cleanTitle;
+      }
       if (idx > -1) {
         markDoc[standardKey][idx] = { ...markDoc[standardKey][idx], ...itemPayload };
       } else {
@@ -915,10 +935,15 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
 
   await Promise.all(docsToSave.map(d => d.save()));
 
-  // Neutralize students left at -99 (ungraded) for this lab evaluation so cleared boxes truly unmark them.
+  // Neutralize ONLY the rows the teacher deliberately cleared. The client reports
+  // which students had a stored row at load and are now blank; the old behaviour
+  // deleted every enrolled student missing from the batch, so a row that failed
+  // to hydrate was silently wiped on the next save.
   const submittedIds = new Set(validEntries.map(e => e.studentId.toString()));
-  const enrolledIds = (labroom.students || []).map(s => (s && s._id ? s._id : s).toString());
-  const excludedIds = enrolledIds.filter(id => !submittedIds.has(id));
+  const requestedCleared = Array.isArray(req.body.clearedStudentIds) ? req.body.clearedStudentIds : [];
+  const excludedIds = requestedCleared
+    .map(id => String(id))
+    .filter(id => id && !submittedIds.has(id));
   if (excludedIds.length > 0) {
     await LabMark.updateMany(
       { labroom: labroomId, student: { $in: excludedIds }, [standardKey]: { $elemMatch: { title: cleanTitle } } },

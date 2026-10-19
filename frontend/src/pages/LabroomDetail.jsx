@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   AcademicCapIcon,
@@ -41,6 +41,8 @@ import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 import { effectiveMarks } from '../utils/viva';
 
+const MAX_NOTICE_ATTACHMENTS = 10;
+
 const LabroomDetail = () => {
   const { labroomId } = useParams();
   const { user } = useAuth();
@@ -78,10 +80,21 @@ const LabroomDetail = () => {
   // Notice board state with optional attachment support
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
-  const [noticeFile, setNoticeFile] = useState(null);
+  const [noticeFiles, setNoticeFiles] = useState([]);
   const [postingNotice, setPostingNotice] = useState(false);
   const [busyNoticeId, setBusyNoticeId] = useState('');
   const [showAllNotices, setShowAllNotices] = useState(false);
+
+  const noticeFilePreviews = useMemo(
+    () => noticeFiles.map((file) => (file.type?.startsWith('image/') ? URL.createObjectURL(file) : '')),
+    [noticeFiles]
+  );
+
+  useEffect(() => {
+    return () => {
+      noticeFilePreviews.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+    };
+  }, [noticeFilePreviews]);
 
   // Anonymous Complaint states
   const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
@@ -379,29 +392,49 @@ const LabroomDetail = () => {
     return false;
   };
 
+  const handleNoticeFilesSelected = (e) => {
+    const selected = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!selected.length) return;
+
+    const remaining = MAX_NOTICE_ATTACHMENTS - noticeFiles.length;
+    if (remaining <= 0) {
+      showToast(`You can attach up to ${MAX_NOTICE_ATTACHMENTS} files per notice.`, 'error');
+      return;
+    }
+    if (selected.length > remaining) {
+      showToast(`Only ${remaining} more file${remaining === 1 ? '' : 's'} can be attached (max ${MAX_NOTICE_ATTACHMENTS}).`, 'error');
+    }
+    setNoticeFiles([...noticeFiles, ...selected.slice(0, remaining)]);
+  };
+
+  const removeNoticeFile = (index) => {
+    setNoticeFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handlePostNotice = async (e) => {
     e.preventDefault();
     if (!noticeTitle.trim() || !noticeContent.trim()) return;
 
     setPostingNotice(true);
     try {
-      let attachmentData = null;
-      if (noticeFile) {
-        attachmentData = await uploadToCloudinary(noticeFile);
-      }
+      const uploadedAttachments = noticeFiles.length > 0
+        ? await Promise.all(noticeFiles.map((file) => uploadToCloudinary(file)))
+        : [];
 
       await API.post(`/labrooms/${labroomId}/notices`, {
         title: noticeTitle.trim(),
         content: noticeContent.trim(),
-        attachment: attachmentData
+        attachment: uploadedAttachments[0] || null,
+        attachments: uploadedAttachments
       });
       setNoticeTitle('');
       setNoticeContent('');
-      setNoticeFile(null);
+      setNoticeFiles([]);
       await fetchLabroomData();
       showToast('Lab notice published successfully!');
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to post lab notice.', 'error');
+      showToast(err.response?.data?.message || err.message || 'Failed to post lab notice.', 'error');
     } finally {
       setPostingNotice(false);
     }
@@ -1282,15 +1315,56 @@ const LabroomDetail = () => {
             <form onSubmit={handlePostNotice} className="lm-inset p-4 space-y-3">
               <input type="text" placeholder="Notice Title" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} required className="lm-field text-sm" />
               <textarea placeholder="Write announcement details..." value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} required rows="2" className="lm-field resize-none text-sm" />
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <label className="cursor-pointer flex items-center gap-2 text-xs text-slate-300 hover:text-slate-100 transition-colors min-w-0">
-                  <PaperClipIcon className="w-4 h-4 shrink-0 text-orange-300" />
-                  <span className="truncate">{noticeFile ? `Attached: ${noticeFile.name}` : 'Attach Image, PDF, or ZIP'}</span>
-                  <input type="file" onChange={(e) => setNoticeFile(e.target.files[0])} className="hidden" accept="image/*,.pdf,.zip" />
-                </label>
-                <button type="submit" disabled={postingNotice} className="lm-btn shrink-0 w-full sm:w-auto">
-                  {postingNotice ? 'Publishing...' : 'Publish Notice'}
-                </button>
+              <div className="space-y-2 min-w-0">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <label className={`text-xs transition-colors flex items-center gap-2 min-w-0 ${noticeFiles.length >= MAX_NOTICE_ATTACHMENTS ? 'cursor-not-allowed text-slate-500' : 'cursor-pointer text-slate-300 hover:text-slate-100'}`}>
+                    <PaperClipIcon className="w-4 h-4 shrink-0 text-orange-300" />
+                    <span className="truncate">
+                      {noticeFiles.length > 0
+                        ? `${noticeFiles.length}/${MAX_NOTICE_ATTACHMENTS} files attached`
+                        : 'Attach up to 10 Images, PDFs, or ZIPs'}
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={handleNoticeFilesSelected}
+                      className="hidden"
+                      accept="image/*,.pdf,.zip"
+                      disabled={noticeFiles.length >= MAX_NOTICE_ATTACHMENTS}
+                    />
+                  </label>
+                  <button type="submit" disabled={postingNotice} className="lm-btn shrink-0 w-full sm:w-auto">
+                    {postingNotice ? 'Publishing...' : 'Publish Notice'}
+                  </button>
+                </div>
+                {noticeFiles.length >= MAX_NOTICE_ATTACHMENTS && (
+                  <p className="text-[10px] sm:text-xs text-amber-300">Maximum of {MAX_NOTICE_ATTACHMENTS} files reached. Remove one to add another.</p>
+                )}
+                {noticeFiles.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                    {noticeFiles.map((file, index) => (
+                      <div key={`${file.name}-${file.lastModified}-${index}`} className="relative lm-inset rounded-lg border border-white/5 p-1.5 min-w-0">
+                        {noticeFilePreviews[index] ? (
+                          <img src={noticeFilePreviews[index]} alt={file.name} className="w-full h-16 object-cover rounded-md border border-white/[0.06] bg-slate-950" />
+                        ) : (
+                          <div className="w-full h-16 flex items-center justify-center rounded-md border border-white/[0.06] bg-slate-950">
+                            <DocumentTextIcon className="w-5 h-5 text-slate-500" />
+                          </div>
+                        )}
+                        <p className="mt-1 text-[10px] text-slate-400 truncate" title={file.name}>{file.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => removeNoticeFile(index)}
+                          aria-label={`Remove ${file.name}`}
+                          title="Remove"
+                          className="absolute -top-1.5 -right-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-slate-900 text-slate-300 hover:text-rose-300 hover:border-rose-400/50"
+                        >
+                          <XMarkIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </form>
           )}

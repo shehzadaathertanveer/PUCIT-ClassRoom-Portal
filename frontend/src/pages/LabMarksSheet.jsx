@@ -67,6 +67,16 @@ const LabMarksSheet = () => {
   // Cleanly decode the item title from URL parameters
   const initialDecodedTitle = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
   const [itemTitle, setItemTitle] = useState(initialDecodedTitle);
+  // The title used to look up stored rows/definitions is read from a ref rather
+  // than the itemTitle state, so typing in the title box can no longer retrigger
+  // a load (which used to blank the form mid-edit on every keystroke).
+  const activeTitleRef = useRef(initialDecodedTitle);
+  // True once the teacher edits the title, so a background reload never clobbers
+  // what they are typing with the stored title.
+  const titleEditedRef = useRef(false);
+  // Students who had a stored row when the sheet loaded. Only these may be
+  // "cleared" on save - a row is never deleted just because it failed to hydrate.
+  const hydratedRowIdsRef = useRef(new Set());
   
   // Unassigned filter toggle (defaults to true if passed via location state from "Grade Remaining")
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(
@@ -125,7 +135,7 @@ const LabMarksSheet = () => {
       setStudents(data.students || []);
 
       // 2. Resolve active title
-      const activeTitle = itemTitle || (itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '');
+      const activeTitle = (activeTitleRef.current || '').trim();
       
       // 3. Look up evaluation totalMarks if it already exists in labroom definitions
       if (activeLabroom) {
@@ -160,6 +170,7 @@ const LabMarksSheet = () => {
       const initialMap = {};
       const vivaMap = {};
       const marksMap = new Map((data.existingMarks || []).map(m => [m.student.toString(), m]));
+      hydratedRowIdsRef.current = new Set();
 
       (data.students || []).forEach(student => {
         const studentId = student._id.toString();
@@ -178,6 +189,7 @@ const LabMarksSheet = () => {
             e.title?.toLowerCase() === activeTitle?.toLowerCase()
           );
           if (item) {
+            hydratedRowIdsRef.current.add(studentId);
             const rawStored = item.obtainedMarks;
             // Use the explicit graded flag, with an evidence-based fallback for
             // rows written before that flag existed. Guessing from the value
@@ -192,7 +204,7 @@ const LabMarksSheet = () => {
               vivaMarks = String(item.vivaMarks);
             }
             if (item.file) fileObj = item.file;
-            if (item.title && !itemTitle) setItemTitle(item.title);
+            if (item.title && !titleEditedRef.current) setItemTitle(item.title);
             if (item.totalMarks && !passedTotalMarks) setTotalMarks(item.totalMarks);
           }
         }
@@ -214,10 +226,12 @@ const LabMarksSheet = () => {
     } finally {
       setLoading(false);
     }
-  }, [labroomId, category, itemId, itemTitle, passedTotalMarks, getCategoryTargetKey]);
+  }, [labroomId, category, itemId, passedTotalMarks, getCategoryTargetKey]);
 
   useEffect(() => {
     if (labroomId && category) {
+      activeTitleRef.current = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
+      titleEditedRef.current = false;
       fetchSheetData();
     }
   }, [labroomId, category, itemId, fetchSheetData]);
@@ -427,18 +441,36 @@ const LabMarksSheet = () => {
       }
 
       const targetCategoryKey = getCategoryTargetKey(category);
+      const originalTitle = itemId && itemId !== 'new' ? decodeURIComponent(itemId) : '';
+      const submittedIds = new Set(marksData.map(m => m.studentId));
+      // Only rows that actually existed at load can be cleared - a row is never
+      // deleted merely because it failed to hydrate into the form.
+      const clearedStudentIds = [...hydratedRowIdsRef.current].filter(id => !submittedIds.has(id));
 
       await API.post('/labmarks/batch-submit', {
         labroomId,
         category: targetCategoryKey,
         title: resolvedTitle,
+        originalTitle,
         totalMarks: parsedTotalMarks,
         hasViva,
-        marksData
+        marksData,
+        clearedStudentIds
       });
 
+      activeTitleRef.current = resolvedTitle;
       showToast('Lab marks submitted successfully!');
-      fetchSheetData();
+      if (resolvedTitle && resolvedTitle !== originalTitle) {
+        // Renaming edits the URL too, otherwise a reload would look for the old
+        // title and show every row as ungraded.
+        const basePath = location.pathname.substring(0, location.pathname.lastIndexOf('/'));
+        navigate(`${basePath}/${encodeURIComponent(resolvedTitle)}`, {
+          replace: true,
+          state: { totalMarks: parsedTotalMarks, category, hasViva }
+        });
+      } else {
+        fetchSheetData();
+      }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to submit lab marks.');
     } finally {
@@ -636,7 +668,7 @@ const LabMarksSheet = () => {
                 <input
                   type="text"
                   value={itemTitle}
-                  onChange={(e) => setItemTitle(e.target.value)}
+                  onChange={(e) => { titleEditedRef.current = true; setItemTitle(e.target.value); }}
                   placeholder="e.g. Lab Task 1"
                   className="lm-field w-full min-w-0 text-xs sm:text-sm"
                 />

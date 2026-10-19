@@ -52,6 +52,7 @@ const labMarkSchema = new mongoose.Schema(
 
     // 🚀 Updated Individual Scores matching Labroom Schema Categories
     labTasks: [LabItemScoreSchema],
+    labTests: [LabItemScoreSchema],
     quizzes: [LabItemScoreSchema],
     assignments: [LabItemScoreSchema],
     presentations: [LabItemScoreSchema],

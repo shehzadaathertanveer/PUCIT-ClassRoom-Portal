@@ -41,7 +41,12 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
     }
   };
 
-  const hasAttachment = Boolean(notice.attachment?.url);
+  const hasLegacyAttachment = Boolean(notice.attachment?.url);
+  const attachmentList = Array.isArray(notice.attachments)
+    ? notice.attachments.filter((item) => item && item.url)
+    : [];
+  const hasAttachments = attachmentList.length > 0;
+  const hasAttachment = hasAttachments || hasLegacyAttachment;
   const wasEdited = Boolean(notice.updatedAt && notice.createdAt)
     && new Date(notice.updatedAt).getTime() - new Date(notice.createdAt).getTime() > 1000;
 
@@ -129,7 +134,20 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
 
           {hasAttachment && (
             <div className="pt-2">
-              <NoticeAttachment attachment={notice.attachment} />
+              {hasAttachments ? (
+                <div className={`grid gap-2 ${compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+                  {attachmentList.map((item, index) => (
+                    <NoticeAttachment
+                      key={`${item.public_id || item.url}-${index}`}
+                      attachment={item}
+                      showPreview={false}
+                      imageClassName="w-full h-24 sm:h-28 object-cover rounded-lg border border-white/[0.06] bg-slate-950"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <NoticeAttachment attachment={notice.attachment} />
+              )}
             </div>
           )}
         </>
