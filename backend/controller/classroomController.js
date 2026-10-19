@@ -1498,9 +1498,12 @@ exports.updateStudentMarks = catchAsync(async (req, res, next) => {
       (item) => item.title.trim().toLowerCase() === (title || '').trim().toLowerCase()
     );
   const vivaEnabled = hasViva !== undefined ? Boolean(hasViva) : Boolean(previousEntry?.hasViva);
-  const vivaMarks = vivaEnabled && !isAbsent
-    ? normalizeVivaScore(incomingViva !== undefined ? incomingViva : previousEntry?.vivaMarks)
-    : null;
+  // A blank incoming viva never erases a stored one - including while the gate
+  // is off - so re-enabling the multiplier restores the previous scores instead
+  // of an empty box the teacher has to refill.
+  const incomingVivaBlank = incomingViva === undefined || incomingViva === null ||
+    String(incomingViva).trim() === '';
+  const vivaMarks = normalizeVivaScore(incomingVivaBlank ? previousEntry?.vivaMarks : incomingViva);
 
   if (vivaEnabled && !isAbsent && vivaMarks === null) {
     return next(new AppError(`Viva is ON for this evaluation, so a viva out of ${VIVA_MAX} is required.`, 400));

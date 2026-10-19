@@ -1310,13 +1310,33 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
       continue;
     }
 
-    // Absent and bypassed rows carry no viva: there is no score to multiply and
-    // no work to defend, so a viva would only add a meaningless number.
-    const parsedViva = vivaEnabled && !absentFlag && !bypassFlag
-      ? normalizeVivaScore(item.vivaMarks)
-      : null;
-
     let markDoc = docMap.get(studentIdStr);
+
+    // Viva scores are sticky. Switching the multiplier off (or an absent/bypass
+    // row sending a blank) must never erase a score that was already recorded:
+    // a blank incoming value falls back to what this row already stores, so
+    // flipping the gate back on restores every previous viva instead of blank
+    // boxes. The score is stored either way - it only APPLIES while hasViva is on.
+    let storedViva = null;
+    if (markDoc) {
+      let storedItem = null;
+      if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+        storedItem = markDoc[resolvedCategory];
+      } else if (isStandard) {
+        storedItem = (Array.isArray(markDoc[resolvedCategory]) ? markDoc[resolvedCategory] : [])
+          .find(e => e.title && e.title.toLowerCase() === cleanTitle.toLowerCase());
+      } else {
+        const storedCat = (Array.isArray(markDoc.customActivities) ? markDoc.customActivities : [])
+          .find(c => c.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+                     c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase());
+        storedItem = storedCat && Array.isArray(storedCat.items)
+          ? storedCat.items.find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase())
+          : null;
+      }
+      if (storedItem) storedViva = normalizeVivaScore(storedItem.vivaMarks);
+    }
+    const incomingViva = normalizeVivaScore(item.vivaMarks);
+    const parsedViva = incomingViva !== null ? incomingViva : storedViva;
 
     // Cap bypasses per student per category. Checked before any write so a
     // rejected request leaves the sheet untouched, and enforced here rather
@@ -1490,7 +1510,8 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
                   : `${parsedObtained} / ${parsedTotal} (${percentage}%)` },
             // Shown only when a viva actually applied, and always showing BOTH
             // numbers so the student can see why their mark is what it is.
-            ...(vivaEnabled && parsedViva !== null
+            // Absent/bypassed rows never show one even with a stored score.
+            ...(vivaEnabled && !absentFlag && !bypassFlag && parsedViva !== null
               ? [
                   { label: 'Viva (out of 10)', value: `${parsedViva}` },
                   { label: 'Marks after viva', value: `${effectiveObtained} / ${parsedTotal}` }
@@ -1636,11 +1657,14 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     const enabled = incomingHasViva === undefined
       ? Boolean(existing && existing.hasViva)
       : (incomingHasViva === true || incomingHasViva === 'true');
-    if (!enabled) return { hasViva: false, vivaMarks: null };
+    // A blank incoming viva never erases a stored one - including when the gate
+    // is off - so re-enabling the multiplier restores the previous scores.
+    const blank = incomingViva === undefined || incomingViva === null ||
+      String(incomingViva).trim() === '';
     const viva = normalizeVivaScore(
-      incomingViva !== undefined ? incomingViva : (existing ? existing.vivaMarks : null)
+      blank ? (existing ? existing.vivaMarks : null) : incomingViva
     );
-    return { hasViva: true, vivaMarks: viva };
+    return { hasViva: enabled, vivaMarks: viva };
   };
 
   const requireVivaFor = (rowViva, absentFlag, bypassFlag) => {

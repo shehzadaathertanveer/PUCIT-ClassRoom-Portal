@@ -323,6 +323,25 @@ const MarksSheet = () => {
     setVivaInputs(prev => ({ ...prev, [studentId]: value }));
   };
 
+  // Disabling the viva from this sheet (the edit/input stage) takes TWO confirms,
+  // so a stray click can never silently change how every student's marks are
+  // counted. Creating the activity keeps a single click - nothing exists yet.
+  // The entered viva scores are never cleared, only hidden, so flipping the
+  // switch back on restores the previous values.
+  const handleVivaToggle = () => {
+    if (hasViva) {
+      const first = window.confirm(
+        'Turn OFF the Viva Multiplier for this evaluation? Final marks will be counted exactly as entered, with no × viva ÷ 10 applied.'
+      );
+      if (!first) return;
+      const second = window.confirm(
+        'Second confirmation: are you sure you want to disable the Viva Multiplier? Once you save, every student\'s final marks will drop back to their raw marks. Already-entered viva scores are kept and will reappear if you switch it back on.'
+      );
+      if (!second) return;
+    }
+    setHasViva(prev => !prev);
+  };
+
   const handleFileUpload = async (studentId, e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -423,10 +442,11 @@ const MarksSheet = () => {
             // the bypass is allowed and rejects it if the limit is already met.
             obtainedMarks: isAbs ? 0 : (isByp ? BYPASS_MARK : Number(rawVal)),
             isAbsent: isAbs,
-            // Sent per row so the gate can be toggled from the sheet without
-            // recreating the activity. Absent/bypassed rows carry null: their
-            // viva is not consulted.
-            vivaMarks: hasViva ? viva : null,
+            // Viva scores travel even while the multiplier is OFF, so the server
+            // keeps them stored: switching the gate off hides the column but must
+            // never erase the scores - flipping it back on restores them.
+            // Absent/bypassed rows carry null: their viva is never consulted.
+            vivaMarks: isAbs || isByp ? null : viva,
             file: data.file?.url ? data.file : null
           };
         });
@@ -666,7 +686,7 @@ const MarksSheet = () => {
                   type="button"
                   role="switch"
                   aria-checked={hasViva}
-                  onClick={() => setHasViva(!hasViva)}
+                  onClick={handleVivaToggle}
                   className={`w-full flex items-center justify-between gap-2 lm-field cursor-pointer ${hasViva ? 'lm-chip-active' : ''}`}
                 >
                   <span className="text-[10px] sm:text-xs font-bold uppercase">{hasViva ? 'On' : 'Off'}</span>

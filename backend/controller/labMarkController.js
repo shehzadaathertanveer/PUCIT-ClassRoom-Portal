@@ -768,11 +768,26 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       continue;
     }
     const parsedObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
-    const parsedViva = vivaEnabled && !isAbsent && !isBypass ? normalizeVivaScore(entry.vivaMarks) : null;
     const fileData = entry.file || {};
 
     let markDoc = docMap.get(studentIdStr);
     let marksChanged = !markDoc;
+
+    // Viva scores are sticky. Switching the multiplier off (or an absent/bypass
+    // row sending a blank) must never erase a score that was already recorded:
+    // a blank incoming value falls back to what this row already stores, so
+    // flipping the gate back on restores every previous viva instead of blank
+    // boxes. The score is stored either way - it only APPLIES while hasViva is on.
+    let storedViva = null;
+    if (markDoc) {
+      const storedItems = markDoc[standardKey];
+      const storedItem = Array.isArray(storedItems)
+        ? storedItems.find(i => i.title && i.title.toLowerCase() === cleanTitle.toLowerCase())
+        : (storedItems && storedItems.title && storedItems.title.toLowerCase() === cleanTitle.toLowerCase() ? storedItems : null);
+      if (storedItem) storedViva = normalizeVivaScore(storedItem.vivaMarks);
+    }
+    const incomingViva = normalizeVivaScore(entry.vivaMarks);
+    const parsedViva = incomingViva !== null ? incomingViva : storedViva;
 
     // Bypass is capped per student per category, enforced here so the cap holds
     // regardless of what the client sends (a TA cannot bypass the UI to exceed it).
@@ -884,7 +899,8 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
                   : `${parsedObtained} / ${parsedTotal}` },
             // The viva and its effect are both surfaced so a student can see WHY
             // their marks changed rather than finding a lower number with no reason.
-            ...(vivaEnabled && parsedViva !== null
+            // Absent/bypassed rows never show one even with a stored score.
+            ...(vivaEnabled && !isAbsent && !isBypass && parsedViva !== null
               ? [
                   { label: 'Viva (out of 10)', value: `${parsedViva}` },
                   { label: 'Marks after viva', value: `${applyVivaMultiplier(parsedObtained, parsedViva)} / ${parsedTotal}` }
@@ -978,13 +994,17 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     : (existingItems && existingItems.title && existingItems.title.toLowerCase() === cleanTitle.toLowerCase() ? existingItems : null);
 
   // Single-row edit falls back to whatever the row already had, so nudging one
-  // student's viva without touching their score does not blank the other field.
+  // student's score does not blank their viva - and a blank (or a gate that is
+  // switched off) never erases a stored score either, so re-enabling the
+  // multiplier restores the previous values.
   const singleVivaEnabled = hasViva === undefined
     ? Boolean(existingItem && existingItem.hasViva)
     : (hasViva === true || hasViva === 'true');
-  const singleViva = singleVivaEnabled
-    ? normalizeVivaScore(vivaMarks !== undefined ? vivaMarks : (existingItem ? existingItem.vivaMarks : null))
-    : null;
+  const incomingVivaBlank = vivaMarks === undefined || vivaMarks === null ||
+    String(vivaMarks).trim() === '';
+  const singleViva = normalizeVivaScore(
+    incomingVivaBlank ? (existingItem ? existingItem.vivaMarks : null) : vivaMarks
+  );
   if (singleVivaEnabled && !isAbsent && !isBypass && singleViva === null) {
     return next(new AppError(`Viva is ON for this activity, so a viva score out of ${VIVA_MAX} is required.`, 400));
   }

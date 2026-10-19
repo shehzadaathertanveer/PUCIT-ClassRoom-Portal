@@ -292,6 +292,25 @@ const LabMarksSheet = () => {
     setVivaInputs(prev => ({ ...prev, [studentId]: value }));
   };
 
+  // Disabling the viva from this sheet (the edit/input stage) takes TWO confirms,
+  // so a stray click can never silently change how every student's lab total is
+  // scaled. Creating the activity keeps a single click - nothing exists yet.
+  // The entered viva scores are never cleared, only hidden, so flipping the
+  // switch back on restores the previous values.
+  const handleVivaToggle = () => {
+    if (hasViva) {
+      const first = window.confirm(
+        'Turn OFF the Viva Multiplier for this lab activity? Lab totals will be counted exactly as entered, with no × viva ÷ 10 scaling.'
+      );
+      if (!first) return;
+      const second = window.confirm(
+        'Second confirmation: are you sure you want to disable the Viva Multiplier? Once you save, every student\'s lab total will drop back to their raw marks. Already-entered viva scores are kept and will reappear if you switch it back on.'
+      );
+      if (!second) return;
+    }
+    setHasViva(prev => !prev);
+  };
+
   const handleFileUpload = async (studentId, e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -392,9 +411,11 @@ const LabMarksSheet = () => {
             // bypass is allowed and rejects it when the limit is already met.
             obtainedMarks: isAbs ? 'A' : (isByp ? BYPASS_MARK : Number(rawVal)),
             isAbsent: isAbs,
-            // null for absent/bypassed rows: their viva is never consulted, and
-            // the lab total scales from the adjusted marks of graded rows only.
-            vivaMarks: hasViva ? viva : null,
+            // Viva scores travel even while the multiplier is OFF, so the server
+            // keeps them stored: switching the gate off hides the column but must
+            // never erase the scores - flipping it back on restores them.
+            // null for absent/bypassed rows: their viva is never consulted.
+            vivaMarks: isAbs || isByp ? null : viva,
             file: data.file?.url ? data.file : null
           };
         });
@@ -639,7 +660,7 @@ const LabMarksSheet = () => {
                   type="button"
                   role="switch"
                   aria-checked={hasViva}
-                  onClick={() => setHasViva(!hasViva)}
+                  onClick={handleVivaToggle}
                   className={`w-full flex items-center justify-between gap-2 lm-field cursor-pointer ${hasViva ? 'lm-chip-active' : ''}`}
                 >
                   <span className="text-[10px] sm:text-xs font-bold uppercase">{hasViva ? 'On' : 'Off'}</span>
