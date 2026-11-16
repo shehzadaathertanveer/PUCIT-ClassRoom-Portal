@@ -1044,7 +1044,7 @@ const LabroomDetail = () => {
   const getStudentRankInfo = () => {
     const rankings = labAnalytics?.rankings || [];
     if (rankings.length === 0 || !user?._id) {
-      return { rank: '#1', total: activeStudents.length };
+      return { rank: 'Pending', total: activeStudents.length };
     }
     
     const sorted = [...rankings].sort((a, b) => {

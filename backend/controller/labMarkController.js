@@ -316,8 +316,9 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   const isTa = labroom.tas && labroom.tas.some(ta => ta._id.toString() === userId.toString());
   const isStaffOrAdmin = userRole === 'ADMIN' || userRole === 'TEACHER' || isInstructor || isTa;
 
+  let studentMark = null;
   if (!isStaffOrAdmin) {
-    let studentMark = await LabMark.findOne({ labroom: labroomId, student: userId })
+    studentMark = await LabMark.findOne({ labroom: labroomId, student: userId })
       .populate('student', 'name rollNo registrationNo email personalNotificationEmail')
       .lean();
 
@@ -330,14 +331,6 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
         labActivities: [], labBehavior: [], labWorksheets: [], troubleshooting: []
       };
     }
-
-    return res.status(200).json({
-      status: 'success',
-      data: {
-        isStaff: false,
-        studentMark
-      }
-    });
   }
 
   const markDocs = await LabMark.find({ labroom: labroomId }).populate('student', 'name rollNo registrationNo').lean();
@@ -345,6 +338,12 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
   const validDocs = markDocs.filter(doc => doc.student && activeStudentIds.has(doc.student._id.toString()));
 
   if (validDocs.length === 0) {
+    if (!isStaffOrAdmin) {
+      return res.status(200).json({
+        status: 'success',
+        data: { isStaff: false, studentMark, rankings: [], classAverages: { overallLabPercentage: 0 } }
+      });
+    }
     return res.status(200).json({
       status: 'success',
       data: {
@@ -462,14 +461,17 @@ exports.getLabroomAnalytics = catchAsync(async (req, res, next) => {
     classAverages[targetKey + 'Percentage'] = Number((catSum / rankings.length).toFixed(2));
   });
 
-  res.status(200).json({
+  const analyticsPayload = {
     status: 'success',
     data: {
-      isStaff: true,
+      isStaff: isStaffOrAdmin,
       classAverages,
       rankings
     }
-  });
+  };
+  if (!isStaffOrAdmin) analyticsPayload.data.studentMark = studentMark;
+
+  res.status(200).json(analyticsPayload);
 });
 
 // =============================================================================
