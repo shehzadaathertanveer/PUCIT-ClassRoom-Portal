@@ -12,6 +12,7 @@ const Mark = require("../models/markSchema");
 const LabMark = require("../models/labMarkSchema");
 const catchAsync = require("../utils/catchAsyncError");
 const AppError = require("../utils/appError");
+const { publicIdsFromMarkDoc, safeDestroyPublicIds } = require("../utils/cloudinaryCleanup");
 const sendStyledEmail = require("../utils/emailService");
 const { getEmailQuotaStatus, updateEmailQuotaConfig, resetEmailQuotaCounter } = require("../utils/emailService");
 
@@ -1477,6 +1478,10 @@ exports.adminDeleteUser = catchAsync(async (req, res, next) => {
 
   await User.findByIdAndDelete(userId);
 
+  const markDocs = await Mark.find({ student: userId }).lean();
+  const labMarkDocs = await LabMark.find({ student: userId }).lean();
+  await safeDestroyPublicIds([...markDocs, ...labMarkDocs].flatMap(publicIdsFromMarkDoc));
+
   await Promise.all([
     Mark.deleteMany({ student: userId }),
     LabMark.deleteMany({ student: userId }),
@@ -1576,6 +1581,10 @@ exports.cleanupUnverifiedRegistrations = catchAsync(async (req, res, next) => {
 // Pass { dryRun: true } to preview every action without touching the database.
 // =============================================================================
 const purgeStudent = async (user) => {
+  const markDocs = await Mark.find({ student: user._id }).lean();
+  const labMarkDocs = await LabMark.find({ student: user._id }).lean();
+  await safeDestroyPublicIds([...markDocs, ...labMarkDocs].flatMap(publicIdsFromMarkDoc));
+
   await Promise.all([
     Mark.deleteMany({ student: user._id }),
     LabMark.deleteMany({ student: user._id }),

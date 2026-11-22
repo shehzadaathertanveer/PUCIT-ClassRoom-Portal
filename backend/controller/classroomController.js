@@ -3,6 +3,7 @@ const User = require('../models/userSchema');
 const Mark = require('../models/markSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
+const { publicIdsFromAttachment, publicIdsFromNotice, publicIdsFromMarkDoc, publicIdsFromMarkRows, safeDestroyPublicIds } = require('../utils/cloudinaryCleanup');
 const sendStyledEmail = require('../utils/emailService');
 const { normaliseRoomColor } = require('../utils/roomColors');
 const { recalculateClassroomGrades, activitiesChanged } = require('../utils/recalculateGrades');
@@ -505,7 +506,8 @@ exports.removeStudentFromClassroom = catchAsync(async (req, res, next) => {
     }
   }
 
-  await Mark.findOneAndDelete({ classroom: classroomId, student: studentId });
+  const studentMark = await Mark.findOneAndDelete({ classroom: classroomId, student: studentId });
+  if (studentMark) await safeDestroyPublicIds(publicIdsFromMarkDoc(studentMark));
 
   res.status(200).json({
     status: 'success',
@@ -586,6 +588,13 @@ exports.hardDeleteClassroom = catchAsync(async (req, res, next) => {
 
   const classroom = await Classroom.findOne(filter);
   if (!classroom) return next(new AppError('Classroom not found or unauthorized!', 404));
+
+  const markDocs = await Mark.find({ classroom: classroomId }).lean();
+  const ids = new Set([
+    ...classroom.notices.flatMap(publicIdsFromNotice),
+    ...markDocs.flatMap(publicIdsFromMarkDoc),
+  ]);
+  await safeDestroyPublicIds([...ids]);
 
   await Classroom.findByIdAndDelete(classroomId);
   await Mark.deleteMany({ classroom: classroomId });
@@ -944,26 +953,37 @@ exports.deleteGradedItem = catchAsync(async (req, res, next) => {
 
   const targetKey = getNormalizedTargetKey(category || type || req.params.categoryKey);
   const cleanTitle = (title || '').trim();
+  if (!cleanTitle) return next(new AppError('Item title is required for deletion.', 400));
+  const escapedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const marksToClean = await Mark.find({ classroom: classroomId }).lean();
+  const collectDeletedIds = (rows) => publicIdsFromMarkRows(rows);
 
   if (['mids', 'finals', 'finalProject'].includes(targetKey)) {
+    const removedIds = publicIdsFromMarkRows(marksToClean.map((mark) => mark[targetKey]).filter(Boolean));
     classroom[targetKey] = { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false };
     await classroom.save();
     await Mark.updateMany(
       { classroom: classroomId },
       { $set: { [targetKey]: { title: 'Exam', totalMarks: 0, obtainedMarks: 0, isAbsent: false } } }
     );
+    await safeDestroyPublicIds(removedIds);
   } else {
     if (!classroom[targetKey]) {
       return next(new AppError('Invalid grading category type.', 400));
     }
+    const removedIds = marksToClean.flatMap((mark) =>
+      collectDeletedIds((mark[targetKey] || []).filter((row) => row.title.trim().toLowerCase() === cleanTitle.toLowerCase()))
+    );
     classroom[targetKey] = classroom[targetKey].filter(
       (item) => item.title.trim().toLowerCase() !== cleanTitle.toLowerCase()
     );
     await classroom.save();
     await Mark.updateMany(
       { classroom: classroomId },
-      { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
+      { $pull: { [targetKey]: { title: { $regex: new RegExp(`^${escapedTitle}$`, 'i') } } } }
     );
+    await safeDestroyPublicIds(removedIds);
   }
 
   res.status(200).json({
@@ -1150,9 +1170,12 @@ exports.updateNotice = catchAsync(async (req, res, next) => {
   // editing just the text keeps every existing file. A full array replaces the
   // set and refreshes the legacy single field; a lone legacy attachment keeps
   // its original single-file behaviour without wiping any stored array.
+  const removedIds = [];
   if (Array.isArray(attachments) && attachments.length > 0) {
     const attachmentsCheck = normaliseNoticeAttachments(attachments);
     if (!attachmentsCheck.ok) return next(new AppError(attachmentsCheck.message, 400));
+    const nextIds = new Set(attachmentsCheck.attachments.flatMap((a) => publicIdsFromAttachment(a)));
+    removedIds.push(...publicIdsFromNotice(notice).filter((id) => !nextIds.has(id)));
     notice.attachments = attachmentsCheck.attachments;
     notice.attachment = attachmentsCheck.attachments[0] || normaliseNoticeAttachment(null).attachment;
   } else if (attachment && typeof attachment === 'object' && attachment.url) {
@@ -1163,6 +1186,7 @@ exports.updateNotice = catchAsync(async (req, res, next) => {
 
   notice.updatedAt = new Date();
   await classroom.save();
+  if (removedIds.length) await safeDestroyPublicIds(removedIds);
 
   res.status(200).json({
     status: 'success',
@@ -1186,8 +1210,10 @@ exports.deleteNotice = catchAsync(async (req, res, next) => {
     return next(new AppError('You can only delete your own notices.', 403));
   }
 
+  const ids = publicIdsFromNotice(notice);
   notice.deleteOne();
   await classroom.save();
+  await safeDestroyPublicIds(ids);
 
   res.status(200).json({
     status: 'success',

@@ -3,6 +3,7 @@ const Classroom = require('../models/classRoomSchema');
 const User = require('../models/userSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
+const { publicIdsFromAttachment, publicIdsFromMarkDoc, publicIdsFromMarkRows, safeDestroyPublicIds } = require('../utils/cloudinaryCleanup');
 const sendStyledEmail = require('../utils/emailService'); // Centralized email utility with IPv4 Render fix & dark theme layout
 const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
 const { computeSessionalBreakdown } = require('../utils/sessionalWeights');
@@ -1063,6 +1064,23 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
         }
       }
 
+      const oldFileIds = [];
+      if (fileData) {
+        if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
+          oldFileIds.push(...publicIdsFromAttachment(markDoc?.[targetCategory]?.file));
+        } else if (isStandard) {
+          const oldEntry = (markDoc?.[targetCategory] || []).find(e => e.title?.toLowerCase() === cleanTitle.toLowerCase());
+          oldFileIds.push(...publicIdsFromAttachment(oldEntry?.file));
+        } else {
+          const oldCat = (markDoc?.customActivities || []).find(c =>
+            c.categoryName?.trim().toLowerCase() === targetCategory.toLowerCase() ||
+            c.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()
+          );
+          const oldItem = (oldCat?.items || []).find(i => i.title?.toLowerCase() === cleanTitle.toLowerCase());
+          oldFileIds.push(...publicIdsFromAttachment(oldItem?.file));
+        }
+      }
+
       if (['mids', 'finals', 'finalProject'].includes(targetCategory)) {
         markDoc[targetCategory] = {
           title: cleanTitle || 'Exam',
@@ -1127,6 +1145,7 @@ exports.saveSingleEvaluationSheet = catchAsync(async (req, res, next) => {
       }
 
       await markDoc.save();
+      if (oldFileIds.length) await safeDestroyPublicIds(oldFileIds, publicIdsFromMarkDoc(markDoc));
       if (marksChanged) updatedStudentIds.push(studentId);
     }
   }
@@ -1574,15 +1593,24 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
     .map(id => String(id))
     .filter(id => id && !submittedIds.has(id));
   if (excludedIds.length > 0) {
+    const clearedDocs = await Mark.find({
+      classroom: classroomId,
+      student: { $in: excludedIds },
+    }).lean();
+    const clearedIds = [];
     if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
       await Mark.updateMany(
         { classroom: classroomId, student: { $in: excludedIds } },
         { $set: { [`${resolvedCategory}.totalMarks`]: 0, [`${resolvedCategory}.obtainedMarks`]: null, [`${resolvedCategory}.isAbsent`]: false } }
       );
     } else if (isStandard) {
+      clearedIds.push(...publicIdsFromMarkRows(clearedDocs.flatMap((doc) =>
+        (doc[resolvedCategory] || []).filter((row) => row.title?.trim().toLowerCase() === cleanTitle.toLowerCase())
+      )));
+      const escapedClearedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       await Mark.updateMany(
-        { classroom: classroomId, student: { $in: excludedIds }, [resolvedCategory]: { $elemMatch: { title: cleanTitle } } },
-        { $pull: { [resolvedCategory]: { title: cleanTitle } } }
+        { classroom: classroomId, student: { $in: excludedIds }, [resolvedCategory]: { $elemMatch: { title: { $regex: `^${escapedClearedTitle}$`, $options: 'i' } } } },
+        { $pull: { [resolvedCategory]: { title: { $regex: `^${escapedClearedTitle}$`, $options: 'i' } } } }
       );
     } else {
       const neutralDocs = await Mark.find({
@@ -1598,12 +1626,14 @@ exports.batchSubmitMarks = catchAsync(async (req, res, next) => {
         );
         if (cat && Array.isArray(cat.items)) {
           const before = cat.items.length;
+          clearedIds.push(...publicIdsFromMarkRows(cat.items.filter(i => i.title?.trim().toLowerCase() === cleanTitle.toLowerCase())));
           cat.items = cat.items.filter(i => i.title?.trim().toLowerCase() !== cleanTitle.toLowerCase());
           if (cat.items.length !== before) changed = true;
         }
       }
       if (changed) await Promise.all(neutralDocs.map(d => d.save()));
     }
+    if (clearedIds.length) await safeDestroyPublicIds(clearedIds);
   }
 
   await Promise.all(
@@ -1717,7 +1747,9 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
     return null;
   };
 
+  let replacedFileIds = [];
   if (['mids', 'finals', 'finalProject'].includes(resolvedCategory)) {
+    if (fileData) replacedFileIds = publicIdsFromAttachment(markDoc[resolvedCategory]?.file);
     const currentTotal = incomingTotal !== undefined ? Number(incomingTotal) : (markDoc[resolvedCategory]?.totalMarks || 100);
     const rawVal = incomingObtained !== undefined ? String(incomingObtained).trim() : String(markDoc[resolvedCategory]?.obtainedMarks || 0);
     const absentFlag = isAbsentFlag || rawVal.toUpperCase() === 'A';
@@ -1790,6 +1822,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       (prevItem.hasViva === true) !== itemViva.hasViva ||
       normalizeVivaScore(prevItem.vivaMarks) !== itemViva.vivaMarks;
 
+    if (fileData) replacedFileIds = publicIdsFromAttachment(prevItem?.file);
     if (itemIdx > -1) {
       markDoc[resolvedCategory][itemIdx].totalMarks = currentTotal;
       markDoc[resolvedCategory][itemIdx].obtainedMarks = currentObtained;
@@ -1861,6 +1894,7 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
       const currentObtained = (absentFlag || bypassFlag) ? 0 : Math.max(0, Number(rawVal));
 
       const prevItem = itemIdx > -1 ? customCat.items[itemIdx] : null;
+      if (fileData) replacedFileIds = publicIdsFromAttachment(prevItem?.file);
       const customViva = resolveRowViva(prevItem);
       const customVivaErr = requireVivaFor(customViva, absentFlag, bypassFlag);
       if (customVivaErr) return next(customVivaErr);
@@ -1896,6 +1930,8 @@ exports.updateSingleStudentMark = catchAsync(async (req, res, next) => {
   }
 
   await markDoc.save();
+
+  if (replacedFileIds.length) await safeDestroyPublicIds(replacedFileIds, publicIdsFromMarkDoc(markDoc));
 
   const studentEmail = student.personalNotificationEmail || student.email;
   const displayTitle = itemTitle || resolvedCategory;
@@ -1947,10 +1983,15 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   const markDocs = await Mark.find({ classroom: classroomId });
 
   const savePromises = [];
+  const removedFileIds = [];
+  const collectRemoved = (items) => removedFileIds.push(
+    ...items.filter((item) => item.title?.trim().toLowerCase() === cleanTitle).flatMap((item) => publicIdsFromAttachment(item.file))
+  );
 
   for (const doc of markDocs) {
     if (isStandard) {
       const initialLength = (doc[resolvedCategory] || []).length;
+      collectRemoved(doc[resolvedCategory] || []);
       doc[resolvedCategory] = (doc[resolvedCategory] || []).filter(
         (item) => item.title.trim().toLowerCase() !== cleanTitle
       );
@@ -1963,6 +2004,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
         if (cat.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
             cat.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()) {
           const initialLen = (cat.items || []).length;
+          collectRemoved(cat.items || []);
           cat.items = (cat.items || []).filter(i => i.title?.trim().toLowerCase() !== cleanTitle);
           if (cat.items.length !== initialLen) modified = true;
         }
@@ -1972,6 +2014,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   }
 
   await Promise.all(savePromises);
+  if (removedFileIds.length) await safeDestroyPublicIds(removedFileIds);
 
   // Also remove the classroom-level item definition so the cancelled assessment disappears from the list/columns.
   const classroom = await Classroom.findById(classroomId);

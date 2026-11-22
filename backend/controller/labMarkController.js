@@ -3,6 +3,7 @@ const Labroom = require('../models/labSchema');
 const User = require('../models/userSchema');
 const catchAsync = require('../utils/catchAsyncError');
 const AppError = require('../utils/appError');
+const { publicIdsFromAttachment, publicIdsFromMarkDoc, publicIdsFromMarkRows, safeDestroyPublicIds } = require('../utils/cloudinaryCleanup');
 const sendStyledEmail = require('../utils/emailService');
 const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
 const { computeLabWeightedPercentage, resolveCategoryKey } = require('../utils/labWeights');
@@ -722,6 +723,8 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   }
   await labroom.save();
 
+  const replacedFileIds = [];
+
   const validEntries = marksData.map(item => ({
     studentId: item.studentId || item.student || item._id,
     obtainedMarks: item.obtainedMarks !== undefined ? item.obtainedMarks : (item.marks !== undefined ? item.marks : item.score),
@@ -782,7 +785,7 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       continue;
     }
     const parsedObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
-    const fileData = entry.file || {};
+    const fileData = entry.file && typeof entry.file === 'object' && (entry.file.url || entry.file.public_id) ? entry.file : null;
 
     let markDoc = docMap.get(studentIdStr);
     let marksChanged = !markDoc;
@@ -864,6 +867,11 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     // vivaAdjustedMarks is computed HERE rather than trusted from the client, and
     // it is stored alongside the raw score so the sheet can show both "scored 80"
     // and "viva 0 means that counts as 0".
+    const existingRowForFile = ['labMids', 'labFinals', 'finalProject'].includes(standardKey)
+      ? markDoc?.[standardKey]?.[0]
+      : (markDoc?.[standardKey] || []).find(i => i.title.toLowerCase() === cleanTitle.toLowerCase()) ||
+        (originalTitle ? (markDoc?.[standardKey] || []).find(i => i.title.toLowerCase() === originalTitle.toLowerCase()) : null);
+
     const itemPayload = withVivaAdjusted({
       title: cleanTitle,
       totalMarks: parsedTotal,
@@ -873,8 +881,12 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
       isGraded: true,
       isAbsent,
       isBypassed: isBypass,
-      file: fileData
+      file: fileData || existingRowForFile?.file || { url: '', public_id: '', fileType: '', fileName: '' }
     });
+
+    if (fileData) {
+      replacedFileIds.push(...publicIdsFromAttachment(existingRowForFile?.file));
+    }
 
     if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
       markDoc[standardKey] = [itemPayload];
@@ -936,6 +948,10 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
   }
 
   await Promise.all(docsToSave.map(d => d.save()));
+  if (replacedFileIds.length) {
+    const stillReferenced = docsToSave.flatMap((doc) => publicIdsFromMarkDoc(doc));
+    await safeDestroyPublicIds(replacedFileIds, stillReferenced);
+  }
 
   // Neutralize ONLY the rows the teacher deliberately cleared. The client reports
   // which students had a stored row at load and are now blank; the old behaviour
@@ -947,10 +963,19 @@ exports.batchSubmitLabMarks = catchAsync(async (req, res, next) => {
     .map(id => String(id))
     .filter(id => id && !submittedIds.has(id));
   if (excludedIds.length > 0) {
+    const clearedDocs = await LabMark.find({
+      labroom: labroomId,
+      student: { $in: excludedIds },
+    }).lean();
+    const clearedIds = publicIdsFromMarkRows(clearedDocs.flatMap((doc) =>
+      (doc[standardKey] || []).filter((row) => row.title?.trim().toLowerCase() === cleanTitle.toLowerCase())
+    ));
+    const escapedClearedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     await LabMark.updateMany(
-      { labroom: labroomId, student: { $in: excludedIds }, [standardKey]: { $elemMatch: { title: cleanTitle } } },
-      { $pull: { [standardKey]: { title: cleanTitle } } }
+      { labroom: labroomId, student: { $in: excludedIds }, [standardKey]: { $elemMatch: { title: { $regex: `^${escapedClearedTitle}$`, $options: 'i' } } } },
+      { $pull: { [standardKey]: { title: { $regex: `^${escapedClearedTitle}$`, $options: 'i' } } } }
     );
+    if (clearedIds.length) await safeDestroyPublicIds(clearedIds);
   }
 
   await Promise.all(
@@ -1012,7 +1037,7 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   const isAbsent = rawVal.toUpperCase() === 'A';
   const isBypass = !isAbsent && rawVal.toUpperCase() === BYPASS_SENTINEL;
   const currentObtained = (isAbsent || isBypass) ? 0 : Math.max(0, Number(rawVal) || 0);
-  const fileData = file || {};
+  const fileData = file && typeof file === 'object' && (file.url || file.public_id) ? file : null;
 
   // Only notify the student when their grade actually changes.
   const existingItems = markDoc[standardKey];
@@ -1065,8 +1090,14 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
     isGraded: true,
     isAbsent,
     isBypassed: isBypass,
-    file: fileData
+    file: fileData || existingItem?.file || { url: '', public_id: '', fileType: '', fileName: '' }
   });
+
+  const oldIds = fileData ? publicIdsFromAttachment(
+    ['labMids', 'labFinals', 'finalProject'].includes(standardKey)
+      ? markDoc[standardKey]?.[0]?.file
+      : (markDoc[standardKey] || []).find(i => i.title.toLowerCase() === cleanTitle.toLowerCase())?.file
+  ) : [];
 
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
     markDoc[standardKey] = [itemPayload];
@@ -1081,6 +1112,7 @@ exports.updateSingleStudentLabMark = catchAsync(async (req, res, next) => {
   }
 
   await markDoc.save();
+  if (oldIds.length) await safeDestroyPublicIds(oldIds, publicIdsFromMarkDoc(markDoc));
 
   const studentEmail = student.personalNotificationEmail || student.email;
   if (marksChanged && studentEmail && !studentEmail.includes('@temp.pucit.edu.pk')) {
@@ -1167,7 +1199,12 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
+  const markDocs = await LabMark.find({ labroom: labroomId }).lean();
+  const escapedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const removedIds = [];
+
   if (['labMids', 'labFinals', 'finalProject'].includes(standardKey)) {
+    removedIds.push(...publicIdsFromMarkRows(markDocs.map((mark) => mark[standardKey]).filter(Boolean)));
     labroom[standardKey] = [];
     await labroom.save();
 
@@ -1179,6 +1216,9 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
     if (!cleanTitle) {
       return next(new AppError('Item title is required for deletion!', 400));
     }
+    removedIds.push(...publicIdsFromMarkRows(markDocs.flatMap((mark) =>
+      (mark[standardKey] || []).filter((row) => row.title?.trim().toLowerCase() === cleanTitle.toLowerCase())
+    )));
     labroom[standardKey] = (labroom[standardKey] || []).filter(
       i => i.title.toLowerCase() !== cleanTitle.toLowerCase()
     );
@@ -1186,9 +1226,11 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
 
     await LabMark.updateMany(
       { labroom: labroomId },
-      { $pull: { [standardKey]: { title: { $regex: new RegExp(`^${cleanTitle}$`, 'i') } } } }
+      { $pull: { [standardKey]: { title: { $regex: new RegExp(`^${escapedTitle}$`, 'i') } } } }
     );
   }
+
+  if (removedIds.length) await safeDestroyPublicIds(removedIds);
 
   res.status(200).json({
     status: 'success',
