@@ -13,18 +13,21 @@ const userSchema = new mongoose.Schema(
       required: [true, "Email is required"],
       lowercase: true,
       trim: true,
+      index: true,
     },
     rollNo: {
       type: String,
       trim: true,
       uppercase: true,
       sparse: true,
+      index: true,
     },
     registrationNo: {
       type: String,
       trim: true,
       uppercase: true,
       sparse: true,
+      index: true,
     },
     password: {
       type: String,

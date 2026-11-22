@@ -27,11 +27,10 @@ const OtpVerify = () => {
   }, [email, navigate]);
 
   useEffect(() => {
-    if (countdown > 0 && !isSuccess) {
-      const timer = setInterval(() => setCountdown((prev) => prev - 1), 1000);
-      return () => clearInterval(timer);
-    }
-  }, [countdown, isSuccess]);
+    if (isSuccess) return undefined;
+    const timer = setInterval(() => setCountdown((prev) => (prev > 0 ? prev - 1 : 0)), 1000);
+    return () => clearInterval(timer);
+  }, [isSuccess]);
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();

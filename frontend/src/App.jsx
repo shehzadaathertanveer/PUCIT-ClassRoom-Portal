@@ -1,19 +1,32 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ShieldCheckIcon } from "@heroicons/react/24/outline";
 import { useAuth } from "./context/AuthContext";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import OtpVerify from "./pages/OtpVerify";
-import ForgotPassword from "./pages/ForgotPassword";
-import VerifyRecoveryOtp from "./pages/VerifyRecoveryOtp";
-import ResetPassword from "./pages/ResetPassword";
-import Dashboard from "./pages/Dashboard";
-import ClassroomDetail from "./pages/ClassroomDetail";
-import MarksSheet from "./pages/MarksSheet";
-import LabroomDetail from "./pages/LabroomDetail";
-import LabMarksSheet from "./pages/LabMarksSheet";
-import AssignmentPage from "./pages/AssignmentPage";
-import Maintenance from "./pages/Maintenance";
+
+const Login = lazy(() => import("./pages/Login"));
+const Register = lazy(() => import("./pages/Register"));
+const OtpVerify = lazy(() => import("./pages/OtpVerify"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const VerifyRecoveryOtp = lazy(() => import("./pages/VerifyRecoveryOtp"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const ClassroomDetail = lazy(() => import("./pages/ClassroomDetail"));
+const MarksSheet = lazy(() => import("./pages/MarksSheet"));
+const LabroomDetail = lazy(() => import("./pages/LabroomDetail"));
+const LabMarksSheet = lazy(() => import("./pages/LabMarksSheet"));
+const AssignmentPage = lazy(() => import("./pages/AssignmentPage"));
+const Maintenance = lazy(() => import("./pages/Maintenance"));
+
+const PageFallback = () => (
+  <div className="lm-canvas relative flex min-h-dvh items-center justify-center overflow-hidden px-4">
+    <div className="lm-ambient" aria-hidden="true"></div>
+    <div className="lm-topline" aria-hidden="true"></div>
+    <div className="lm-card relative z-10 px-6 py-6 text-center">
+      <div className="lm-bar mx-auto" role="status" aria-live="polite"></div>
+      <p className="lm-eyebrow mt-4">Loading Portal...</p>
+    </div>
+  </div>
+);
 
 // Protected Route Component to block unauthenticated users and enforce Maintenance Mode (Admin only bypass)
 const ProtectedRoute = ({ children }) => {
@@ -57,7 +70,8 @@ const ProtectedRoute = ({ children }) => {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
         {/* Public Auth & Password Recovery Routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -138,7 +152,8 @@ function App() {
 
         {/* Catch-all redirect to home/login */}
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

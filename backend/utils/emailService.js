@@ -420,6 +420,21 @@ const sendViaBrevo = async (to, subject, htmlContent) => {
   };
 };
 
+let gmailTransporter;
+
+const getGmailTransporter = (user, pass) => {
+  if (!gmailTransporter) {
+    gmailTransporter = nodemailer.createTransport({
+      service: "Gmail",
+      family: 4,
+      auth: { user, pass },
+      connectionTimeout: 10000,
+      socketTimeout: 12000,
+    });
+  }
+  return gmailTransporter;
+};
+
 // Gmail SMTP via nodemailer (works with a Gmail App Password)
 const sendViaGmail = async (to, subject, htmlContent) => {
   const user = process.env.EMAIL_USER;
@@ -429,13 +444,7 @@ const sendViaGmail = async (to, subject, htmlContent) => {
     return { ok: false, reason: "No EMAIL_USER/EMAIL_PASS configured" };
   }
 
-  const transporter = nodemailer.createTransport({
-    service: "Gmail",
-    family: 4,
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    socketTimeout: 12000,
-  });
+  const transporter = getGmailTransporter(user, pass);
 
   await transporter.sendMail({
     from: `"PUCIT Portal System" <${user}>`,

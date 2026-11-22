@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
+import { invalidateAssignments } from './AssignmentNoticeBar';
 
 const CLASS_KEYS = ['quizzes', 'assignments', 'presentations', 'projects', 'homework', 'classActivities', 'classParticipation', 'vivas', 'specialMarks'];
 const LAB_KEYS = ['labTasks', 'labTests', 'quizzes', 'assignments', 'presentations', 'vivas', 'projects', 'finalProject', 'labMids', 'labFinals', 'labActivities', 'labBehavior', 'labWorksheets', 'troubleshooting'];
@@ -73,6 +74,7 @@ const AssignmentCreateModal = ({ roomType, roomId, categories, onClose, onCreate
         maxSizeUnit,
         instructionsFile,
       });
+      invalidateAssignments();
       onCreated?.(res.data?.data?.assignment);
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || 'Could not create assignment.');

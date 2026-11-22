@@ -4,7 +4,47 @@ import axios from "axios";
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
-export const uploadToCloudinary = async (file) => {
+const sanitizeDownloadName = (fileName) => {
+  const baseName = String(fileName || 'download').split(/[\\/]/).pop() || 'download';
+  return baseName
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\./g, '%252E')
+    .replace(/[^A-Za-z0-9_!\- %]/g, '_')
+    .replace(/%(?!252E)/g, '_')
+    .trim() || 'download';
+};
+
+export const getAttachmentDownloadUrl = (url, fileName) => {
+  if (!url) return '';
+
+  const marker = '/upload/';
+  const markerIndex = url.indexOf(marker);
+  if (markerIndex === -1) return url;
+
+  const prefix = url.slice(0, markerIndex + marker.length);
+  const parts = url.slice(markerIndex + marker.length).split('/');
+  const versionIndex = parts.findIndex((part) => /^v\d+$/.test(part));
+  const transformEnd = versionIndex >= 0 ? versionIndex : 1;
+
+  if (parts.slice(0, transformEnd).some((part) => part.split(',').some((item) => item === 'fl_attachment' || item.startsWith('fl_attachment:')))) {
+    return url;
+  }
+
+  const transformation = `fl_attachment:${sanitizeDownloadName(fileName)}`;
+  if (versionIndex >= 0) {
+    parts.splice(versionIndex, 0, transformation);
+  } else if (parts[0] && !parts[0].startsWith('s--')) {
+    const existing = parts[0].split(',').filter((part) => part && part !== 'f_auto');
+    parts[0] = [...existing, transformation].join(',');
+  } else {
+    parts.splice(parts[0]?.startsWith('s--') ? 1 : 0, 0, transformation);
+  }
+
+  return `${prefix}${parts.join('/')}`;
+};
+
+export const uploadToCloudinary = async (file, onProgress) => {
   if (!CLOUD_NAME || !UPLOAD_PRESET) {
     throw new Error(
       "Cloudinary environment variables are missing in your frontend .env file."
@@ -22,6 +62,7 @@ export const uploadToCloudinary = async (file) => {
     const res = await axios.post(
       `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`,
       formData,
+      onProgress ? { onUploadProgress: onProgress } : undefined,
     );
 
     const resourceType = res.data.resource_type; // 'image', 'raw', 'video'

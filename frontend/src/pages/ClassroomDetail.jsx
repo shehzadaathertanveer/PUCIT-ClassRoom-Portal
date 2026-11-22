@@ -49,7 +49,7 @@ const MAX_NOTICE_ATTACHMENTS = 10;
 const ClassroomDetail = () => {
   const { classroomId } = useParams();
   const { user } = useAuth();
-  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT');
+  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT', user?._id);
   const [classroom, setClassroom] = useState(null);
   const [studentMark, setStudentMark] = useState(null);
   const [classAnalytics, setClassAnalytics] = useState(null);
@@ -1508,7 +1508,7 @@ const studentBreakdownItems = [
       <div className="lm-ambient" />
 
       {toastMessage && (
-        <div className="fixed top-4 sm:top-5 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4 pointer-events-none">
+        <div className="fixed top-20 sm:top-5 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4 pointer-events-none">
           <div className={`lm-toast flex items-center gap-3 px-4 py-3 rounded-2xl border ${
             toastType === 'success' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'
           }`}>
@@ -1605,30 +1605,30 @@ const studentBreakdownItems = [
         {user?.role === 'STUDENT' && <AssignmentNoticeBar assignments={myAssignments} roomType="CLASSROOM" roomId={classroomId} />}
 
         {/* NOTICE BOARD SECTION */}
-        <section className="lm-card p-4 sm:p-6 space-y-4">
-          <div className={`flex flex-wrap items-center justify-between gap-3 border-b ${themeColorClass} pb-3`}>
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl lm-inset text-orange-300">
-                <MegaphoneIcon className="w-4 h-4" />
+        <section className="lm-card min-w-0 p-4 sm:p-5 lg:p-6 space-y-4 sm:space-y-5">
+          <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b ${themeColorClass} pb-2.5 sm:pb-3`}>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-orange-300">
+                <MegaphoneIcon className="h-3.5 w-3.5" />
               </span>
-              <h2 className="text-sm sm:text-base font-black text-slate-100 uppercase tracking-wider">Notice Board</h2>
+              <h2 className="text-[13px] sm:text-sm font-bold text-slate-100 tracking-tight">Notice Board</h2>
             </div>
             {classroom.notices?.length > 0 && (
-              <button type="button" onClick={() => setShowAllNotices(!showAllNotices)} className="lm-chip shrink-0">
+              <button type="button" onClick={() => setShowAllNotices(!showAllNotices)} className="lm-chip ml-auto shrink-0 px-2.5 py-1.5">
                 {showAllNotices ? 'Show Latest Only' : `View All (${classroom.notices.length})`}
               </button>
             )}
           </div>
 
           {isStaffOrAdmin && (
-            <form onSubmit={handlePostNotice} className="lm-inset p-3 sm:p-4 space-y-3">
-              <input type="text" placeholder="Notice Title" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} required className="lm-field" />
-              <textarea placeholder="Write announcement details..." value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} required rows="2" className="lm-field resize-none" />
+            <form onSubmit={handlePostNotice} className="lm-inset min-w-0 p-3.5 sm:p-4 lg:p-5 space-y-3 sm:space-y-4">
+              <input type="text" placeholder="Notice Title" value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} required className="lm-field text-sm" />
+              <textarea placeholder="Write announcement details..." value={noticeContent} onChange={(e) => setNoticeContent(e.target.value)} required rows="2" className="lm-field min-h-28 resize-y text-sm leading-relaxed" />
               <div className="space-y-2 min-w-0">
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                  <label className={`text-xs transition-colors min-w-0 break-words flex items-center gap-1.5 ${noticeFiles.length >= MAX_NOTICE_ATTACHMENTS ? 'cursor-not-allowed text-slate-500' : 'cursor-pointer text-slate-300 hover:text-slate-100'}`}>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+                  <label className={`inline-flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2.5 py-2 text-xs transition-colors ${noticeFiles.length >= MAX_NOTICE_ATTACHMENTS ? 'cursor-not-allowed text-slate-500' : 'cursor-pointer text-slate-300 hover:border-white/20 hover:text-slate-100'}`}>
                     <PaperClipIcon className="w-4 h-4 shrink-0 text-slate-400" />
-                    <span className="min-w-0">
+                    <span className="min-w-0 truncate">
                       {noticeFiles.length > 0
                         ? `${noticeFiles.length}/${MAX_NOTICE_ATTACHMENTS} files attached`
                         : 'Attach up to 10 Images, PDFs, or ZIPs'}
@@ -1642,31 +1642,31 @@ const studentBreakdownItems = [
                       disabled={noticeFiles.length >= MAX_NOTICE_ATTACHMENTS}
                     />
                   </label>
-                  <button type="submit" disabled={postingNotice} className="lm-btn shrink-0">
+                  <button type="submit" disabled={postingNotice} className="lm-btn w-full shrink-0 sm:w-auto">
                     {postingNotice ? 'Publishing...' : 'Publish Notice'}
                   </button>
                 </div>
                 {noticeFiles.length >= MAX_NOTICE_ATTACHMENTS && (
-                  <p className="text-[10px] sm:text-xs text-amber-300">Maximum of {MAX_NOTICE_ATTACHMENTS} files reached. Remove one to add another.</p>
+                  <p className="text-xs text-amber-300">Maximum of {MAX_NOTICE_ATTACHMENTS} files reached. Remove one to add another.</p>
                 )}
                 {noticeFiles.length > 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {noticeFiles.map((file, index) => (
-                      <div key={`${file.name}-${file.lastModified}-${index}`} className="relative lm-inset rounded-lg border border-white/5 p-1.5 min-w-0">
+                      <div key={`${file.name}-${file.lastModified}-${index}`} className="relative flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] p-1.5 pr-8 sm:max-w-[15rem]">
                         {noticeFilePreviews[index] ? (
-                          <img src={noticeFilePreviews[index]} alt={file.name} className="w-full h-16 object-cover rounded-md border border-white/[0.06] bg-slate-950" />
+                          <img src={noticeFilePreviews[index]} alt={file.name} className="h-10 w-10 shrink-0 rounded-lg bg-slate-950 object-cover sm:h-12 sm:w-12" />
                         ) : (
-                          <div className="w-full h-16 flex items-center justify-center rounded-md border border-white/[0.06] bg-slate-950">
+                          <div className="flex h-10 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-950 sm:h-12 sm:w-12">
                             <FolderIcon className="w-5 h-5 text-slate-500" />
                           </div>
                         )}
-                        <p className="mt-1 text-[10px] text-slate-400 truncate" title={file.name}>{file.name}</p>
+                        <p className="min-w-0 truncate text-xs text-slate-300" title={file.name}>{file.name}</p>
                         <button
                           type="button"
                           onClick={() => removeNoticeFile(index)}
                           aria-label={`Remove ${file.name}`}
                           title="Remove"
-                          className="absolute -top-1.5 -right-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-slate-900 text-slate-300 hover:text-rose-300 hover:border-rose-400/50"
+                          className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg border border-white/10 bg-slate-950/90 text-slate-300 transition-colors hover:border-rose-400/50 hover:text-rose-200"
                         >
                           <XMarkIcon className="w-3 h-3" />
                         </button>
@@ -1678,11 +1678,11 @@ const studentBreakdownItems = [
             </form>
           )}
 
-          <div className="space-y-3">
+          <div className="space-y-3 sm:space-y-4">
             {!latestNotice ? (
-              <div className="lm-inset p-6 text-center">
-                <MegaphoneIcon className="w-7 h-7 mx-auto text-slate-600" />
-                <p className="text-slate-400 text-xs italic mt-2">No announcements posted yet.</p>
+              <div className="lm-inset px-4 py-8 text-center sm:py-10">
+                <MegaphoneIcon className="mx-auto h-8 w-8 text-slate-600" />
+                <p className="mt-2 text-sm text-slate-400">No announcements posted yet.</p>
               </div>
             ) : showAllNotices ? (
               reversedNotices.map((n) => (

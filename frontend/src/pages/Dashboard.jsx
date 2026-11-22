@@ -28,10 +28,32 @@ import RoomColorPicker from '../components/RoomColorPicker';
 import AssignmentNoticeBar, { useMyAssignments, remainingTime, useTick } from '../components/AssignmentNoticeBar';
 import { DEFAULT_ROOM_COLOR, roomCardStyle, roomRowStyle } from '../utils/roomColors';
 
+const RoomPendingWork = ({ assignments, roomType, courseId }) => {
+  const navigate = useNavigate();
+  const now = useTick();
+  const pending = (assignments || []).filter((item) => {
+    const itemRoomId = item.roomId || item.room?._id || item.room;
+    return item.roomType === roomType && String(itemRoomId) === String(courseId) && !item.mySubmission && new Date(item.dueAt).getTime() > now;
+  });
+
+  if (!pending.length) return null;
+
+  return (
+    <div className="lm-inset border-amber-400/25 bg-amber-950/20 p-2.5 space-y-1.5">
+      <p className="text-xs font-bold uppercase tracking-wide text-amber-200">Pending Work</p>
+      {pending.slice(0, 3).map((item) => (
+        <button key={item._id} type="button" onClick={() => navigate(`/assignments/${item._id}`)} className="flex w-full items-center justify-between gap-2 text-left text-xs text-slate-200 hover:text-amber-200">
+          <span className="truncate">{item.title}</span>
+          <span className="font-mono text-amber-300 shrink-0">{remainingTime(item.dueAt, now)}</span>
+        </button>
+      ))}
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const { user, logout, updateUser, maintenance, setMaintenance } = useAuth();
-  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT');
-  const assignmentNow = useTick();
+  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT', user?._id);
   const [classroomsList, setClassroomsList] = useState([]);
   const [pendingTeachers, setPendingTeachers] = useState([]);
   const [analytics, setAnalytics] = useState(null);
@@ -1139,11 +1161,6 @@ sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
                 const detailRoute = isLab ? `/labrooms/${courseId}` : `/classroom/${courseId}`;
                 const creatorName = cls.teacher?.name || cls.placeholderTeacherName || 'System Admin / TBA';
                 const creatorEmail = cls.teacher?.email || '';
-                const roomPendingAssignments = myAssignments.filter((item) => {
-                  const expectedType = isLab ? 'LABROOM' : 'CLASSROOM';
-                  const itemRoomId = item.roomId || item.room?._id || item.room;
-                  return item.roomType === expectedType && String(itemRoomId) === String(courseId) && !item.mySubmission && new Date(item.dueAt).getTime() > assignmentNow;
-                });
 
                 return (
                   <div 
@@ -1184,17 +1201,7 @@ sectionPrefix: newClassData.sectionPrefix.trim().toUpperCase(),
                         </span>
                       </div>
 
-                      {roomPendingAssignments.length > 0 && (
-                        <div className="lm-inset border-amber-400/35 bg-amber-950/30 p-2.5 space-y-1">
-                          <p className="text-[10px] font-bold uppercase text-amber-200">Pending Work</p>
-                          {roomPendingAssignments.slice(0, 3).map((item) => (
-                            <button key={item._id} type="button" onClick={() => navigate(`/assignments/${item._id}`)} className="w-full text-left flex items-center justify-between gap-2 text-[11px] text-slate-200 hover:text-amber-200">
-                              <span className="truncate">{item.title}</span>
-                              <span className="font-mono text-amber-300 shrink-0">{remainingTime(item.dueAt, assignmentNow)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <RoomPendingWork assignments={myAssignments} roomType={isLab ? 'LABROOM' : 'CLASSROOM'} courseId={courseId} />
 
                       <div className="flex flex-col gap-1.5">
                         <h3 className="text-slate-100 font-bold text-base sm:text-lg tracking-tight break-words">

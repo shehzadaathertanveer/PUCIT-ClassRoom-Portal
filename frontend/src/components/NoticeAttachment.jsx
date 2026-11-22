@@ -1,4 +1,5 @@
 import { ArrowDownTrayIcon, DocumentTextIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { getAttachmentDownloadUrl } from '../utils/cloudinary';
 
 /**
  * Cloudinary delivery URLs for notice attachments.
@@ -88,6 +89,7 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
 
   // Derived during render: no effect, no HEAD probe, no extra request.
   const deliveryUrl = buildDeliveryUrl(url);
+  const downloadUrl = getAttachmentDownloadUrl(deliveryUrl, fileName);
 
   if (!deliveryUrl) return null;
 
@@ -95,10 +97,10 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
 
   const meta = (
     <div className="min-w-0 flex-1">
-      <p className="text-xs font-semibold text-slate-100 break-words">
+      <p className="text-[13px] font-semibold text-slate-100 [overflow-wrap:anywhere]">
         {fileName || (isPdf ? 'Document.pdf' : 'Attachment')}
       </p>
-      <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
+      <p className="text-xs font-mono text-slate-400">
         {[ext && ext.toUpperCase(), sizeLabel].filter(Boolean).join(' • ') || 'FILE'}
       </p>
     </div>
@@ -110,13 +112,13 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
         href={deliveryUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="block w-full min-w-0 lm-inset rounded-xl border border-white/5 p-2 transition-all duration-200 hover:-translate-y-px hover:border-white/15 active:scale-[0.99]"
+        className="block w-full min-w-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.025] p-1.5 transition-all duration-200 hover:-translate-y-px hover:border-white/20 active:scale-[0.99]"
       >
         <img
           src={deliveryUrl}
           alt={fileName || 'Notice attachment'}
           loading="lazy"
-          className={imageClassName || 'w-full max-h-40 object-cover rounded-lg border border-white/[0.06] bg-slate-950'}
+          className={imageClassName || 'w-full max-h-36 rounded-lg bg-slate-950 object-cover'}
         />
       </a>
     );
@@ -127,14 +129,14 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
   // viewers where the embed is blocked.
   if (isPdf && showPreview) {
     return (
-      <div className="w-full min-w-0 lm-inset rounded-xl border border-white/5 p-2 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="w-full min-w-0 space-y-2 rounded-xl border border-white/10 bg-white/[0.025] p-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {meta}
           <a
-            href={deliveryUrl}
+            href={downloadUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={linkClassName || 'lm-btn-ghost shrink-0'}
+            className={linkClassName || 'lm-btn-ghost ml-auto shrink-0 px-2.5 py-1.5'}
           >
             <EyeIcon className="w-4 h-4 shrink-0" />
             Open
@@ -147,25 +149,25 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
           loading="lazy"
           sandbox=""
           referrerPolicy="no-referrer"
-          className="w-full h-56 sm:h-72 rounded-lg border border-white/[0.06] bg-slate-950"
+          className="h-56 w-full rounded-lg bg-slate-950 sm:h-72"
         />
       </div>
     );
   }
 
   return (
-    <div className="lm-inset rounded-xl border border-white/5 p-2.5 flex flex-wrap items-center gap-2 min-w-0">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-2.5 transition-colors hover:border-white/20">
       {ext && (
-        <span className="lm-badge text-orange-200 border-orange-300/25 bg-orange-300/[0.06] font-mono uppercase">
+        <span className="lm-badge border-white/10 bg-slate-900/60 font-mono text-xs uppercase tracking-wide text-slate-300">
           {ext}
         </span>
       )}
       {meta}
       <a
-        href={deliveryUrl}
+        href={downloadUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className={linkClassName || 'lm-btn-ghost shrink-0'}
+        className={linkClassName || 'lm-btn-ghost ml-auto shrink-0 px-2.5 py-1.5'}
       >
         <DocumentTextIcon className="w-4 h-4 shrink-0" />
         Open

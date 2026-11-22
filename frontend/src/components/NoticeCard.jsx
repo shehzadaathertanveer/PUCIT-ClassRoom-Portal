@@ -51,9 +51,9 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
     && new Date(notice.updatedAt).getTime() - new Date(notice.createdAt).getTime() > 1000;
 
   return (
-    <div className={`lm-inset ${compact ? 'p-4' : 'p-4'} space-y-2`}>
+    <div className={`lm-inset w-full min-w-0 p-3.5 sm:p-4 lg:p-5 space-y-3 ${compact ? 'border-l-2 border-l-orange-300/50' : 'border-l-2 border-l-slate-500/25'}`}>
       {editing ? (
-        <form onSubmit={save} className="space-y-2">
+        <form onSubmit={save} className="space-y-3">
           <input
             type="text"
             value={title}
@@ -68,14 +68,14 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
             placeholder="Notice message"
             required
             rows={3}
-            className="lm-field text-xs leading-relaxed resize-y"
+            className="lm-field min-h-28 resize-y text-sm leading-relaxed"
           />
           {hasAttachment && (
-            <p className="text-[10px] sm:text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               The attached file is kept as-is.
             </p>
           )}
-          <div className="flex flex-wrap gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2 pt-1">
             <button type="submit" disabled={saving || busy} className="lm-btn">
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
@@ -86,13 +86,13 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
         </form>
       ) : (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <h4 className={`font-bold text-slate-100 break-words min-w-0 ${compact ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'}`}>
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <h4 className="min-w-0 flex-1 text-sm sm:text-[15px] font-bold leading-snug tracking-tight text-slate-100 [overflow-wrap:anywhere]">
               {notice.title}
             </h4>
 
             {canManage && (
-              <div className="flex gap-1 shrink-0">
+              <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
                   onClick={startEdit}
@@ -117,31 +117,31 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
             )}
           </div>
 
-          <p className="text-slate-300 text-xs leading-relaxed break-words whitespace-pre-wrap">{notice.content}</p>
+          <p className="mt-0.5 max-w-[75ch] whitespace-pre-wrap break-words text-[13px] leading-[1.7] text-slate-200">{notice.content}</p>
 
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] sm:text-xs text-slate-500">
-            <span className="font-semibold text-slate-400">{notice.authorName || 'Staff'}</span>
-            {notice.authorRole && <span className="font-mono uppercase">{notice.authorRole}</span>}
+          <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-white/[0.06] pt-2.5 text-xs text-slate-400">
+            <span className="font-semibold text-slate-300">{notice.authorName || 'Staff'}</span>
+            {notice.authorRole && <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-xs uppercase tracking-wide text-slate-400">{notice.authorRole}</span>}
             {notice.createdAt && (
-              <span className="font-mono">
+              <span className="font-mono tabular-nums text-slate-500">
                 {new Date(notice.createdAt).toLocaleDateString(undefined, {
                   day: 'numeric', month: 'short', year: 'numeric'
                 })}
               </span>
             )}
-            {wasEdited && <span className="font-mono italic">edited</span>}
+            {wasEdited && <span className="font-mono italic text-slate-500">edited</span>}
           </div>
 
           {hasAttachment && (
-            <div className="pt-2">
+            <div className="mt-3 border-t border-white/[0.06] pt-3">
               {hasAttachments ? (
-                <div className={`grid gap-2 ${compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+                <div className={`grid grid-cols-2 gap-2 ${compact ? 'sm:grid-cols-3' : 'sm:grid-cols-3 xl:grid-cols-4'}`}>
                   {attachmentList.map((item, index) => (
                     <NoticeAttachment
                       key={`${item.public_id || item.url}-${index}`}
                       attachment={item}
                       showPreview={false}
-                      imageClassName="w-full h-24 sm:h-28 object-cover rounded-lg border border-white/[0.06] bg-slate-950"
+                      imageClassName="h-20 w-full rounded-lg bg-slate-950 object-cover sm:h-24"
                     />
                   ))}
                 </div>
