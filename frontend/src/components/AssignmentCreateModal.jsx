@@ -86,8 +86,8 @@ const AssignmentCreateModal = ({ roomType, roomId, categories, onClose, onCreate
 
   return (
     <div className="lm-scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="lm-modal max-w-3xl p-0 overflow-hidden">
-        <div className="border-b border-white/[0.07] bg-gradient-to-r from-amber-500/[0.08] via-transparent to-transparent px-5 py-5 sm:px-6">
+      <div className="lm-modal max-w-3xl !p-0 flex flex-col">
+        <div className="shrink-0 border-b border-white/[0.07] bg-gradient-to-r from-amber-500/[0.08] via-transparent to-transparent px-5 py-5 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="lm-eyebrow text-amber-200/80">New Assignment</p>
@@ -98,7 +98,7 @@ const AssignmentCreateModal = ({ roomType, roomId, categories, onClose, onCreate
           </div>
         </div>
 
-        <form onSubmit={submit} className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
+        <form onSubmit={submit} className="min-h-0 flex-1 overflow-y-auto space-y-5 px-5 py-5 sm:px-6 sm:py-6">
           {error && <div className="rounded-xl border border-rose-500/35 bg-rose-950/35 px-4 py-3 text-sm text-rose-200">{error}</div>}
 
           <section className="space-y-4">

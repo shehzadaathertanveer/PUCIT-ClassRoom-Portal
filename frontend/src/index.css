@@ -308,6 +308,13 @@ select:-webkit-autofill {
       radial-gradient(80% 60% at 0% 100%, #0b1219 0%, transparent 55%);
   }
 
+  @media (min-width: 1024px) {
+    .lm-canvas .lm-card,
+    .lm-canvas .lm-card-flat {
+      box-shadow: var(--shadow-card), 0 0 0 1px rgb(255 255 255 / 0.015);
+    }
+  }
+
   /* Two slow-drifting pools of light behind the content */
   .lm-ambient {
     position: absolute;

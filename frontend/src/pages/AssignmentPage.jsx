@@ -220,12 +220,12 @@ const AssignmentPage = () => {
   return (
     <div className="lm-canvas space-y-5 overflow-x-hidden">
       <section className="lm-card min-w-0 overflow-hidden">
-        <div className="h-px bg-gradient-to-r from-transparent via-amber-300/60 to-transparent" />
-        <div className="p-5 sm:p-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="flex min-w-0 gap-3">
-              <span className="inline-grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-amber-300/25 bg-amber-300/10 text-amber-200">
-                <ClipboardDocumentListIcon className="h-5 w-5" />
+        <div className="h-px bg-gradient-to-r from-transparent via-amber-300/55 to-transparent" />
+        <div className="p-5 sm:p-6 lg:p-7">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 gap-4">
+              <span className="inline-grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-amber-300/20 bg-amber-300/[0.08] text-amber-200">
+                <ClipboardDocumentListIcon className="h-6 w-6" />
               </span>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -233,7 +233,7 @@ const AssignmentPage = () => {
                   <span className="lm-badge border-white/10 bg-white/[0.04] text-slate-300">{humanizeKey(assignment.categoryKey)}</span>
                   {pastDue && <span className="lm-badge border-rose-400/30 bg-rose-400/10 text-rose-200">Closed</span>}
                 </div>
-                <h1 className="mt-1 break-words text-xl font-bold tracking-tight text-slate-100 sm:text-2xl">{assignment.title}</h1>
+                <h1 className="mt-2 max-w-4xl break-words text-2xl font-bold tracking-tight text-slate-100 sm:text-3xl">{assignment.title}</h1>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
                   <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono">{assignment.totalMarks} marks</span>
                   <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono uppercase">{assignment.allowedTypes.join(', ')}</span>
@@ -242,7 +242,7 @@ const AssignmentPage = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 xl:justify-end">
+            <div className="flex flex-wrap gap-2 lg:max-w-md lg:justify-end">
               <button type="button" onClick={() => navigate(roomRoute)} className="lm-btn-ghost">
                 <ArrowLeftIcon className="h-4 w-4" />
                 Back
@@ -262,11 +262,11 @@ const AssignmentPage = () => {
             </div>
           </div>
 
-          {error && <div className="mt-4 rounded-xl border border-rose-500/35 bg-rose-950/35 px-4 py-3 text-sm text-rose-200">{error}</div>}
+          {error && <div className="mt-5 rounded-xl border border-rose-500/35 bg-rose-950/35 px-4 py-3 text-sm text-rose-200">{error}</div>}
 
-          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Due date" value={new Date(assignment.dueAt).toLocaleDateString()} sub={new Date(assignment.dueAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
-            <Stat label="Submissions" value={submissions.length} tone="text-slate-100" />
+            <Stat label="Submissions" value={submissions.length} />
             <Stat label="Graded" value={gradedCount} tone="text-emerald-300" sub={`${ungradedCount} pending`} />
             <Stat label="Max upload" value={`${assignment.maxSize} ${assignment.maxSizeUnit}`} />
           </div>
