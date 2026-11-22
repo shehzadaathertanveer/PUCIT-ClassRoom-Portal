@@ -20,9 +20,10 @@ const stripExtension = (id) => String(id || '').trim().replace(/\.[a-z0-9]+$/i, 
 const publicIdFromUrl = (value) => {
   const url = String(value || '').trim();
   if (!url) return '';
-  const match = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/(?:image|raw|video|auto|multi)\/upload\/(?:v\d+\/)?(.+)$/i.exec(url);
+  const match = /^https?:\/\/res\.cloudinary\.com\/([^/]+)\/(?:image|raw|video|auto|multi)\/upload\/(?:v\d+\/)?(.+)$/i.exec(url);
   if (!match) return '';
-  let id = match[1].split('?')[0];
+  if (CLOUD_NAME && match[1] !== CLOUD_NAME) return '';
+  let id = match[2].split('?')[0];
   if (id.includes(',')) id = id.split('/').filter((part) => part && !part.includes(',')).join('/');
   return stripExtension(id);
 };
@@ -97,6 +98,27 @@ const destroyPublicIds = async (ids) => {
   return deleted;
 };
 
+const resourceTypeFromUrl = (url) => /\/(image|video)\/upload\//i.test(String(url || ''))
+  ? (/\/(image)\/upload\//i.test(url) ? 'image' : 'video')
+  : 'raw';
+
+const fetchResourceBytes = async (publicId, resourceType = 'raw') => {
+  const id = String(publicId || '').trim();
+  if (!configured || !id) return null;
+  const candidates = [...new Set([id, stripExtension(id)])];
+  for (const candidate of candidates) {
+    try {
+      const result = await cloudinary.api.resource(candidate, { resource_type: resourceType, type: 'upload' });
+      return Number.isFinite(Number(result?.bytes)) ? Number(result.bytes) : null;
+    } catch (err) {
+      if (candidate === candidates[candidates.length - 1]) {
+        console.warn('Cloudinary resource lookup failed:', err?.message || err);
+      }
+    }
+  }
+  return null;
+};
+
 const safeDestroyPublicIds = async (ids, stillReferencedIds = []) => {
   const keep = new Set((Array.isArray(stillReferencedIds) ? stillReferencedIds : [stillReferencedIds])
     .flatMap((id) => [String(id || '').trim(), stripExtension(id)])
@@ -121,6 +143,8 @@ module.exports = {
   publicIdsFromNotice,
   publicIdsFromMarkDoc,
   publicIdsFromMarkRows,
+  resourceTypeFromUrl,
+  fetchResourceBytes,
   destroyPublicIds,
   safeDestroyPublicIds,
 };

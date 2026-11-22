@@ -39,6 +39,7 @@ const individualMarkSchema = new mongoose.Schema({
   vivaAdjustedMarks: { type: Number, default: null },
   percentage: { type: Number, default: 0 },
   file: { type: cloudinaryFileSchema, default: () => ({}) },
+  assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', default: null },
 }, { _id: true });
 
 const customActivityItemSchema = new mongoose.Schema({

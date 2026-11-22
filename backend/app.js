@@ -11,6 +11,7 @@ const classroomRoutes = require("./routes/classroomRoutes");
 const marksRoutes = require("./routes/marksRoutes");
 const labRoutes = require("./routes/labRoutes");
 const labMarkRoutes = require("./routes/labMarkRoutes");
+const assignmentRoutes = require("./routes/assignmentRoutes");
 
 const app = express();
 
@@ -93,6 +94,7 @@ app.use("/api/v1/marks", marksRoutes);
 app.use("/api/v1/classroommarks", marksRoutes);
 app.use("/api/v1/labrooms", labRoutes);
 app.use("/api/v1/labmarks", labMarkRoutes);
+app.use("/api/v1/assignments", assignmentRoutes);
 
 // Legacy / Direct /api Fallback Mounts (Prevents 404s if frontend base URL omits /v1)
 app.use("/api/auth", authRoutes);
@@ -101,6 +103,7 @@ app.use("/api/marks", marksRoutes);
 app.use("/api/classroommarks", marksRoutes);
 app.use("/api/labrooms", labRoutes);
 app.use("/api/labmarks", labMarkRoutes);
+app.use("/api/assignments", assignmentRoutes);
 
 // Handle Unhandled Routes (Fixed for Express 5 path-to-regexp compatibility)
 app.all(/(.*)/, (req, res, next) => {

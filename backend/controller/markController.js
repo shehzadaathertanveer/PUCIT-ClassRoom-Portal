@@ -8,6 +8,7 @@ const sendStyledEmail = require('../utils/emailService'); // Centralized email u
 const { createBypassRules, BYPASS_SENTINEL, UNGRADED_SENTINEL } = require('../utils/bypassRules');
 const { computeSessionalBreakdown } = require('../utils/sessionalWeights');
 const { getGradeAndGpa } = require('../utils/gradeScale');
+const { deleteAssignmentById } = require('./assignmentController');
 const {
   applyVivaMultiplier,
   effectiveMarks,
@@ -1980,6 +1981,25 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   }
 
   const cleanTitle = itemTitle.trim().toLowerCase();
+  const classroom = await Classroom.findById(classroomId);
+  const linkedAssignmentIds = [];
+  const collectAssignmentIds = (items) => {
+    for (const item of items || []) {
+      if (item.assignmentId && String(item.title || '').trim().toLowerCase() === cleanTitle) {
+        linkedAssignmentIds.push(item.assignmentId);
+      }
+    }
+  };
+  if (isStandard) collectAssignmentIds(classroom?.[resolvedCategory]);
+  else {
+    for (const cat of classroom?.customActivities || []) {
+      if (cat.categoryName?.trim().toLowerCase() === resolvedCategory.toLowerCase() ||
+          cat.categoryName?.trim().toLowerCase() === cleanCategory.toLowerCase()) {
+        collectAssignmentIds(cat.items);
+      }
+    }
+  }
+
   const markDocs = await Mark.find({ classroom: classroomId });
 
   const savePromises = [];
@@ -2015,9 +2035,9 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
 
   await Promise.all(savePromises);
   if (removedFileIds.length) await safeDestroyPublicIds(removedFileIds);
+  for (const assignmentId of linkedAssignmentIds) await deleteAssignmentById(assignmentId);
 
   // Also remove the classroom-level item definition so the cancelled assessment disappears from the list/columns.
-  const classroom = await Classroom.findById(classroomId);
   if (classroom) {
     if (isStandard && Array.isArray(classroom[resolvedCategory])) {
       classroom[resolvedCategory] = classroom[resolvedCategory].filter(

@@ -34,6 +34,8 @@ import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import NoticeCard from '../components/NoticeCard';
+import AssignmentCreateModal from '../components/AssignmentCreateModal';
+import AssignmentNoticeBar, { useMyAssignments } from '../components/AssignmentNoticeBar';
 import BypassLimitsPanel from '../components/BypassLimitsPanel';
 import GradeBadge from '../components/GradeBadge';
 import RoomColorPicker from '../components/RoomColorPicker';
@@ -46,6 +48,7 @@ const MAX_NOTICE_ATTACHMENTS = 10;
 const LabroomDetail = () => {
   const { labroomId } = useParams();
   const { user } = useAuth();
+  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT');
   const [labroom, setLabroom] = useState(null);
   const [studentMark, setStudentMark] = useState(null);
   const [labAnalytics, setLabAnalytics] = useState(null);
@@ -108,6 +111,7 @@ const LabroomDetail = () => {
 
   // Create student result / graded item sheet modal state
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [evaluationMode, setEvaluationMode] = useState(null); // 'full' or 'range'
   const [itemCategory, setItemCategory] = useState('Lab Tasks');
   const [itemTitle, setItemTitle] = useState('');
@@ -1287,6 +1291,9 @@ const LabroomDetail = () => {
                 <button onClick={() => setIsAddStudentModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300"><PlusIcon className="w-4 h-4" />Student</button>
                 <button onClick={() => setIsExcelModalOpen(true)} className="lm-btn-ghost uppercase text-blue-300"><ChartBarIcon className="w-4 h-4" />Upload Sync</button>
                 <button onClick={() => setIsItemModalOpen(true)} className="lm-btn uppercase"><PlusIcon className="w-4 h-4" />Evaluation</button>
+                {isStaffOrAdmin && (
+                  <button type="button" onClick={() => setIsAssignmentModalOpen(true)} className="lm-btn-ghost shrink-0">Assign Work</button>
+                )}
               </>
             )}
             {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setSettingsError(''); setIsSettingsModalOpen(true); }} className="lm-btn-ghost uppercase text-slate-200"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
@@ -1296,7 +1303,8 @@ const LabroomDetail = () => {
       </header>
 
       <main className="relative z-10 w-full max-w-6xl mx-auto my-5 sm:my-6 space-y-4 sm:space-y-6 flex-grow min-w-0">
-        
+        {user?.role === 'STUDENT' && <AssignmentNoticeBar assignments={myAssignments} roomType="LABROOM" roomId={labroomId} />}
+
         {/* NOTICE BOARD SECTION */}
         <section className={`lm-card p-4 sm:p-6 space-y-4 ${themeColorClass}`}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
@@ -1792,6 +1800,9 @@ const LabroomDetail = () => {
                             <div className="flex items-center gap-2.5 min-w-0">
                               <span className="w-2.5 h-2.5 rounded-full bg-orange-300 shrink-0"></span>
                               <h4 className="text-slate-100 font-black text-sm sm:text-base tracking-wide min-w-0 break-words">{item.title}</h4>
+                              {item.assignmentId && (
+                                <button type="button" onClick={() => navigate(`/assignments/${item.assignmentId}`)} className="lm-badge border-amber-300/35 bg-amber-300/10 text-amber-200 shrink-0">Task Assigned • View</button>
+                              )}
                             </div>
                             <span className="lm-badge font-mono shrink-0">
                               {total} Marks
@@ -2065,6 +2076,19 @@ const LabroomDetail = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {isAssignmentModalOpen && (
+        <AssignmentCreateModal
+          roomType="LABROOM"
+          roomId={labroomId}
+          categories={sessionalActivitiesList.map((act) => act.category)}
+          onClose={() => setIsAssignmentModalOpen(false)}
+          onCreated={(assignment) => {
+            setIsAssignmentModalOpen(false);
+            navigate(`/assignments/${assignment._id}`);
+          }}
+        />
       )}
 
       {/* 2. Create Result Sheet Modal */}

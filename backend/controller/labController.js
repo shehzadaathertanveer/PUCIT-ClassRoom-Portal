@@ -10,6 +10,7 @@ const { recalculateLabGrades, activitiesChanged } = require('../utils/recalculat
 const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment, normaliseNoticeAttachments } = require('../utils/noticeAttachment');
 const { normalizeVivaScore } = require('../utils/viva');
+const { deleteAssignmentsForRoom } = require('./assignmentController');
 
 // Helper: Sort roll numbers numerically on the last digits (BITF26A002 -> 2)
 const getRollDigits = (rollNo = '') => {
@@ -632,6 +633,7 @@ exports.hardDeleteLabroom = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findOne(filter);
   if (!labroom) return next(new AppError('Labroom not found or unauthorized!', 404));
 
+  await deleteAssignmentsForRoom('LABROOM', labroomId);
   const markDocs = await LabMark.find({ labroom: labroomId }).lean();
   const ids = new Set([
     ...labroom.notices.flatMap(publicIdsFromNotice),

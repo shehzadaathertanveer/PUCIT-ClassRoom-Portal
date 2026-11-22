@@ -9,9 +9,10 @@ const { ROOM_COLOR_KEYS, DEFAULT_ROOM_COLOR } = require('../utils/roomColors');
 const labEvaluationItemSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   totalMarks: { type: Number, required: true, min: 1 },
-  hasViva: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
+    hasViva: { type: Boolean, default: false },
+    assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', default: null },
+    createdAt: { type: Date, default: Date.now }
+  });
 
 // Shared shape for a lab notice file. Kept as a sub-schema so the single legacy
 // `attachment` and the new `attachments` array cannot drift apart.

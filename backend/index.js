@@ -28,6 +28,16 @@ connectDB()
       console.log(`PUCIT Portal Server running on port ${PORT}...`);
     });
 
+    const assignmentController = require('./controller/assignmentController');
+    const runAssignmentReminders = () => assignmentController.runRemindersInternal()
+      .then((result) => {
+        if (result.reminderEmailsSent > 0) console.log(`Assignment reminders sent: ${result.reminderEmailsSent}`);
+      })
+      .catch((err) => console.warn('Assignment reminder sweep failed:', err?.message || err));
+    setTimeout(runAssignmentReminders, 30 * 1000);
+    const reminderTimer = setInterval(runAssignmentReminders, 10 * 60 * 1000);
+    reminderTimer.unref();
+
     process.on('unhandledRejection', (err) => {
       console.error('UNHANDLED REJECTION! Gracefully closing server...');
       console.error(err.name, err.message);

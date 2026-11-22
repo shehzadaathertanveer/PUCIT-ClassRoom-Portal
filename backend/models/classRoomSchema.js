@@ -12,9 +12,10 @@ const vivaGateFields = {
 const evaluationItemSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   totalMarks: { type: Number, required: true, min: 1 },
-  ...vivaGateFields,
-  createdAt: { type: Date, default: Date.now }
-}, { _id: true });
+    ...vivaGateFields,
+    assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', default: null },
+    createdAt: { type: Date, default: Date.now }
+  }, { _id: true });
 
 const singleEvaluationSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true, default: 'Exam' },

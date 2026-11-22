@@ -10,6 +10,7 @@ const { recalculateClassroomGrades, activitiesChanged } = require('../utils/reca
 const { planActivityMigrations } = require('../utils/activityRemap');
 const { normaliseNoticeAttachment, normaliseNoticeAttachments } = require('../utils/noticeAttachment');
 const { normalizeVivaScore, withVivaAdjusted, VIVA_MAX } = require('../utils/viva');
+const { deleteAssignmentsForRoom } = require('./assignmentController');
 
 // Helper: Normalize Schema Target Keys Safely (Mapped to Fixed University Categories)
 const STANDARD_CATEGORY_KEYS = ['quizzes','assignments','presentations','projects','homework','classActivities','classParticipation','vivas','specialMarks','mids','finals','finalProject'];
@@ -589,6 +590,7 @@ exports.hardDeleteClassroom = catchAsync(async (req, res, next) => {
   const classroom = await Classroom.findOne(filter);
   if (!classroom) return next(new AppError('Classroom not found or unauthorized!', 404));
 
+  await deleteAssignmentsForRoom('CLASSROOM', classroomId);
   const markDocs = await Mark.find({ classroom: classroomId }).lean();
   const ids = new Set([
     ...classroom.notices.flatMap(publicIdsFromNotice),

@@ -61,14 +61,20 @@ const normaliseNoticeAttachment = (raw) => {
 
   // Only Cloudinary delivery URLs are accepted. This rejects http:// (mixed
   // content), javascript:, data: and any other host.
-  if (!CLOUDINARY_UPLOAD_RE.test(url)) {
+  const cloudMatch = CLOUDINARY_UPLOAD_RE.exec(url);
+  if (!cloudMatch) {
     return { ok: false, message: 'Attachment must be a Cloudinary upload URL.' };
+  }
+
+  const expectedCloud = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+  if (expectedCloud && cloudMatch[2] !== expectedCloud) {
+    return { ok: false, message: 'Attachment must belong to this Cloudinary cloud.' };
   }
 
   // public_id is taken from the URL rather than trusted from the client, so the
   // stored pair can never disagree and later be used to reference a different
   // asset than the one displayed.
-  const rest = CLOUDINARY_UPLOAD_RE.exec(url)[4];
+  const rest = cloudMatch[4];
   const segments = rest.split('/').filter(Boolean);
   const withoutVersion = segments[0] && /^v\d+$/.test(segments[0]) ? segments.slice(1) : segments;
   const publicId = withoutVersion.join('/');

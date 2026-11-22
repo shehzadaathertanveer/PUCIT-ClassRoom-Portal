@@ -33,6 +33,8 @@ import { useAuth } from '../context/AuthContext';
 import API from '../api/axios';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import NoticeCard from '../components/NoticeCard';
+import AssignmentCreateModal from '../components/AssignmentCreateModal';
+import AssignmentNoticeBar, { useMyAssignments } from '../components/AssignmentNoticeBar';
 import BypassLimitsPanel from '../components/BypassLimitsPanel';
 import RoomColorPicker from '../components/RoomColorPicker';
 import GradeBadge from '../components/GradeBadge';
@@ -47,6 +49,7 @@ const MAX_NOTICE_ATTACHMENTS = 10;
 const ClassroomDetail = () => {
   const { classroomId } = useParams();
   const { user } = useAuth();
+  const { assignments: myAssignments } = useMyAssignments(user?.role === 'STUDENT');
   const [classroom, setClassroom] = useState(null);
   const [studentMark, setStudentMark] = useState(null);
   const [classAnalytics, setClassAnalytics] = useState(null);
@@ -109,6 +112,7 @@ const ClassroomDetail = () => {
 
   // Create student result / graded item sheet modal state
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [itemCreationMode, setItemCreationMode] = useState('all'); // 'all' or 'range'
   const [itemCategory, setItemCategory] = useState('Quizzes');
   const [itemTitle, setItemTitle] = useState('');
@@ -1585,6 +1589,9 @@ const studentBreakdownItems = [
                   Upload Sync
                 </button>
                 <button type="button" onClick={() => setIsItemModalOpen(true)} className="lm-btn shrink-0"><PlusIcon className="w-4 h-4" />Result</button>
+                {isStaffOrAdmin && (
+                  <button type="button" onClick={() => setIsAssignmentModalOpen(true)} className="lm-btn-ghost shrink-0">Assign Work</button>
+                )}
               </>
             )}
             {isTeacherOrAdmin && <button type="button" onClick={() => { setSettingsTab('general'); setSettingsError(''); setIsSettingsModalOpen(true); }} className="lm-btn-ghost shrink-0"><Cog6ToothIcon className="w-4 h-4" />Settings</button>}
@@ -1595,7 +1602,8 @@ const studentBreakdownItems = [
       </header>
 
       <main className="relative z-10 w-full max-w-6xl mx-auto my-5 sm:my-6 space-y-5 sm:space-y-6 flex-grow min-w-0">
-        
+        {user?.role === 'STUDENT' && <AssignmentNoticeBar assignments={myAssignments} roomType="CLASSROOM" roomId={classroomId} />}
+
         {/* NOTICE BOARD SECTION */}
         <section className="lm-card p-4 sm:p-6 space-y-4">
           <div className={`flex flex-wrap items-center justify-between gap-3 border-b ${themeColorClass} pb-3`}>
@@ -2193,6 +2201,9 @@ const studentBreakdownItems = [
                             <div className="flex items-center gap-2.5 min-w-0">
                               <span className="w-2.5 h-2.5 shrink-0 rounded-full bg-orange-200 ring-1 ring-inset ring-white/50"></span>
                               <h4 className="text-slate-100 font-black text-sm sm:text-base tracking-wide break-words min-w-0">{item.title}</h4>
+                              {item.assignmentId && (
+                                <button type="button" onClick={() => navigate(`/assignments/${item.assignmentId}`)} className="lm-badge border-amber-300/35 bg-amber-300/10 text-amber-200 shrink-0">Task Assigned • View</button>
+                              )}
                             </div>
                             <span className="lm-badge font-mono shrink-0">
                               {total} Marks
@@ -2475,6 +2486,19 @@ const studentBreakdownItems = [
             </div>
           </div>
         </div>
+      )}
+
+      {isAssignmentModalOpen && (
+        <AssignmentCreateModal
+          roomType="CLASSROOM"
+          roomId={classroomId}
+          categories={sessionalActivitiesList.map((act) => act.category)}
+          onClose={() => setIsAssignmentModalOpen(false)}
+          onCreated={(assignment) => {
+            setIsAssignmentModalOpen(false);
+            navigate(`/assignments/${assignment._id}`);
+          }}
+        />
       )}
 
       {/* 2. Create Result Sheet Modal */}

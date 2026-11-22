@@ -32,7 +32,8 @@ const LabItemScoreSchema = new mongoose.Schema({
   vivaMarks: { type: Number, min: 0, max: 10, default: null },
   vivaAdjustedMarks: { type: Number, default: null },
   remarks: { type: String, trim: true, default: '' },
-  file: { type: cloudinaryFileSchema, default: () => ({}) } // 👈 Persists file attachments in lab grading sheets
+  file: { type: cloudinaryFileSchema, default: () => ({}) },
+  assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Assignment', default: null }
 }, { _id: false });
 
 const labMarkSchema = new mongoose.Schema(

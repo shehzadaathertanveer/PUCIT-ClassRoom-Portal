@@ -12,6 +12,7 @@ import ClassroomDetail from "./pages/ClassroomDetail";
 import MarksSheet from "./pages/MarksSheet";
 import LabroomDetail from "./pages/LabroomDetail";
 import LabMarksSheet from "./pages/LabMarksSheet";
+import AssignmentPage from "./pages/AssignmentPage";
 import Maintenance from "./pages/Maintenance";
 
 // Protected Route Component to block unauthenticated users and enforce Maintenance Mode (Admin only bypass)
@@ -122,6 +123,15 @@ function App() {
           element={
             <ProtectedRoute>
               <LabMarksSheet />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/assignments/:id"
+          element={
+            <ProtectedRoute>
+              <AssignmentPage />
             </ProtectedRoute>
           }
         />

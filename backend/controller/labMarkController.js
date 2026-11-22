@@ -8,6 +8,7 @@ const sendStyledEmail = require('../utils/emailService');
 const { createBypassRules, BYPASS_SENTINEL } = require('../utils/bypassRules');
 const { computeLabWeightedPercentage, resolveCategoryKey } = require('../utils/labWeights');
 const { getGradeAndGpa } = require('../utils/gradeScale');
+const { deleteAssignmentById } = require('./assignmentController');
 const { partitionRoster, csvCell, csvPad, rosterWidths, blankRow } = require('../utils/exportCsv');
 const { applyVivaMultiplier, normalizeVivaScore, withVivaAdjusted, effectiveMarks, VIVA_MAX } = require('../utils/viva');
 
@@ -1199,6 +1200,10 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   const labroom = await Labroom.findById(labroomId);
   if (!labroom) return next(new AppError('Labroom not found!', 404));
 
+  const linkedAssignmentIds = (labroom[standardKey] || [])
+    .filter((item) => item.assignmentId && String(item.title || '').trim().toLowerCase() === cleanTitle.toLowerCase())
+    .map((item) => item.assignmentId);
+
   const markDocs = await LabMark.find({ labroom: labroomId }).lean();
   const escapedTitle = cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const removedIds = [];
@@ -1231,6 +1236,7 @@ exports.deleteEvaluationEntry = catchAsync(async (req, res, next) => {
   }
 
   if (removedIds.length) await safeDestroyPublicIds(removedIds);
+  for (const assignmentId of linkedAssignmentIds) await deleteAssignmentById(assignmentId);
 
   res.status(200).json({
     status: 'success',
