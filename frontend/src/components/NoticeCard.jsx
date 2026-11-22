@@ -135,13 +135,12 @@ const NoticeCard = ({ notice, canManage, onEdit, onDelete, busy = false, compact
           {hasAttachment && (
             <div className="mt-3 border-t border-white/[0.06] pt-3">
               {hasAttachments ? (
-                <div className={`grid grid-cols-2 gap-2 ${compact ? 'sm:grid-cols-3' : 'sm:grid-cols-3 xl:grid-cols-4'}`}>
+                <div className={`grid grid-cols-1 gap-2 ${compact ? 'sm:grid-cols-2' : 'sm:grid-cols-2 xl:grid-cols-3'}`}>
                   {attachmentList.map((item, index) => (
                     <NoticeAttachment
                       key={`${item.public_id || item.url}-${index}`}
                       attachment={item}
                       showPreview={false}
-                      imageClassName="h-20 w-full rounded-lg bg-slate-950 object-cover sm:h-24"
                     />
                   ))}
                 </div>

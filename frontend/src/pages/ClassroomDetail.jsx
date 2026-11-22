@@ -2198,16 +2198,29 @@ const studentBreakdownItems = [
                       >
                         <div className="space-y-3">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="w-2.5 h-2.5 shrink-0 rounded-full bg-orange-200 ring-1 ring-inset ring-white/50"></span>
-                              <h4 className="text-slate-100 font-black text-sm sm:text-base tracking-wide break-words min-w-0">{item.title}</h4>
-                              {item.assignmentId && (
-                                <button type="button" onClick={() => navigate(`/assignments/${item.assignmentId}`)} className="lm-badge border-amber-300/35 bg-amber-300/10 text-amber-200 shrink-0">Task Assigned • View</button>
-                              )}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-orange-200 ring-1 ring-inset ring-white/40"></span>
+                                <h4 className="min-w-0 break-words text-sm font-bold tracking-tight text-slate-100 sm:text-base">{item.title}</h4>
+                                {item.assignmentId && (
+                                  <span className="lm-badge border-amber-300/30 bg-amber-300/10 text-amber-200">Assignment</span>
+                                )}
+                              </div>
+                              <p className="mt-1 pl-[1.125rem] text-[11px] text-slate-400">{cat} activity</p>
                             </div>
-                            <span className="lm-badge font-mono shrink-0">
-                              {total} Marks
-                            </span>
+                            <div className="flex shrink-0 items-center gap-2">
+                              {item.assignmentId && isStaffOrAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/assignments/${item.assignmentId}`)}
+                                  className="lm-btn-ghost !px-2.5 !py-1.5 text-[11px]"
+                                >
+                                  View Task
+                                  <ArrowRightIcon className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              <span className="lm-badge font-mono">{total} Marks</span>
+                            </div>
                           </div>
 
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
@@ -2269,45 +2282,54 @@ const studentBreakdownItems = [
 
                         <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.06]">
                           {user?.role === 'STUDENT' && !isAssignedTa ? (
-                            <div className="w-full flex items-center justify-between gap-3">
-                              <span className="text-[10px] sm:text-xs text-slate-500 italic">Submission Status Active</span>
-                              {hasPhoto && (
-                                <button 
-                                  type="button"
-                                  onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
-                                  className="lm-btn-ghost shrink-0 text-orange-200 hover:text-orange-100"
-                                >
-                                  <CameraIcon className="w-4 h-4" />
-                                  View Photo
-                                </button>
-                              )}
+                            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                              <span className="text-[11px] text-slate-500">Submission status</span>
+                              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                                {hasPhoto && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedActivityItem({ item, targetKey, category: cat, scoreData: studentItemScore })}
+                                    className="lm-btn-ghost w-full sm:w-auto !px-3 !py-2 text-[11px]"
+                                  >
+                                    <CameraIcon className="h-3.5 w-3.5" />
+                                    View Photo
+                                  </button>
+                                )}
+                                {item.assignmentId && (
+                                  <button type="button" onClick={() => navigate(`/assignments/${item.assignmentId}`)} className="lm-btn-ghost w-full sm:w-auto !px-3 !py-2 text-[11px] border-amber-300/30 text-amber-200">
+                                    <ArrowRightIcon className="h-3.5 w-3.5" />
+                                    Open Task
+                                  </button>
+                                )}
+                                {!hasPhoto && !item.assignmentId && <span className="text-[11px] text-slate-500">No file uploaded</span>}
+                              </div>
                             </div>
                           ) : (
                             isStaffOrAdmin && (
                               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTabletClick(item, targetKey, cat, false)}
+                                  className="lm-btn-ghost flex-1"
+                                >
+                                  <ArrowRightIcon className="w-4 h-4" />
+                                  Marksheet
+                                </button>
                                 {ungradedCount > 0 ? (
-                                  <button 
+                                  <button
                                     type="button"
                                     onClick={() => handleTabletClick(item, targetKey, cat, true)}
-                                    className="lm-btn-ghost flex-1 border-amber-500/40 text-amber-300 hover:text-amber-200"
+                                    className="lm-btn-ghost flex-1 border-amber-400/35 text-amber-200"
                                   >
                                     <ExclamationTriangleIcon className="w-4 h-4" />
-                                    Grade Remaining ({ungradedCount})
+                                    Ungraded ({ungradedCount})
                                   </button>
                                 ) : (
-                                  <span className="lm-badge flex-1 justify-center py-2 rounded-xl border-emerald-500/30 bg-emerald-500/10 text-emerald-300 font-mono font-bold">
+                                  <span className="lm-badge flex-1 justify-center py-2 rounded-xl border-emerald-400/25 bg-emerald-400/10 text-emerald-200 font-mono">
                                     <CheckIcon className="w-4 h-4" />
                                     All Graded
                                   </span>
                                 )}
-                                <button 
-                                  type="button"
-                                  onClick={() => handleTabletClick(item, targetKey, cat, false)}
-                                  className="lm-btn flex-1"
-                                >
-                                  Full Sheet
-                                  <ArrowRightIcon className="w-4 h-4" />
-                                </button>
                               </div>
                             )
                           )}

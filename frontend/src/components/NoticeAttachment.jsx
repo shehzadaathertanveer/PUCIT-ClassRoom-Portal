@@ -106,7 +106,7 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
     </div>
   );
 
-  if (isImage) {
+  if (isImage && showPreview) {
     return (
       <a
         href={deliveryUrl}
@@ -120,6 +120,24 @@ const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '',
           loading="lazy"
           className={imageClassName || 'w-full max-h-36 rounded-lg bg-slate-950 object-cover'}
         />
+      </a>
+    );
+  }
+
+  if (isImage) {
+    return (
+      <a
+        href={deliveryUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-2.5 transition-colors hover:border-white/20"
+      >
+        <img src={deliveryUrl} alt={fileName || 'Notice attachment'} loading="lazy" className="h-11 w-11 shrink-0 rounded-lg bg-slate-950 object-cover sm:h-12 sm:w-12" />
+        {meta}
+        <span className="lm-btn-ghost ml-auto shrink-0 px-2.5 py-1.5">
+          <EyeIcon className="w-4 h-4 shrink-0" />
+          Open
+        </span>
       </a>
     );
   }

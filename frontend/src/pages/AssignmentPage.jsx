@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import {
+  ArrowLeftIcon,
+  CalendarDaysIcon,
+  ClipboardDocumentListIcon,
+  DocumentArrowDownIcon,
+  ExclamationTriangleIcon,
+  PaperClipIcon,
+  TableCellsIcon,
+  TrashIcon,
+  UserGroupIcon,
+} from '@heroicons/react/24/outline';
 import API from '../api/axios';
 import { getAttachmentDownloadUrl, uploadToCloudinary } from '../utils/cloudinary';
 import { invalidateAssignments, useTick } from '../components/AssignmentNoticeBar';
@@ -15,6 +26,18 @@ const formatBytes = (bytes) => {
   return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
 };
 
+const humanizeKey = (key) => String(key || '')
+  .replace(/([A-Z])/g, ' $1')
+  .replace(/^./, (char) => char.toUpperCase());
+
+const Stat = ({ label, value, sub, tone = 'text-slate-100' }) => (
+  <div className="min-w-0 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5">
+    <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+    <p className={`mt-1 truncate font-mono text-sm font-bold ${tone}`}>{value}</p>
+    {sub && <p className="mt-0.5 truncate text-[10px] text-slate-500">{sub}</p>}
+  </div>
+);
+
 const Countdown = ({ dueAt }) => {
   const now = useTick();
   const ms = new Date(dueAt).getTime() - now;
@@ -23,13 +46,18 @@ const Countdown = ({ dueAt }) => {
   const hours = Math.max(0, Math.floor((ms % 86400000) / 3600000));
   const minutes = Math.max(0, Math.floor((ms % 3600000) / 60000));
   const seconds = Math.max(0, Math.floor((ms % 60000) / 1000));
+
   return (
-    <div className={`lm-inset p-3 ${passed ? 'border-rose-500/40 bg-rose-950/30' : 'border-emerald-500/35 bg-emerald-950/25'}`}>
-      <p className="lm-eyebrow mb-1">{passed ? 'Deadline passed' : 'Time remaining'}</p>
-      <p className="font-mono font-extrabold text-lg text-slate-100">
+    <div className={`relative overflow-hidden rounded-2xl border p-4 ${passed ? 'border-rose-500/25 bg-rose-950/25' : 'border-emerald-400/20 bg-emerald-950/20'}`}>
+      <div className={`absolute inset-x-0 top-0 h-px ${passed ? 'bg-gradient-to-r from-transparent via-rose-300/60 to-transparent' : 'bg-gradient-to-r from-transparent via-emerald-300/60 to-transparent'}`} />
+      <div className="flex items-center justify-between gap-2">
+        <p className="lm-eyebrow">{passed ? 'Deadline passed' : 'Time remaining'}</p>
+        <CalendarDaysIcon className={`h-4 w-4 ${passed ? 'text-rose-300' : 'text-emerald-300'}`} />
+      </div>
+      <p className="mt-2 font-mono text-xl font-bold tracking-tight text-slate-100 sm:text-2xl">
         {passed ? '00d 00h 00m 00s' : `${days}d ${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`}
       </p>
-      <p className="text-[11px] text-slate-400 mt-1">{new Date(dueAt).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}</p>
+      <p className="mt-1 text-xs text-slate-400">{new Date(dueAt).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}</p>
     </div>
   );
 };
@@ -91,6 +119,22 @@ const AssignmentPage = () => {
   const roomRoute = assignment
     ? (assignment.roomType === 'LABROOM' ? `/labrooms/${assignment.room}` : `/classroom/${assignment.room}`)
     : '/';
+  const submissions = assignment?.submissions || [];
+  const ungradedCount = submissions.filter((sub) => sub.marks === null || sub.marks === undefined).length;
+  const gradedCount = submissions.length - ungradedCount;
+
+  const openMarksheet = (ungradedOnly = false) => {
+    if (!assignment) return;
+    const base = assignment.roomType === 'LABROOM' ? 'labroom' : 'classroom';
+    navigate(`/${base}/${assignment.room}/sheet/${assignment.categoryKey}/${encodeURIComponent(assignment.title)}`, {
+      state: {
+        totalMarks: assignment.totalMarks,
+        category: assignment.categoryKey,
+        filterUngraded: ungradedOnly,
+        filterUnassigned: ungradedOnly,
+      },
+    });
+  };
 
   const maxBytes = useMemo(() => {
     if (!assignment) return 0;
@@ -154,134 +198,250 @@ const AssignmentPage = () => {
     }
   };
 
-  if (loading) return <div className="lm-canvas"><div className="lm-card p-6 text-slate-300">Loading assignment...</div></div>;
-  if (!assignment) return <div className="lm-canvas"><div className="lm-card p-6 text-rose-200">{error || 'Assignment not found.'}</div></div>;
+  if (loading) {
+    return (
+      <div className="lm-canvas flex min-h-[60vh] items-center justify-center">
+        <div className="lm-card w-full max-w-md p-8 text-center">
+          <div className="lm-bar mx-auto" />
+          <p className="lm-eyebrow mt-4">Loading assignment...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!assignment) {
+    return (
+      <div className="lm-canvas flex min-h-[60vh] items-center justify-center">
+        <div className="lm-card w-full max-w-md border-rose-500/30 p-8 text-center text-rose-200">{error || 'Assignment not found.'}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="lm-canvas space-y-5 overflow-x-hidden">
-      <div className="lm-card min-w-0 p-4 sm:p-6 space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="lm-eyebrow">{assignment.roomName} • {assignment.categoryKey}</p>
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100 break-words">{assignment.title}</h1>
-            <p className="text-xs text-slate-400 mt-1">{assignment.totalMarks} marks • {assignment.allowedTypes.join(', ').toUpperCase()} • max {assignment.maxSize} {assignment.maxSizeUnit}</p>
-          </div>
-          <button type="button" onClick={() => navigate(roomRoute)} className="lm-btn-ghost">Back</button>
-        </div>
+      <section className="lm-card min-w-0 overflow-hidden">
+        <div className="h-px bg-gradient-to-r from-transparent via-amber-300/60 to-transparent" />
+        <div className="p-5 sm:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex min-w-0 gap-3">
+              <span className="inline-grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-amber-300/25 bg-amber-300/10 text-amber-200">
+                <ClipboardDocumentListIcon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="lm-eyebrow">{assignment.roomName}</p>
+                  <span className="lm-badge border-white/10 bg-white/[0.04] text-slate-300">{humanizeKey(assignment.categoryKey)}</span>
+                  {pastDue && <span className="lm-badge border-rose-400/30 bg-rose-400/10 text-rose-200">Closed</span>}
+                </div>
+                <h1 className="mt-1 break-words text-xl font-bold tracking-tight text-slate-100 sm:text-2xl">{assignment.title}</h1>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-400">
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono">{assignment.totalMarks} marks</span>
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono uppercase">{assignment.allowedTypes.join(', ')}</span>
+                  <span className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono">max {assignment.maxSize} {assignment.maxSizeUnit}</span>
+                </div>
+              </div>
+            </div>
 
-        {error && <div className="lm-inset border-rose-500/40 bg-rose-950/40 text-rose-200 text-xs p-3">{error}</div>}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 lm-inset min-w-0 p-4 space-y-3">
-            <p className="lm-eyebrow">Instructions</p>
-            <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{assignment.description || 'No written instructions were added.'}</p>
-            {assignment.instructionsFile?.url && (
-              <a href={getAttachmentDownloadUrl(assignment.instructionsFile.url, assignment.instructionsFile.fileName)} className="lm-btn-ghost inline-flex max-w-full">
-                Open instruction file (<span className="min-w-0 break-all">{assignment.instructionsFile.fileName || 'file'}</span>)
-              </a>
-            )}
+            <div className="flex flex-wrap gap-2 xl:justify-end">
+              <button type="button" onClick={() => navigate(roomRoute)} className="lm-btn-ghost">
+                <ArrowLeftIcon className="h-4 w-4" />
+                Back
+              </button>
+              {canManage && (
+                <>
+                  <button type="button" onClick={() => openMarksheet(false)} className="lm-btn-ghost">
+                    <TableCellsIcon className="h-4 w-4" />
+                    Marksheet
+                  </button>
+                  <button type="button" onClick={() => openMarksheet(true)} className="lm-btn-ghost border-amber-300/30 text-amber-200">
+                    <ExclamationTriangleIcon className="h-4 w-4" />
+                    Ungraded ({ungradedCount})
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-          <Countdown dueAt={assignment.dueAt} />
+
+          {error && <div className="mt-4 rounded-xl border border-rose-500/35 bg-rose-950/35 px-4 py-3 text-sm text-rose-200">{error}</div>}
+
+          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Stat label="Due date" value={new Date(assignment.dueAt).toLocaleDateString()} sub={new Date(assignment.dueAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} />
+            <Stat label="Submissions" value={submissions.length} tone="text-slate-100" />
+            <Stat label="Graded" value={gradedCount} tone="text-emerald-300" sub={`${ungradedCount} pending`} />
+            <Stat label="Max upload" value={`${assignment.maxSize} ${assignment.maxSizeUnit}`} />
+          </div>
         </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <section className="lm-card min-w-0 p-5 sm:p-6 lg:col-span-2">
+          <div className="flex items-start gap-3">
+            <span className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300">
+              <ClipboardDocumentListIcon className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="lm-eyebrow">Instructions</p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-200">{assignment.description || 'No written instructions were added.'}</p>
+              {assignment.instructionsFile?.url && (
+                <a href={getAttachmentDownloadUrl(assignment.instructionsFile.url, assignment.instructionsFile.fileName)} className="lm-btn-ghost mt-4 w-full max-w-full sm:w-auto">
+                  <DocumentArrowDownIcon className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 truncate" title={assignment.instructionsFile.fileName}>{assignment.instructionsFile.fileName || 'Instruction file'}</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </section>
+        <Countdown dueAt={assignment.dueAt} />
       </div>
 
       {!canManage && (
-        <div className="lm-card min-w-0 p-4 sm:p-6 space-y-4">
-          <h2 className="text-sm font-bold text-slate-100 uppercase">Your Submission</h2>
+        <section className="lm-card min-w-0 p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <span className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300">
+              <PaperClipIcon className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="lm-eyebrow">Your Submission</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-100">Submit your work</h2>
+            </div>
+          </div>
+
           {mySubmission && (
-            <div className="lm-inset p-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/20 bg-emerald-950/20 p-3.5">
               <div className="min-w-0">
                 <p className="text-xs font-bold text-emerald-300">Submitted</p>
-                <p className="text-xs text-slate-300 break-all">{mySubmission.file?.fileName || 'File'}</p>
-                <p className="text-[10px] text-slate-500">{formatBytes(mySubmission.file?.size)} • {new Date(mySubmission.updatedAt || mySubmission.submittedAt).toLocaleString()}</p>
+                <p className="mt-0.5 break-all text-sm text-slate-100">{mySubmission.file?.fileName || 'File'}</p>
+                <p className="mt-0.5 text-xs text-slate-400">{formatBytes(mySubmission.file?.size)} • {new Date(mySubmission.updatedAt || mySubmission.submittedAt).toLocaleString()}</p>
               </div>
-              <a href={getAttachmentDownloadUrl(mySubmission.file?.url, mySubmission.file?.fileName)} className="lm-btn-ghost">Download File</a>
+              <a href={getAttachmentDownloadUrl(mySubmission.file?.url, mySubmission.file?.fileName)} className="lm-btn-ghost shrink-0">
+                <DocumentArrowDownIcon className="h-4 w-4" />
+                Download
+              </a>
             </div>
           )}
+
           {!pastDue ? (
-            <form onSubmit={submit} className="space-y-3">
-              <input
-                type="file"
-                accept={assignment.allowedTypes.map((t) => `.${t}`).join(',')}
-                onChange={(e) => {
-                  setFile(e.target.files?.[0] || null);
-                  setUploadProgress(0);
-                  setError('');
-                }}
-                className="lm-field cursor-pointer"
-              />
+            <form onSubmit={submit} className="mt-4 space-y-3">
+              <label className="block rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4 sm:p-5">
+                <span className="mb-2 block text-sm font-medium text-slate-200">Choose a file</span>
+                <input
+                  type="file"
+                  accept={assignment.allowedTypes.map((type) => `.${type}`).join(',')}
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] || null);
+                    setUploadProgress(0);
+                    setError('');
+                  }}
+                  className="lm-field cursor-pointer file:mr-3 file:rounded-md file:border-0 file:bg-white/10 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-slate-200"
+                />
+              </label>
               {file && (
-                <div className="lm-inset flex min-w-0 items-center justify-between gap-3 p-3">
+                <div className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-slate-100" title={file.name}>{file.name}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      {formatBytes(file.size)} • {busy ? `Uploading ${uploadProgress}%` : 'Ready to submit'}
-                    </p>
+                    <p className="truncate text-sm font-semibold text-slate-100" title={file.name}>{file.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-400">{formatBytes(file.size)} • {busy ? `Uploading ${uploadProgress}%` : 'Ready to submit'}</p>
                     {busy && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-amber-300 transition-all" style={{ width: `${uploadProgress}%` }} /></div>}
                   </div>
                   {busy && <span className="lm-badge shrink-0 border-amber-300/30 bg-amber-300/10 font-mono text-amber-200">{uploadProgress}%</span>}
                 </div>
               )}
-              <button type="submit" disabled={busy || !file} className="lm-btn w-full sm:w-auto">{busy ? 'Submitting...' : mySubmission ? 'Replace File' : 'Submit Work'}</button>
+              <button type="submit" disabled={busy || !file} className="lm-btn w-full sm:w-auto">
+                {busy ? 'Submitting...' : mySubmission ? 'Replace File' : 'Submit Work'}
+              </button>
             </form>
           ) : (
-            <div className="lm-inset border-rose-500/40 bg-rose-950/30 p-3 text-sm text-rose-200">The deadline has passed. Ask your teacher to extend it.</div>
+            <div className="mt-4 rounded-xl border border-rose-500/35 bg-rose-950/25 p-4 text-sm text-rose-200">The deadline has passed. Ask your teacher to extend it.</div>
           )}
-        </div>
+        </section>
       )}
 
       {canManage && (
         <>
-          <div className="lm-card p-4 sm:p-6 space-y-4">
+          <section className="lm-card min-w-0 p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-sm font-bold text-slate-100 uppercase">Submissions & Grading</h2>
-              <p className="text-xs text-slate-400">{assignment.submissions?.length || 0} submitted</p>
+              <div className="flex items-start gap-3">
+                <span className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300">
+                  <UserGroupIcon className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="lm-eyebrow">Staff Review</p>
+                  <h2 className="mt-1 text-lg font-bold text-slate-100">Submissions &amp; Grading</h2>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => openMarksheet(false)} className="lm-btn-ghost">
+                  <TableCellsIcon className="h-4 w-4" />
+                  Marksheet
+                </button>
+                <button type="button" onClick={() => openMarksheet(true)} className="lm-btn-ghost border-amber-300/30 text-amber-200">
+                  <ExclamationTriangleIcon className="h-4 w-4" />
+                  Ungraded ({ungradedCount})
+                </button>
+              </div>
             </div>
-            <div className="max-h-[60vh] overflow-auto">
-              <table className="lm-table w-full">
-                <thead><tr><th>Student</th><th>File</th><th>Submitted</th><th>Marks</th><th>Action</th></tr></thead>
-                <tbody>
-                  {(assignment.submissions || []).map((sub) => {
-                    const studentId = String(sub.student?._id || sub.student);
-                    return (
-                      <tr key={studentId}>
-                        <td className="font-semibold">{sub.student?.name || 'Student'}<span className="block text-[10px] text-slate-500 font-mono">{sub.student?.rollNo || sub.student?.registrationNo || ''}</span></td>
-                        <td className="min-w-0">
-                          {sub.file?.url ? (
-                            <a
-                              className="block max-w-[12rem] truncate text-sky-300 underline"
-                              title={sub.file.fileName}
-                              href={getAttachmentDownloadUrl(sub.file.url, sub.file.fileName)}
-                            >
-                              {sub.file.fileName || 'Open'}
-                            </a>
-                          ) : '—'}
-                        </td>
-                        <td className="text-xs">{new Date(sub.updatedAt || sub.submittedAt).toLocaleString()}</td>
-                        <td>
-                          <input type="number" min="0" max={assignment.totalMarks} value={gradeDrafts[studentId] ?? ''} onChange={(e) => setGradeDrafts((d) => ({ ...d, [studentId]: e.target.value }))} className="lm-field !py-1.5 w-24 font-mono" />
-                        </td>
-                        <td><button type="button" onClick={() => grade(studentId)} className="lm-btn-ghost !py-1.5">Save</button></td>
-                      </tr>
-                    );
-                  })}
-                  {!assignment.submissions?.length && <tr><td colSpan="5" className="text-center text-slate-500 py-6">No submissions yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
-          <div className="lm-card p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <form onSubmit={extend} className="space-y-3">
-              <h2 className="text-sm font-bold text-slate-100 uppercase">Extend Deadline</h2>
+            {submissions.length ? (
+              <div className="lm-table-scroll mt-4 overflow-x-auto">
+                <table className="lm-table w-full">
+                  <thead><tr><th>Student</th><th>File</th><th>Submitted</th><th>Marks</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {submissions.map((sub) => {
+                      const studentId = String(sub.student?._id || sub.student);
+                      return (
+                        <tr key={studentId}>
+                          <td className="font-semibold">
+                            {sub.student?.name || 'Student'}
+                            <span className="mt-0.5 block font-mono text-[10px] text-slate-500">{sub.student?.rollNo || sub.student?.registrationNo || ''}</span>
+                          </td>
+                          <td className="min-w-0">
+                            {sub.file?.url ? (
+                              <a
+                                className="block max-w-[12rem] truncate text-sky-300 underline"
+                                title={sub.file.fileName}
+                                href={getAttachmentDownloadUrl(sub.file.url, sub.file.fileName)}
+                              >
+                                {sub.file.fileName || 'Open'}
+                              </a>
+                            ) : '—'}
+                            {sub.file?.size ? <span className="mt-0.5 block font-mono text-[10px] text-slate-500">{formatBytes(sub.file.size)}</span> : null}
+                          </td>
+                          <td className="text-xs">{new Date(sub.updatedAt || sub.submittedAt).toLocaleString()}</td>
+                          <td>
+                            <input type="number" min="0" max={assignment.totalMarks} value={gradeDrafts[studentId] ?? ''} onChange={(e) => setGradeDrafts((d) => ({ ...d, [studentId]: e.target.value }))} className="lm-field !py-1.5 w-24 font-mono" />
+                          </td>
+                          <td><button type="button" onClick={() => grade(studentId)} className="lm-btn-ghost !py-1.5">Save</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="lm-inset mt-4 px-4 py-10 text-center">
+                <PaperClipIcon className="mx-auto h-8 w-8 text-slate-600" />
+                <p className="mt-2 text-sm text-slate-400">No submissions yet.</p>
+              </div>
+            )}
+          </section>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <form onSubmit={extend} className="lm-card space-y-3 p-5 sm:p-6">
+              <div className="flex items-center gap-2">
+                <CalendarDaysIcon className="h-4 w-4 text-amber-200" />
+                <h2 className="text-sm font-bold uppercase tracking-wide text-slate-100">Extend Deadline</h2>
+              </div>
               <input type="datetime-local" value={extension} onChange={(e) => setExtension(e.target.value)} className="lm-field font-mono" />
-              <button type="submit" className="lm-btn w-full">Extend & Notify Students</button>
+              <button type="submit" className="lm-btn w-full">Extend &amp; Notify Students</button>
             </form>
-            <div className="lm-inset p-3 space-y-2">
-              <h2 className="text-sm font-bold text-slate-100 uppercase">Danger Zone</h2>
-              <p className="text-xs text-slate-400">Deleting removes all submissions and Cloudinary files for this assignment.</p>
-              <button type="button" onClick={removeAssignment} className="lm-btn-ghost border-rose-500/40 text-rose-200 w-full">Delete Assignment</button>
-            </div>
+
+            <section className="lm-card space-y-3 p-5 sm:p-6">
+              <div className="flex items-center gap-2">
+                <TrashIcon className="h-4 w-4 text-rose-200" />
+                <h2 className="text-sm font-bold uppercase tracking-wide text-slate-100">Danger Zone</h2>
+              </div>
+              <p className="text-sm text-slate-400">Deleting removes all submissions and Cloudinary files for this assignment.</p>
+              <button type="button" onClick={removeAssignment} className="lm-btn-ghost w-full border-rose-500/40 text-rose-200">Delete Assignment</button>
+            </section>
           </div>
         </>
       )}
