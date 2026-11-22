@@ -21,7 +21,7 @@ import { ArrowDownTrayIcon, DocumentTextIcon, EyeIcon } from '@heroicons/react/2
 const CLOUDINARY_UPLOAD_RE =
   /^(https?:\/\/res\.cloudinary\.com\/)([^/]+)\/(image|raw|video|auto|multi)\/upload\/(.+)$/i;
 
-const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'];
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif'];
 const VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov', 'm4v'];
 const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga'];
 
@@ -71,47 +71,23 @@ const describeAttachment = (attachment = {}) => {
  * non-Cloudinary value can only be legacy or hand-edited data - rendering it
  * would turn the attachment into a javascript:/data:/plain-http XSS vector.
  */
-const buildDeliveryUrl = (rawUrl, kind = 'file') => {
+const buildDeliveryUrl = (rawUrl) => {
   const url = String(rawUrl || '').trim();
   if (!url) return '';
 
   const match = CLOUDINARY_UPLOAD_RE.exec(url);
   if (!match) return '';
 
-  const [, , cloudName, , rest] = match;
-
-  // Cloudinary transformations are comma-separated flags in their own path
-  // segment ("q_auto,f_jpg"). Drop attachment/download flags and empty out any
-  // segment left with nothing, but keep folder segments intact so the public_id
-  // (and therefore the file) still resolves.
-  const cleaned = rest
-    .split('/')
-    .map((segment) => {
-      if (!segment || segment.startsWith('v') && /^v\d+$/.test(segment)) return segment;
-      if (!segment.includes(',')) return segment;
-      const flags = segment
-        .split(',')
-        .filter((f) => f && !/^fl_(attachment|attachment_filename)$/i.test(f));
-      return flags.join(',');
-    })
-    .filter((segment) => segment.length > 0);
-
-  if (!cleaned.length) return '';
-
-  // Images are addressable via /image/, everything else (PDF, docs, archives)
-  // must come from /raw/ or Cloudinary serves its landing page instead.
-  const resourceType = kind === 'image' ? 'image' : 'raw';
-
-  return `https://res.cloudinary.com/${cloudName}/${resourceType}/upload/${cleaned.join('/')}`;
+  return url.replace(/\/fl_attachment(?:_[^/]*)?(?:\/|$)/i, '/');
 };
 
 const NoticeAttachment = ({ attachment, imageClassName = '', linkClassName = '', showPreview = true }) => {
   const { url = '', fileName = '', size = '' } = attachment || {};
 
-  const { ext, kind, canPreviewInline, isPdf, isImage } = describeAttachment(attachment);
+  const { ext, isPdf, isImage } = describeAttachment(attachment);
 
   // Derived during render: no effect, no HEAD probe, no extra request.
-  const deliveryUrl = buildDeliveryUrl(url, kind);
+  const deliveryUrl = buildDeliveryUrl(url);
 
   if (!deliveryUrl) return null;
 

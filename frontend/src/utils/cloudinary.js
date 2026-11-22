@@ -15,8 +15,8 @@ export const uploadToCloudinary = async (file) => {
   formData.append("file", file);
   formData.append("upload_preset", UPLOAD_PRESET);
 
-  // Optional: Pass original filename so Cloudinary raw/auto storage preserves identity
-  formData.append("public_id", `notice_attachments/${Date.now()}_${file.name.replace(/\.[^/.]+$/, "")}`);
+  // Keep the extension in public_id so raw/auto delivery URLs resolve correctly.
+  formData.append("public_id", `notice_attachments/${Date.now()}_${file.name}`);
 
   try {
     const res = await axios.post(
@@ -28,7 +28,7 @@ export const uploadToCloudinary = async (file) => {
     const format = (res.data.format || file.name.split('.').pop()).toLowerCase();
     
     // Check if it's a true browser-renderable image type
-    const isImage = resourceType === 'image' && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(format);
+    const isImage = resourceType === 'image' && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif'].includes(format);
 
     // IMPORTANT: Use Cloudinary's secure_url verbatim. Cloudinary already returns
     // the correct resource-type segment (/image/upload/ vs /raw/upload/). Rewriting
@@ -37,7 +37,7 @@ export const uploadToCloudinary = async (file) => {
     return {
       url: res.data.secure_url,
       public_id: res.data.public_id || '',
-      fileType: isImage ? 'image' : 'raw', 
+      fileType: isImage ? 'image' : format === 'pdf' ? 'pdf' : 'raw',
       fileName: file.name,
     };
   } catch (err) {
