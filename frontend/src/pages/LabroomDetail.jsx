@@ -42,6 +42,11 @@ import RoomColorPicker from '../components/RoomColorPicker';
 import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 import { effectiveMarks } from '../utils/viva';
+import {
+  getItemMarkStats,
+  getCategoryMarkStats,
+  getComponentStats,
+} from '../utils/markStats';
 
 const MAX_NOTICE_ATTACHMENTS = 10;
 
@@ -904,80 +909,15 @@ const LabroomDetail = () => {
     };
   };
 
-  const getItemClassAverage = (targetKey, itemTitle) => {
-    const rankings = labAnalytics?.rankings || [];
-    if (rankings.length === 0) {
-      const sScore = (studentMark?.[targetKey] || []).find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      if (sScore && sScore.obtainedMarks !== undefined && sScore.obtainedMarks !== null) {
-        const total = Number(sScore.totalMarks || 10);
-        // VIVA-ADJUSTED, so this fallback agrees with the analytics row it stands
-        // in for rather than reporting a different average for the same activity.
-        return ((effectiveMarks(sScore) / total) * 100).toFixed(2);
-      }
-      return '0.00';
-    }
-    
-    let totalObtained = 0;
-    let totalPossible = 0;
-    let count = 0;
-
-    const categoryItems = labroom[targetKey] || [];
-    const targetItem = categoryItems.find(i => i.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-    const maxMarks = targetItem ? Number(targetItem.totalMarks || 10) : 10;
-
-    rankings.forEach(r => {
-      const doc = r.marksDoc || r;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      
-      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
-        // An absent student counts as 0 earned but STILL occupies their share of
-        // the possible total. Skipping them entirely (both sides) let absences
-        // inflate the class average, which is the opposite of absent = 0.
-        // effectiveMarks, not raw obtainedMarks: on a viva-gated activity the
-        // class average must reflect the marks students actually earned.
-        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
-        totalPossible += Number(match.totalMarks || maxMarks);
-        count++;
-      }
-    });
-
-    if (count === 0 || totalPossible === 0) return '0.00';
-    return ((totalObtained / totalPossible) * 100).toFixed(2);
-  };
-
-  const getItemClassAverageRaw = (targetKey, itemTitle) => {
-    const rankings = labAnalytics?.rankings || [];
-    if (rankings.length === 0) {
-      const sScore = (studentMark?.[targetKey] || []).find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      if (sScore && sScore.obtainedMarks !== undefined && sScore.obtainedMarks !== null) {
-        // Adjusted here too, because this figure is displayed as "x / total" right
-        // beside the percentage. Using raw marks on a viva-gated activity would
-        // print two different answers for the same cohort.
-        return effectiveMarks(sScore).toFixed(2);
-      }
-      return '0.00';
-    }
-    
-    let totalObtained = 0;
-    let count = 0;
-
-    rankings.forEach(r => {
-      const doc = r.marksDoc || r;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      const match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      
-      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
-        // Absent = 0 for the raw mark average too, otherwise the average silently
-        // skips every absent student and reads far higher than the class earned.
-        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
-        count++;
-      }
-    });
-
-    if (count === 0) return '0.00';
-    return (totalObtained / count).toFixed(2);
-  };
+  // Generic class-wide stats shared with the classroom page. The lab has no
+  // separate exam objects - mids/finals are array categories too - so every
+  // graded entity here goes through the same category/item collectors.
+  const getItemStats = (targetKey, itemTitle) =>
+    getItemMarkStats(labAnalytics?.rankings, targetKey, itemTitle, studentMark ? [studentMark] : []);
+  const getCategoryStats = (targetKey) => getCategoryMarkStats(labAnalytics?.rankings, targetKey);
+  const getComponentStatsFor = (field) => getComponentStats(labAnalytics?.rankings, field);
+  const fmtRange = (s) => `${s.min.marks} / ${s.average.marks} / ${s.max.marks}`;
+  const fmtPctRange = (s) => `${s.min.pct}% / ${s.average.pct}% / ${s.max.pct}%`;
 
   const getItemGradedCount = (targetKey, itemTitle) => {
     const rankings = labAnalytics?.rankings || [];
@@ -1502,6 +1442,9 @@ const LabroomDetail = () => {
                       <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
                         Final marks: {studentLabMarks}/{labTotalMarks}
                       </p>
+                      <p className="text-[9px] sm:text-[10px] text-slate-400 font-mono break-words">
+                        Class % Min / Avg / Max: {fmtPctRange(getComponentStatsFor('percentage'))}
+                      </p>
                       <div className="pt-1">
                         <GradeBadge grade={studentAnalyticsData.letterGrade} gradePoint={studentAnalyticsData.gradePoint} />
                       </div>
@@ -1517,6 +1460,7 @@ const LabroomDetail = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {sessionalActivitiesList.map((act, i) => {
                         const catPct = Number(studentAnalyticsData.categories?.[act.category] || 0);
+                        const classStats = getCategoryStats(getCategoryTargetKey(act.category));
                         const weight = Number(act.allocatedMarks) || 0;
                         // The activity's own percentage resolved against its share
                         // of the lab total, i.e. how many of the lab's marks it
@@ -1532,6 +1476,9 @@ const LabroomDetail = () => {
                             <span className="text-[9px] sm:text-[10px] text-slate-300 font-mono">
                               contributes {contrib.toFixed(2)}/{(labTotalMarks * weight / labWeightTotal).toFixed(2)} marks
                             </span>
+                            <span className="pt-1 border-t border-white/[0.06] block text-[9px] sm:text-[10px] text-slate-500 font-mono break-words">
+                              Class Min / Avg / Max: {fmtRange(classStats)}{classStats.total > 0 ? ` / ${classStats.total}` : ''}
+                            </span>
                           </div>
                         );
                       })}
@@ -1546,6 +1493,12 @@ const LabroomDetail = () => {
                       <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-blue-300 break-words">{labAnalytics?.classAverages?.overallLabPercentage ?? labAnalytics?.classAverages?.overallPercentage ?? labAnalytics?.averageOverallPercentage ?? '0.00'}%</p>
                       <p className="text-[10px] sm:text-xs text-slate-400 font-mono">
                         Class average marks: {Number(labAnalytics?.classAverages?.overallMarks ?? 0).toFixed(2)}/{Number(labroom?.totalMarks) || 100}
+                      </p>
+                      <p className="text-[9px] sm:text-[10px] text-slate-500 font-mono break-words">
+                        % Min / Avg / Max: {fmtPctRange(getComponentStatsFor('percentage'))}
+                      </p>
+                      <p className="text-[9px] sm:text-[10px] text-slate-500 font-mono break-words">
+                        Marks Min / Avg / Max: {fmtRange(getComponentStatsFor('finalMarks'))}/{Number(labroom?.totalMarks) || 100}
                       </p>
                     </div>
                     {/* Cohort GPA on the same 4.00 scale as the classroom, so a
@@ -1574,6 +1527,7 @@ const LabroomDetail = () => {
                       {sessionalActivitiesList.map((act, i) => {
                         const targetKey = getCategoryTargetKey(act.category);
                         const avgVal = Number(getCategoryClassAverage(targetKey, act)) || 0;
+                        const stats = getCategoryStats(targetKey);
                         const weight = Number(act.allocatedMarks) || 0;
                         const contrib = (labTotalMarks * (avgVal / 100) * (weight / labWeightTotal));
                         return (
@@ -1585,6 +1539,9 @@ const LabroomDetail = () => {
                             </span>
                             <span className="block text-[9px] sm:text-[10px] text-slate-300 font-mono">
                               class avg {contrib.toFixed(2)}/{(labTotalMarks * weight / labWeightTotal).toFixed(2)} marks
+                            </span>
+                            <span className="block text-[9px] sm:text-[10px] text-slate-500 font-mono break-words">
+                              Min / Avg / Max: {fmtRange(stats)}{stats.total > 0 ? ` / ${stats.total}` : ''}
                             </span>
                           </div>
                         );
@@ -1773,8 +1730,7 @@ const LabroomDetail = () => {
                 <div className="space-y-4">
                   {itemsList.map((item, idx) => {
                     const studentItemScore = (studentMark?.[targetKey] || []).find(e => e.title?.trim().toLowerCase() === item.title?.trim().toLowerCase());
-                    const itemAvgPct = getItemClassAverage(targetKey, item.title);
-                    const itemAvgRaw = getItemClassAverageRaw(targetKey, item.title);
+                    const itemStats = getItemStats(targetKey, item.title);
                     const gradedCount = getItemGradedCount(targetKey, item.title);
                     const ungradedCount = Math.max(0, totalStudentsCount - gradedCount);
 
@@ -1840,9 +1796,9 @@ const LabroomDetail = () => {
                                   )}
                                 </div>
                                 <div className="pt-1 border-t border-white/5">
-                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg Score</span>
-                                  <span className="font-mono text-cyan-400 font-bold text-xs">
-                                    {itemAvgRaw} / {total}
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Min / Avg / Max ({total} marks)</span>
+                                  <span className="font-mono text-cyan-400 font-bold text-xs break-words">
+                                    {fmtRange(itemStats)}
                                   </span>
                                 </div>
                               </div>
@@ -1859,9 +1815,9 @@ const LabroomDetail = () => {
                                   </span>
                                 </div>
                                 <div className="pt-1 border-t border-white/5">
-                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class Avg %</span>
-                                  <span className="font-mono text-cyan-400 font-bold text-xs">
-                                    {itemAvgPct}%
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-extrabold tracking-wider">Class % Min / Avg / Max</span>
+                                  <span className="font-mono text-cyan-400 font-bold text-xs break-words">
+                                    {fmtPctRange(itemStats)}
                                   </span>
                                 </div>
                               </div>
@@ -1869,8 +1825,12 @@ const LabroomDetail = () => {
                           ) : (
                             <div className="lm-inset p-3.5 space-y-2 text-xs">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-slate-400 font-bold uppercase shrink-0">Class Average:</span>
-                                <strong className="text-cyan-400 font-mono text-right min-w-0 break-words">{itemAvgPct}% ({itemAvgRaw} / {total})</strong>
+                                <span className="text-slate-400 font-bold uppercase shrink-0">Marks Min / Avg / Max:</span>
+                                <strong className="text-cyan-400 font-mono text-right min-w-0 break-words">{fmtRange(itemStats)} / {total}</strong>
+                              </div>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 font-bold uppercase shrink-0">% Min / Avg / Max:</span>
+                                <strong className="text-cyan-400 font-mono text-right min-w-0 break-words">{fmtPctRange(itemStats)}</strong>
                               </div>
                               <div className="flex items-center justify-between gap-3">
                                 <span className="text-slate-400 font-bold uppercase shrink-0">Grading Progress:</span>

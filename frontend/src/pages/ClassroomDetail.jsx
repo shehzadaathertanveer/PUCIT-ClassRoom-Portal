@@ -41,6 +41,12 @@ import GradeBadge from '../components/GradeBadge';
 import { getGradeAndGpa } from '../utils/gradeScale';
 import { partitionRoster, csvPad, rosterWidths, blankRow } from '../utils/exportCsv';
 import { effectiveMarks } from '../utils/viva';
+import {
+  getItemMarkStats,
+  getExamMarkStats,
+  getCategoryMarkStats,
+  getComponentStats,
+} from '../utils/markStats';
 import ExportMenu from '../components/ExportMenu';
 import { DEFAULT_ROOM_COLOR } from '../utils/roomColors';
 
@@ -1132,66 +1138,16 @@ const ClassroomDetail = () => {
     return Number(((Number(pct || 0) / 100) * w).toFixed(2));
   };
 
-  const getItemClassAverage = (targetKey, itemTitle, categoryName) => {
-    const rankings = classAnalytics?.rankings || [];
-    if (rankings.length === 0) return '0.00';
-    
-    let totalObtained = 0;
-    let totalPossible = 0;
-    let count = 0;
-
-    const categoryItems = getItemsForCategory(categoryName || targetKey);
-    const targetItem = categoryItems.find(i => i.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-    const maxMarks = targetItem ? Number(targetItem.totalMarks || 10) : 10;
-
-    rankings.forEach(r => {
-      const doc = r.marksDoc || r;
-      let match = null;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      
-      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
-        // An absent student counts as 0 earned but STILL occupies their share of
-        // the possible total. Skipping them entirely (both sides) let absences
-        // inflate the class average, which is the opposite of absent = 0.
-        // VIVA-ADJUSTED marks, so a viva-gated activity's average reflects what
-        // students actually earned rather than their pre-viva scores.
-        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
-        totalPossible += Number(match.totalMarks || maxMarks);
-        count++;
-      }
-    });
-
-    if (count === 0 || totalPossible === 0) return '0.00';
-    return ((totalObtained / totalPossible) * 100).toFixed(2);
-  };
-
-  const getItemClassAverageRaw = (targetKey, itemTitle, _categoryName) => {
-    const rankings = classAnalytics?.rankings || [];
-    if (rankings.length === 0) return '0.00';
-    
-    let totalObtained = 0;
-    let count = 0;
-
-    rankings.forEach(r => {
-      const doc = r.marksDoc || r;
-      let match = null;
-      const scores = doc[targetKey] || r[targetKey] || [];
-      match = scores.find(s => s.title?.trim().toLowerCase() === itemTitle?.trim().toLowerCase());
-      
-      if (match && (match.isAbsent || (match.obtainedMarks !== undefined && match.obtainedMarks !== null && !isNaN(match.obtainedMarks)))) {
-        // Absent = 0 for the raw mark average too, otherwise the average silently
-        // skips every absent student and reads far higher than the class earned.
-        // Adjusted as well, because this is displayed beside the percentage as
-        // "x / total" and must describe the same marks.
-        totalObtained += match.isAbsent ? 0 : effectiveMarks(match);
-        count++;
-      }
-    });
-
-    if (count === 0) return '0.00';
-    return (totalObtained / count).toFixed(2);
-  };
+  // One generic pass over the class marks yields min / max / average for any
+  // graded entity. Item cards, exams and whole categories all use it, so the
+  // numbers shown to students and staff cannot drift apart.
+  const getItemStats = (targetKey, itemTitle) =>
+    getItemMarkStats(classAnalytics?.rankings, targetKey, itemTitle);
+  const getExamStats = (targetKey) => getExamMarkStats(classAnalytics?.rankings, targetKey);
+  const getCategoryStats = (targetKey) => getCategoryMarkStats(classAnalytics?.rankings, targetKey);
+  const getComponentStatsFor = (field) => getComponentStats(classAnalytics?.rankings, field);
+  const fmtRange = (s) => `${s.min.marks} / ${s.average.marks} / ${s.max.marks}`;
+  const fmtPctRange = (s) => `${s.min.pct}% / ${s.average.pct}% / ${s.max.pct}%`;
 
   const getItemGradedCount = (targetKey, itemTitle, _categoryName) => {
     const rankings = classAnalytics?.rankings || [];
@@ -1448,6 +1404,7 @@ const studentBreakdownItems = [
     ...sessionalActivitiesList.map(act => ({
       label: act.category,
       catName: act.category,
+      statsKey: getCategoryTargetKey(act.category),
       // Sessional activities are slices of the sessional block.
       weight: Number(act.allocatedMarks) || 0,
       weightOf: sessionalWeightTotal,
@@ -1456,6 +1413,7 @@ const studentBreakdownItems = [
     ...((classroom.mids?.totalMarks > 0) ? [{
       label: 'Mids',
       catName: 'Mids',
+      statsKey: 'mids',
       // Mids and finals are slices of the whole 100-mark course, not of the
       // sessional block, so they are shown against their own scheme weight.
       weight: Number(classroom.gradingScheme?.midsWeight) || 35,
@@ -1465,6 +1423,7 @@ const studentBreakdownItems = [
     ...((classroom.finals?.totalMarks > 0) ? [{
       label: 'Finals',
       catName: 'Finals',
+      statsKey: 'finals',
       weight: Number(classroom.gradingScheme?.finalsWeight) || 40,
       weightOf: 100,
       marksFromPct: false
@@ -1805,6 +1764,9 @@ const studentBreakdownItems = [
                       <p className="text-[10px] sm:text-xs text-orange-300 uppercase font-bold tracking-wider">Overall Percentage</p>
                       <p className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-orange-200">{studentAnalyticsData.overall}%</p>
                       <p className="text-[10px] sm:text-xs text-slate-400 font-mono">Final marks: {studentAnalyticsData.overallMarks}/100</p>
+                      <p className="text-[9px] sm:text-[10px] text-slate-400 font-mono break-words">
+                        Class % Min / Avg / Max: {fmtPctRange(getComponentStatsFor('overallPercentage'))}
+                      </p>
                       <div className="pt-1.5">
                         <GradeBadge grade={studentAnalyticsData.letterGrade} gradePoint={studentAnalyticsData.gradePoint} />
                       </div>
@@ -1820,6 +1782,7 @@ const studentBreakdownItems = [
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
                       {studentBreakdownItems.map(item => {
                         const summary = calculateCategoryMarksSummary(item.catName);
+                        const classStats = getCategoryStats(item.statsKey);
                         return (
                           <div key={item.label} className="lm-card-flat p-3 space-y-1 min-w-0">
                             <span className="text-[10px] sm:text-xs text-slate-400 block uppercase font-bold break-words">{item.label}</span>
@@ -1838,6 +1801,14 @@ const studentBreakdownItems = [
                                 {item.marksFromPct
                                   ? `${marksFromPct(summary.total > 0 ? (summary.obtained / summary.total) * 100 : 0, item.weight)}/${item.weight} marks`
                                   : `${marksFromPct(summary.total > 0 ? (summary.obtained / summary.total) * 100 : 0, item.weight)}/${item.weight} of 100 marks`}
+                              </span>
+                            </div>
+                            {/* Class spread so a student can read their exact
+                                standing against the cohort for this category. */}
+                            <div className="pt-1 border-t border-white/[0.06]">
+                              <span className="text-[9px] sm:text-[10px] text-slate-500 uppercase block font-bold">Class Min / Avg / Max</span>
+                              <span className="font-mono text-amber-200 text-[10px] sm:text-xs break-words">
+                                {fmtRange(classStats)}{classStats.total > 0 ? ` / ${classStats.total}` : ''}
                               </span>
                             </div>
                           </div>
@@ -1885,15 +1856,19 @@ const studentBreakdownItems = [
                     {/* Per-component class averages */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       {[
-                        { key: 'Sessional', value: classAnalytics?.classAverages?.sessionalPercentage, color: 'text-amber-200' },
-                        { key: 'Mids', value: classAnalytics?.classAverages?.midsPercentage, color: 'text-orange-200' },
-                        { key: 'Finals', value: classAnalytics?.classAverages?.finalsPercentage, color: 'text-rose-200' },
-                      ].map(c => (
-                        <div key={c.key} className="lm-card-flat p-3 text-center">
-                          <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">{c.key}</p>
-                          <p className={`font-mono font-black text-base sm:text-lg ${c.color}`}>{Number(c.value || 0).toFixed(2)}%</p>
-                        </div>
-                      ))}
+                        { key: 'Sessional', value: classAnalytics?.classAverages?.sessionalPercentage, field: 'sessionalPercentage', color: 'text-amber-200' },
+                        { key: 'Mids', value: classAnalytics?.classAverages?.midsPercentage, field: 'midsPercentage', color: 'text-orange-200' },
+                        { key: 'Finals', value: classAnalytics?.classAverages?.finalsPercentage, field: 'finalsPercentage', color: 'text-rose-200' },
+                      ].map(c => {
+                        const stats = getComponentStatsFor(c.field);
+                        return (
+                          <div key={c.key} className="lm-card-flat p-3 text-center">
+                            <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">{c.key}</p>
+                            <p className={`font-mono font-black text-base sm:text-lg ${c.color}`}>{Number(c.value || 0).toFixed(2)}%</p>
+                            <p className="mt-0.5 text-[9px] sm:text-[10px] text-slate-400 font-mono break-words">Min / Avg / Max: {fmtPctRange(stats)}</p>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Sessional activity breakdown */}
@@ -1905,6 +1880,7 @@ const studentBreakdownItems = [
                           const metric = getCategoryMetric(catKey);
                           const avg = getMetricAverage(metric);
                           const prog = getMetricProgress(metric);
+                          const stats = getCategoryStats(catKey);
                           return (
                             <div key={act.category} className="lm-card-flat p-3 space-y-1.5 min-w-0">
                               <div className="flex items-center justify-between gap-2">
@@ -1914,6 +1890,12 @@ const studentBreakdownItems = [
                               <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono text-slate-500">
                                 <span>{prog.graded}/{prog.total} graded</span>
                                 <span>{prog.pct}% progress</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono">
+                                <span className="text-slate-500">Min / Avg / Max marks</span>
+                                <span className="text-slate-300 break-words text-right">
+                                  {fmtRange(stats)}{stats.total > 0 ? ` / ${stats.total}` : ''}
+                                </span>
                               </div>
                               {/* How this activity's liquid marks convert into the solid
                                   marks it contributes to the sessional block. */}
@@ -1944,6 +1926,7 @@ const studentBreakdownItems = [
                             if (!metric) return null;
                             const avg = getMetricAverage(metric);
                             const prog = getMetricProgress(metric);
+                            const stats = getExamStats(catKey);
                             return (
                               <div key={catKey} className="lm-card-flat p-3 space-y-1.5 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
@@ -1953,6 +1936,12 @@ const studentBreakdownItems = [
                                 <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono text-slate-500">
                                   <span>{prog.graded}/{prog.total} graded</span>
                                   <span>{prog.pct}% progress</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 text-[10px] sm:text-xs font-mono">
+                                  <span className="text-slate-500">Min / Avg / Max marks</span>
+                                  <span className="text-slate-300 break-words text-right">
+                                    {fmtRange(stats)}{stats.total > 0 ? ` / ${stats.total}` : ''}
+                                  </span>
                                 </div>
                                 <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                                   <div className="h-full bg-gradient-to-r from-orange-200 to-rose-300 rounded-full transition-all" style={{ width: `${prog.pct}%` }}></div>
@@ -2176,8 +2165,7 @@ const studentBreakdownItems = [
                       }
                     }
 
-                    const itemAvgPct = getItemClassAverage(targetKey, item.title, cat);
-                    const itemAvgRaw = getItemClassAverageRaw(targetKey, item.title, cat);
+                    const itemStats = getItemStats(targetKey, item.title);
                     const gradedCount = getItemGradedCount(targetKey, item.title, cat);
                     const ungradedCount = Math.max(0, totalStudentsCount - gradedCount);
 
@@ -2240,9 +2228,9 @@ const studentBreakdownItems = [
                                   )}
                                 </div>
                                 <div className="pt-1 border-t border-white/[0.06]">
-                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-bold tracking-wider">Class Avg Score</span>
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-bold tracking-wider">Class Min / Avg / Max ({total} marks)</span>
                                   <span className="font-mono text-orange-200 font-bold text-xs sm:text-sm break-words">
-                                    {itemAvgRaw} / {total}
+                                    {fmtRange(itemStats)}
                                   </span>
                                 </div>
                               </div>
@@ -2259,9 +2247,9 @@ const studentBreakdownItems = [
                                   </span>
                                 </div>
                                 <div className="pt-1 border-t border-white/[0.06]">
-                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-bold tracking-wider">Class Avg %</span>
+                                  <span className="text-[10px] sm:text-xs text-slate-400 uppercase block font-bold tracking-wider">Class % Min / Avg / Max</span>
                                   <span className="font-mono text-orange-200 font-bold text-xs sm:text-sm break-words">
-                                    {itemAvgPct}%
+                                    {fmtPctRange(itemStats)}
                                   </span>
                                 </div>
                               </div>
@@ -2269,8 +2257,12 @@ const studentBreakdownItems = [
                           ) : (
                             <div className="lm-inset rounded-xl p-3.5 space-y-2 text-xs">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-slate-400 font-bold uppercase shrink-0">Class Average:</span>
-                                <strong className="text-orange-200 font-mono text-right break-words">{itemAvgPct}% ({itemAvgRaw} / {total})</strong>
+                                <span className="text-slate-400 font-bold uppercase shrink-0">Marks Min / Avg / Max:</span>
+                                <strong className="text-orange-200 font-mono text-right break-words">{fmtRange(itemStats)} / {total}</strong>
+                              </div>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 font-bold uppercase shrink-0">% Min / Avg / Max:</span>
+                                <strong className="text-orange-200 font-mono text-right break-words">{fmtPctRange(itemStats)}</strong>
                               </div>
                               <div className="flex items-center justify-between gap-3">
                                 <span className="text-slate-400 font-bold uppercase shrink-0">Grading Progress:</span>
