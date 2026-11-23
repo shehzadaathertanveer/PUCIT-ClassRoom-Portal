@@ -8,6 +8,13 @@
  * lab mids/finals, overall components) describes the same set of marks. All
  * figures use effectiveMarks, so a viva-gated score is reported after its viva
  * multiplier exactly like the stored grade and the existing class average.
+ *
+ * Absent students are NOT zero scores here: they have no mark for that entity, so
+ * they are left out of the min, the max and the average entirely. Counting them
+ * as 0 turned a quiz everyone else aced into a class minimum of 0 and dragged
+ * the average down, which hid the actual spread of the students who sat it.
+ * (Absence still counts as 0 in a student's own grade and in grading progress -
+ * this module only describes the class statistics of scored work.)
  */
 
 import { effectiveMarks } from './viva';
@@ -19,14 +26,13 @@ const UNGRADED = -99;
 const round = (value) => Number((Number(value) || 0).toFixed(2));
 
 const isGraded = (entry) => {
-  if (!entry || entry.isBypassed) return false;
-  if (entry.isAbsent === true) return true;
+  if (!entry || entry.isBypassed || entry.isAbsent === true) return false;
   if (entry.obtainedMarks === undefined || entry.obtainedMarks === null || entry.obtainedMarks === '') return false;
   const raw = Number(entry.obtainedMarks);
   return Number.isFinite(raw) && raw !== UNGRADED;
 };
 
-const scoreOf = (entry) => (entry && entry.isAbsent === true ? 0 : effectiveMarks(entry));
+const scoreOf = (entry) => effectiveMarks(entry);
 
 const entriesOf = (doc, key) => {
   const value = doc && doc[key];

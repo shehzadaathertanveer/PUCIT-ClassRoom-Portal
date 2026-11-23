@@ -963,28 +963,6 @@ const LabroomDetail = () => {
     return ((pct / 100) * rowTotal).toFixed(2);
   })();
 
-  const getCategoryClassAverage = (targetKey, act) => {
-    const ca = labAnalytics?.classAverages || {};
-    const directKey = targetKey + 'Percentage';
-    if (ca[directKey] !== undefined && ca[directKey] !== null) return Number(ca[directKey]);
-
-    const normKey = (act?.category || '').toLowerCase().replace(/\s+/g, '') + 'Percentage';
-    if (ca[normKey] !== undefined && ca[normKey] !== null) return Number(ca[normKey]);
-
-    const rankings = labAnalytics?.rankings || [];
-    if (rankings.length === 0) return 0;
-    let sum = 0;
-    let count = 0;
-    rankings.forEach(r => {
-      const v = r[directKey] ?? r[normKey];
-      if (v !== undefined && v !== null && !isNaN(Number(v))) {
-        sum += Number(v);
-        count++;
-      }
-    });
-    return count > 0 ? Number((sum / count).toFixed(2)) : 0;
-  };
-
   const getStudentRankInfo = () => {
     const rankings = labAnalytics?.rankings || [];
     if (rankings.length === 0 || !user?._id) {
@@ -1526,8 +1504,11 @@ const LabroomDetail = () => {
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
                       {sessionalActivitiesList.map((act, i) => {
                         const targetKey = getCategoryTargetKey(act.category);
-                        const avgVal = Number(getCategoryClassAverage(targetKey, act)) || 0;
                         const stats = getCategoryStats(targetKey);
+                        // Keep the headline average in step with the range below:
+                        // students marked absent contributed no score, so they are
+                        // left out of all three figures for this category.
+                        const avgVal = stats.average.pct;
                         const weight = Number(act.allocatedMarks) || 0;
                         const contrib = (labTotalMarks * (avgVal / 100) * (weight / labWeightTotal));
                         return (

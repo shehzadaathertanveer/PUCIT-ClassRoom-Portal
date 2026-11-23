@@ -1437,11 +1437,6 @@ const studentBreakdownItems = [
     return list.find(m => (m.category || '').toLowerCase() === String(catKey).toLowerCase()) || null;
   };
 
-  const getMetricAverage = (metric) => {
-    if (!metric) return '0.00';
-    return Number(metric.averagePercentage || 0).toFixed(2);
-  };
-
   const getMetricProgress = (metric) => {
     if (!metric) return { graded: 0, total: totalStudentsCount, pct: '0.0' };
     return {
@@ -1856,15 +1851,19 @@ const studentBreakdownItems = [
                     {/* Per-component class averages */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                       {[
-                        { key: 'Sessional', value: classAnalytics?.classAverages?.sessionalPercentage, field: 'sessionalPercentage', color: 'text-amber-200' },
-                        { key: 'Mids', value: classAnalytics?.classAverages?.midsPercentage, field: 'midsPercentage', color: 'text-orange-200' },
-                        { key: 'Finals', value: classAnalytics?.classAverages?.finalsPercentage, field: 'finalsPercentage', color: 'text-rose-200' },
+                        { key: 'Sessional', field: 'sessionalPercentage', color: 'text-amber-200' },
+                        { key: 'Mids', field: 'midsPercentage', color: 'text-orange-200', examKey: 'mids' },
+                        { key: 'Finals', field: 'finalsPercentage', color: 'text-rose-200', examKey: 'finals' },
                       ].map(c => {
-                        const stats = getComponentStatsFor(c.field);
+                        const stats = c.examKey
+                          ? getExamStats(c.examKey)
+                          : getComponentStatsFor(c.field);
                         return (
                           <div key={c.key} className="lm-card-flat p-3 text-center">
                             <p className="text-[10px] sm:text-xs text-slate-400 uppercase font-bold tracking-wider">{c.key}</p>
-                            <p className={`font-mono font-black text-base sm:text-lg ${c.color}`}>{Number(c.value || 0).toFixed(2)}%</p>
+                            <p className={`font-mono font-black text-base sm:text-lg ${c.color}`}>
+                              {Number(c.examKey ? stats.average.pct : stats.average).toFixed(2)}%
+                            </p>
                             <p className="mt-0.5 text-[9px] sm:text-[10px] text-slate-400 font-mono break-words">Min / Avg / Max: {fmtPctRange(stats)}</p>
                           </div>
                         );
@@ -1878,9 +1877,12 @@ const studentBreakdownItems = [
                         {sessionalActivitiesList.map(act => {
                           const catKey = getCategoryTargetKey(act.category);
                           const metric = getCategoryMetric(catKey);
-                          const avg = getMetricAverage(metric);
-                          const prog = getMetricProgress(metric);
                           const stats = getCategoryStats(catKey);
+                          // Same exclusion as the min/max below: absent students
+                          // have no mark for this activity, so they do not lower
+                          // the class average either.
+                          const avg = stats.average.pct.toFixed(2);
+                          const prog = getMetricProgress(metric);
                           return (
                             <div key={act.category} className="lm-card-flat p-3 space-y-1.5 min-w-0">
                               <div className="flex items-center justify-between gap-2">
@@ -1924,9 +1926,9 @@ const studentBreakdownItems = [
                           {['mids', 'finals', 'finalProject'].map(catKey => {
                             const metric = getCategoryMetric(catKey);
                             if (!metric) return null;
-                            const avg = getMetricAverage(metric);
-                            const prog = getMetricProgress(metric);
                             const stats = getExamStats(catKey);
+                            const avg = stats.average.pct.toFixed(2);
+                            const prog = getMetricProgress(metric);
                             return (
                               <div key={catKey} className="lm-card-flat p-3 space-y-1.5 min-w-0">
                                 <div className="flex items-center justify-between gap-2">
